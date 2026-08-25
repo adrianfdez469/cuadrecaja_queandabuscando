@@ -1,0 +1,79 @@
+#!/usr/bin/env node
+/**
+ * Fail the build if the client JavaScript on a storefront page grows past its
+ * budget.
+ *
+ * What this measures: every <script src> a prerendered page actually references,
+ * gzipped. That is what a visitor downloads — a fairer number than summing the
+ * build manifest, which includes chunks no single page loads.
+ *
+ * On the connections this app targets, the number that decides whether the page
+ * is usable is the HTML, not the JS: every storefront component is a server
+ * component, so the catalogue is readable before a single byte of JavaScript
+ * arrives. The JS budget exists to catch regressions — a heavy client library,
+ * or a catalogue component that gained a "use client" — not to hit an absolute.
+ *
+ * Run after `next build`.
+ */
+import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
+import { gzipSync } from "node:zlib";
+import path from "node:path";
+
+const BUDGET_KB = Number(process.env.BUNDLE_BUDGET_KB ?? 190);
+const APP_DIR = ".next/server/app";
+
+if (!existsSync(APP_DIR)) {
+  console.error(`✗ ${APP_DIR} not found. Run \`npm run build\` first.`);
+  process.exit(1);
+}
+
+function* htmlFiles(dir) {
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) yield* htmlFiles(full);
+    else if (entry.endsWith(".html")) yield full;
+  }
+}
+
+const gzipCache = new Map();
+function gzipOf(src) {
+  if (gzipCache.has(src)) return gzipCache.get(src);
+  // "/_next/static/chunks/x.js" -> ".next/static/chunks/x.js"
+  const rel = src.replace(/^\/_next\//, "");
+  const full = path.join(".next", rel);
+  const size = existsSync(full) ? gzipSync(readFileSync(full)).length : 0;
+  gzipCache.set(src, size);
+  return size;
+}
+
+let worst = { page: null, js: 0, html: 0 };
+
+for (const file of htmlFiles(APP_DIR)) {
+  const html = readFileSync(file, "utf8");
+  const srcs = [...new Set([...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1]))];
+  const js = srcs.reduce((total, src) => total + gzipOf(src), 0);
+  if (js > worst.js) {
+    worst = { page: path.relative(APP_DIR, file), js, html: gzipSync(Buffer.from(html)).length };
+  }
+}
+
+if (!worst.page) {
+  console.error("✗ No prerendered pages found to measure.");
+  process.exit(1);
+}
+
+const jsKb = worst.js / 1024;
+const htmlKb = worst.html / 1024;
+const ok = jsKb <= BUDGET_KB;
+
+console.log(`${ok ? "✓" : "✗"} Heaviest page: ${worst.page}`);
+console.log(`    client JS: ${jsKb.toFixed(1)} KB gzipped (budget ${BUDGET_KB} KB)`);
+console.log(`    HTML:      ${htmlKb.toFixed(1)} KB gzipped — this is what decides first paint`);
+
+if (!ok) {
+  console.error(
+    "\nThe client bundle grew past its budget. Before raising the number, check\n" +
+      'whether a component gained an unnecessary "use client".',
+  );
+  process.exit(1);
+}

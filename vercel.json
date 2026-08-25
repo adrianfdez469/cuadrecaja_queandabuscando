@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/crons/purge-sso-tokens",
+      "schedule": "0 4 * * *"
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+/**
+ * Design tokens.
+ *
+ * Every colour, radius and shadow the app uses is declared here as a CSS custom
+ * property. Per-store branding works by overriding a handful of these inside a
+ * `[data-store="<slug>"]` scope — which means theming costs zero JavaScript,
+ * survives ISR, and is cached by the CDN along with the page.
+ *
+ * Light is the base. Dark only redefines; nothing gets its ONLY definition
+ * inside a media query.
+ */
+
+:root {
+  /* Brand — the four a store may override */
+  --color-brand: oklch(0.55 0.19 256);
+  --color-brand-contrast: oklch(0.99 0 0);
+  --color-accent: oklch(0.68 0.17 45);
+  --color-accent-contrast: oklch(0.15 0.01 256);
+
+  /* Surfaces */
+  --color-bg: oklch(0.99 0.003 256);
+  --color-surface: oklch(1 0 0);
+  --color-surface-muted: oklch(0.97 0.005 256);
+  --color-border: oklch(0.9 0.008 256);
+
+  /* Text */
+  --color-fg: oklch(0.22 0.015 256);
+  --color-fg-muted: oklch(0.52 0.015 256);
+
+  /* Status — availability badges live off these */
+  --color-positive: oklch(0.6 0.14 155);
+  --color-warning: oklch(0.72 0.15 75);
+  --color-danger: oklch(0.58 0.2 25);
+
+  /* Shape */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 1rem;
+
+  --shadow-card: 0 1px 2px oklch(0.2 0.02 256 / 0.06), 0 4px 12px oklch(0.2 0.02 256 / 0.06);
+
+  /* Layout */
+  --container-max: 72rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: oklch(0.17 0.012 256);
+    --color-surface: oklch(0.21 0.014 256);
+    --color-surface-muted: oklch(0.25 0.014 256);
+    --color-border: oklch(0.32 0.016 256);
+
+    --color-fg: oklch(0.95 0.005 256);
+    --color-fg-muted: oklch(0.7 0.012 256);
+
+    --color-positive: oklch(0.72 0.14 155);
+    --color-warning: oklch(0.8 0.14 75);
+    --color-danger: oklch(0.68 0.18 25);
+
+    --shadow-card: 0 1px 2px oklch(0 0 0 / 0.4), 0 4px 12px oklch(0 0 0 / 0.3);
+  }
+}

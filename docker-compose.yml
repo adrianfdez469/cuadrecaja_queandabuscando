@@ -1,0 +1,29 @@
+# Postgres propio para desarrollo local.
+#
+# Puerto 5433 a propósito: el 5432 suele estar ocupado por el Postgres de otro
+# proyecto, y compartirlo significa que parar aquel se lleva por delante esta
+# base de datos.
+#
+#   docker compose up -d
+#   npm run db:migrate && npm run seed
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: queandabuscando-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: queandabuscando
+    ports:
+      - "5433:5432"
+    volumes:
+      - queandabuscando-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d queandabuscando"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  queandabuscando-pgdata:

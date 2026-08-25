@@ -1,0 +1,499 @@
+// queandabuscando — online storefronts fed by the cuadrecaja POS.
+//
+// Money is Decimal(14,2), never Float. CUP is the universal currency anchor:
+// ExchangeRate.rate is "CUP per 1 unit"; CUP itself is never stored as a rate.
+//
+// Postgres extensions (unaccent, pg_trgm) are created by SQL migration,
+// not by Prisma. See prisma/migrations/*_init/migration.sql.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum StoreStatus {
+  DRAFT
+  PUBLISHED
+  SUSPENDED
+}
+
+/// Derived in cuadrecaja from stock + umbralBajo. The raw stock integer never
+/// crosses the boundary, so this arrives as an opaque enum.
+enum Availability {
+  OUT_OF_STOCK
+  LOW_STOCK
+  AVAILABLE
+}
+
+enum CheckoutMode {
+  WHATSAPP
+  ONSITE
+}
+
+enum OrderStatus {
+  PENDING
+  PULLED
+  CONFIRMED
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+enum PromotionType {
+  PERCENTAGE
+  FIXED
+}
+
+enum PromotionScope {
+  PRODUCT
+  CATEGORY
+  ORDER
+}
+
+enum SyncEntity {
+  STORE
+  CATEGORY
+  PRODUCT
+  CURRENCY
+  EXCHANGE_RATE
+}
+
+enum SyncOperation {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+enum SyncEventStatus {
+  PENDING
+  PROCESSED
+  FAILED
+  SKIPPED
+}
+
+// ---------------------------------------------------------------------------
+// Tenant
+// ---------------------------------------------------------------------------
+
+/// Mirror of cuadrecaja's `Negocio`. Never holds credentials.
+model Business {
+  id               String   @id @default(uuid())
+  externalId       String   @unique
+  name             String
+  slug             String   @unique
+  logoUrl          String?
+  baseCurrencyCode String   @default("CUP")
+  /// SHA-256 of the bearer token this business uses on /api/internal/*.
+  syncTokenHash    String?
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  stores        Store[]
+  categories    LocalCategory[]
+  aliases       ProductAlias[]
+  exchangeRates ExchangeRate[]
+  adminUsers    AdminUser[]
+
+  @@index([active])
+}
+
+/// Mirror of a cuadrecaja `Tienda` the business opted into publishing.
+/// The row existing IS the opt-in; `status` controls publication.
+model Store {
+  id          String      @id @default(uuid())
+  businessId  String
+  externalId  String      @unique
+  slug        String      @unique
+  name        String
+  description String?
+  status      StoreStatus @default(DRAFT)
+
+  logoUrl     String?
+  coverUrl    String?
+  /// CSS custom property overrides, rendered inline in the store layout.
+  themeTokens Json?
+
+  phone    String?
+  whatsapp String?
+  email    String?
+
+  address  String?
+  city     String?
+  province String?
+  /// Reserved for marketplace proximity search.
+  ///
+  /// Deliberately plain columns rather than a PostGIS geography: proximity
+  /// search is not built yet, and requiring the postgis extension would mean
+  /// every local database needs a postgis-enabled image. The coordinates are
+  /// captured now; the geography column and its GiST index arrive in the
+  /// migration that actually implements the search.
+  latitude  Decimal? @db.Decimal(9, 6)
+  longitude Decimal? @db.Decimal(9, 6)
+
+  openingHours Json?
+
+  checkoutMode    CheckoutMode @default(WHATSAPP)
+  deliveryEnabled Boolean      @default(false)
+  deliveryFee     Decimal?     @db.Decimal(14, 2)
+
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  business    Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  products    StoreProduct[]
+  promotions  Promotion[]
+  orders      Order[]
+  adminAccess AdminStoreAccess[]
+
+  @@index([businessId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Catalog — canonical identity
+// ---------------------------------------------------------------------------
+
+/// Marketplace taxonomy, owned by the platform (not synced).
+model GlobalCategory {
+  id       String  @id @default(uuid())
+  slug     String  @unique
+  name     String
+  parentId String?
+
+  parent   GlobalCategory?  @relation("GlobalCategoryTree", fields: [parentId], references: [id])
+  children GlobalCategory[] @relation("GlobalCategoryTree")
+
+  canonicalProducts CanonicalProduct[]
+  localCategories   LocalCategory[]
+
+  @@index([parentId])
+}
+
+/// Mirror of cuadrecaja's `Categoria`, scoped to a business.
+model LocalCategory {
+  id               String  @id @default(uuid())
+  businessId       String
+  externalId       String
+  name             String
+  slug             String
+  color            String?
+  globalCategoryId String?
+
+  business       Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  globalCategory GlobalCategory? @relation(fields: [globalCategoryId], references: [id])
+  products       StoreProduct[]
+
+  @@unique([businessId, externalId])
+  @@index([globalCategoryId])
+}
+
+/// Identity shared across businesses — the basis of the marketplace.
+/// `isExclusive` marks an orphan canonical: visible in its own store,
+/// excluded from the marketplace. This is what guarantees that a product
+/// with neither EAN nor canonical id can still always be published.
+model CanonicalProduct {
+  id               String  @id @default(uuid())
+  ean              String? @unique
+  name             String
+  description      String?
+  imageUrl         String?
+  globalCategoryId String?
+  isExclusive      Boolean @default(false)
+
+  /// Concatenated searchable text: name + every alias. Recomputed whenever a
+  /// new alias appears — forgetting this silently degrades search.
+  searchDocument String @default("")
+  /// Populated by application code with to_tsvector('spanish', unaccent(...)).
+  /// GIN index is created in the SQL migration.
+  searchVector   Unsupported("tsvector")?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  globalCategory GlobalCategory? @relation(fields: [globalCategoryId], references: [id])
+  aliases        ProductAlias[]
+  storeProducts  StoreProduct[]
+
+  @@index([globalCategoryId])
+  @@index([isExclusive])
+}
+
+/// How each business names a canonical product. Feeds `searchDocument`.
+model ProductAlias {
+  id                 String @id @default(uuid())
+  canonicalProductId String
+  text               String
+  businessId         String
+  useCount           Int    @default(1)
+
+  createdAt DateTime @default(now())
+
+  canonicalProduct CanonicalProduct @relation(fields: [canonicalProductId], references: [id], onDelete: Cascade)
+  business         Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([canonicalProductId, text, businessId])
+  @@index([businessId])
+}
+
+/// The concrete offer: what a shopper sees and buys.
+/// Mirrors one row of cuadrecaja's `ProductoTienda`.
+model StoreProduct {
+  id                 String @id @default(uuid())
+  storeId            String
+  canonicalProductId String
+  /// UUID of the source ProductoTienda row.
+  externalId         String
+  slug               String
+
+  // --- owned by the sync; never edited here ---
+  localName           String
+  syncedPrice         Decimal      @db.Decimal(14, 2)
+  syncedPriceCurrency String
+  availability        Availability @default(AVAILABLE)
+  localCategoryId     String?
+  /// Payload timestamp of the write that produced this row. Every sync UPDATE
+  /// carries `AND sourceUpdatedAt < $new`, which makes delivery order irrelevant.
+  sourceUpdatedAt     DateTime
+  syncedAt            DateTime     @default(now())
+  deletedAt           DateTime?
+
+  // --- owned by the admin panel; the sync never touches these ---
+  description           String?
+  imageUrls             String[] @default([])
+  priceOverride         Decimal? @db.Decimal(14, 2)
+  priceOverrideCurrency String?
+  visible               Boolean  @default(true)
+  featured              Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store            Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  canonicalProduct CanonicalProduct @relation(fields: [canonicalProductId], references: [id])
+  localCategory    LocalCategory?   @relation(fields: [localCategoryId], references: [id])
+  orderItems       OrderItem[]
+
+  @@unique([storeId, canonicalProductId])
+  @@unique([storeId, externalId])
+  @@unique([storeId, slug])
+  @@index([storeId, deletedAt, visible])
+  @@index([canonicalProductId])
+  @@index([localCategoryId])
+}
+
+// ---------------------------------------------------------------------------
+// Money
+// ---------------------------------------------------------------------------
+
+model Currency {
+  code   String  @id
+  name   String
+  symbol String
+  active Boolean @default(true)
+
+  exchangeRates ExchangeRate[]
+}
+
+/// Append-only. `rate` is CUP per 1 unit of `currencyCode`; CUP is never stored.
+model ExchangeRate {
+  id           String   @id @default(uuid())
+  businessId   String
+  currencyCode String
+  rate         Decimal  @db.Decimal(18, 6)
+  createdAt    DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  currency Currency @relation(fields: [currencyCode], references: [code])
+
+  @@index([businessId, currencyCode, createdAt])
+}
+
+/// Lives only in queandabuscando. The POS knows nothing about promotions.
+model Promotion {
+  id         String         @id @default(uuid())
+  storeId    String
+  type       PromotionType
+  scope      PromotionScope
+  value      Decimal        @db.Decimal(14, 2)
+  conditions Json?
+  startsAt   DateTime
+  endsAt     DateTime?
+  active     Boolean        @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, active])
+}
+
+// ---------------------------------------------------------------------------
+// Shoppers and orders
+// ---------------------------------------------------------------------------
+
+/// Optional. Guest checkout is the primary path; an account only persists
+/// contact details and order history. Auth itself lives in Supabase.
+model Customer {
+  id             String  @id @default(uuid())
+  supabaseUserId String? @unique
+  name           String?
+  phone          String?
+  email          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  addresses CustomerAddress[]
+  orders    Order[]
+}
+
+model CustomerAddress {
+  id         String  @id @default(uuid())
+  customerId String
+  label      String
+  address    String
+  notes      String?
+  isDefault  Boolean @default(false)
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+/// BigInt autoincrement because the POS pages through orders with `?since=<id>`
+/// and needs a monotonic cursor.
+model Order {
+  id   BigInt @id @default(autoincrement())
+  code String @unique
+
+  storeId    String
+  customerId String?
+
+  // Contact snapshot — a guest order must be self-sufficient.
+  contactName     String
+  contactPhone    String
+  contactEmail    String?
+  deliveryAddress String?
+
+  status       OrderStatus @default(PENDING)
+  cancelReason String?
+
+  currencyCode  String
+  subtotal      Decimal @db.Decimal(14, 2)
+  discountTotal Decimal @default(0) @db.Decimal(14, 2)
+  deliveryFee   Decimal @default(0) @db.Decimal(14, 2)
+  total         Decimal @db.Decimal(14, 2)
+  /// Exchange rates frozen at order time. Historical prices are never recomputed.
+  rateSnapshot  Json
+
+  notes    String?
+  pulledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store    Store       @relation(fields: [storeId], references: [id])
+  customer Customer?   @relation(fields: [customerId], references: [id])
+  items    OrderItem[]
+
+  @@index([storeId, createdAt])
+  @@index([status, id])
+  @@index([customerId])
+}
+
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId BigInt
+
+  /// Nullable: the product may be soft-deleted later; the snapshot below stands.
+  storeProductId String?
+  name           String
+  unitPrice      Decimal @db.Decimal(14, 2)
+  currencyCode   String
+  quantity       Decimal @db.Decimal(14, 3)
+  lineTotal      Decimal @db.Decimal(14, 2)
+
+  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  storeProduct StoreProduct? @relation(fields: [storeProductId], references: [id])
+
+  @@index([orderId])
+  @@index([storeProductId])
+}
+
+// ---------------------------------------------------------------------------
+// Administration
+// ---------------------------------------------------------------------------
+
+/// Mirror of a cuadrecaja `Usuario`. Deliberately has NO password field:
+/// credentials are never replicated. Access arrives signed in the SSO token.
+model AdminUser {
+  id          String    @id @default(uuid())
+  externalId  String    @unique
+  businessId  String?
+  name        String
+  email       String?
+  lastLoginAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  business    Business?          @relation(fields: [businessId], references: [id])
+  storeAccess AdminStoreAccess[]
+
+  @@index([businessId])
+}
+
+model AdminStoreAccess {
+  id          String @id @default(uuid())
+  adminUserId String
+  storeId     String
+
+  adminUser AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  store     Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([adminUserId, storeId])
+  @@index([storeId])
+}
+
+/// Enforces the single use of an SSO token. Purged by cron.
+model SsoTokenUse {
+  jti       String   @id
+  usedAt    DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Sync inbox
+// ---------------------------------------------------------------------------
+
+/// Inbox pattern. Idempotency is by `eventId` (the id of the row in
+/// cuadrecaja's OutboxEvento), which makes replaying a whole batch safe.
+model SyncEvent {
+  id         String          @id @default(uuid())
+  eventId    String          @unique
+  businessId String
+  entity     SyncEntity
+  operation  SyncOperation
+  occurredAt DateTime
+  payload    Json
+  status     SyncEventStatus @default(PENDING)
+  receivedAt DateTime        @default(now())
+  processedAt DateTime?
+  error      String?
+
+  @@index([status, receivedAt])
+  @@index([businessId])
+}

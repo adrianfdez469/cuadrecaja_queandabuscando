@@ -1,36 +1,70 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# queandabuscando
 
-## Getting Started
+Tiendas online para los negocios que ya usan **Cuadre de Caja**. Cada local
+publicado vive en `dominio/[slug]`: los clientes ven el catálogo con precios y
+disponibilidad reales, y hacen pedidos. A futuro, un marketplace.
 
-First, run the development server:
+Los dos sistemas tienen bases de datos separadas y **ninguno tiene credenciales
+del otro**. cuadrecaja empuja cambios de catálogo por HTTP y lee los pedidos.
+El contrato completo está en [`docs/sync-contract.md`](docs/sync-contract.md).
+
+## Empezar
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+nvm use
+npm ci
+cp .env.example .env         # ver DATABASE_URL de abajo
+docker compose up -d         # Postgres propio en el puerto 5433
+npm run db:migrate
+npm run seed
+npm run dev                  # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Para desarrollo local, `DATABASE_URL` y `DIRECT_URL` apuntan al contenedor:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+postgresql://postgres:postgres@localhost:5433/queandabuscando
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+El puerto es **5433** a propósito: el 5432 suele estar ocupado por el Postgres
+de otro proyecto, y compartirlo significa que parar aquel se lleva por delante
+esta base de datos.
 
-## Learn More
+Comprobar que el entorno sirve:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+bash .agent/init.sh       # debe terminar en ENTORNO LISTO
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Con el seed cargado hay dos tiendas con paletas distintas:
+[`/tienda-demo`](http://localhost:3000/tienda-demo) y
+[`/tienda-dos`](http://localhost:3000/tienda-dos).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Dónde está cada cosa
 
-## Deploy on Vercel
+|                                                  |                                                        |
+| ------------------------------------------------ | ------------------------------------------------------ |
+| [`AGENTS.md`](AGENTS.md)                         | Convenciones, arquitectura y las trampas del repo      |
+| [`.agent/`](.agent/README.md)                    | Backlog (`features.json`) y protocolo de progreso      |
+| [`docs/sync-contract.md`](docs/sync-contract.md) | Lo que implementa el equipo de cuadrecaja              |
+| [`docs/adr/`](docs/adr/)                         | Por qué las decisiones estructurales son como son      |
+| `scripts/`                                       | Simuladores del POS para verificar sin el otro sistema |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Verificar el contrato sin cuadrecaja
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Los scripts de `scripts/` hacen de POS. Con `npm run dev` levantado:
+
+```bash
+node scripts/send-catalog-batch.mjs --repeat        # processed
+node scripts/send-catalog-batch.mjs --repeat        # duplicate
+node scripts/send-catalog-batch.mjs --bad-token     # 401
+node scripts/send-catalog-batch.mjs --unknown-store # skipped_not_published
+node scripts/send-catalog-batch.mjs --stale         # stale
+node scripts/send-availability-batch.mjs OUT_OF_STOCK
+node scripts/mint-sso-token.mjs                     # imprime la URL de login admin
+```
+
+Tras el primer comando, recargar `/tienda-demo`: el precio del refresco cambia
+de 450 a 499. Esa es la cadena completa sync → inbox → `revalidateTag` → ISR.
+
+Apuntan a `http://localhost:3000`; para otro puerto, `QAB_BASE_URL=... node ...`.

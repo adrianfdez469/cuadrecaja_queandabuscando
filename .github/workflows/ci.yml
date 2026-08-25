@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: queandabuscando
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/queandabuscando
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/queandabuscando
+      # Dummy values: enough to satisfy validation, never used against anything real.
+      SYNC_TOKEN: ci-only-token-that-is-long-enough-to-pass-validation
+      SSO_JWT_SECRET: ci-only-secret-that-is-long-enough-to-pass-check
+      ADMIN_SESSION_SECRET: ci-only-admin-secret-long-enough-to-pass-check
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Prisma schema is valid
+        run: npx prisma validate
+
+      - name: Migrations apply cleanly to an empty database
+        run: npx prisma migrate deploy
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+
+      - name: Seed is idempotent
+        run: |
+          npm run seed
+          npm run seed
+
+      - run: npm run build
+
+      - name: Client bundle is within budget
+        run: npm run check:bundle

@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "project": "queandabuscando",
+  "updated_at": "2026-08-25",
+  "rules": [
+    "Solo se cambia 'passes' a true cuando TODOS los acceptance_criteria fueron verificados ejecutando algo, no leyendo código.",
+    "Nunca se borra un feature: se marca 'status': 'deprecated' y se explica en 'notes'.",
+    "Nunca se modifica un acceptance_criteria ya escrito. Si está mal, se agrega un feature nuevo que lo corrija.",
+    "El backlog de producto lo define el humano. Un agente no agrega features por iniciativa propia.",
+    "No se empieza un feature cuyos 'depends_on' no tengan 'passes': true.",
+    "Un feature con 'passes': false y sin archivo en .agent/progress/ está sin empezar. Si tiene archivo, se retoma desde ahí.",
+    "Antes de tocar código: leer features.json completo, AGENTS.md, y el progress/ del feature elegido.",
+    "Al cerrar sesión con trabajo a medias es OBLIGATORIO actualizar .agent/progress/<id>.md, con 'Próximo paso concreto' relleno."
+  ],
+  "features": [
+    {
+      "id": "F-001",
+      "category": "bootstrap",
+      "status": "active",
+      "depends_on": [],
+      "description": "Esqueleto Next.js con App Router, TypeScript estricto y tooling de calidad.",
+      "acceptance_criteria": [
+        "Existe package.json con los scripts dev, build, start, lint, format, typecheck, test y check:bundle.",
+        "Existe tsconfig.json con \"strict\": true y el alias \"@/*\" → \"./src/*\".",
+        "Existe .nvmrc y 'node -v' coincide con su contenido.",
+        "'npm run typecheck' termina con código 0.",
+        "'npm run lint' termina con código 0.",
+        "'npm run format:check' termina con código 0.",
+        "'npm run build' termina con código 0.",
+        "Las versiones reales de Next.js, React, TypeScript y Prisma están anotadas en la tabla de Stack de AGENTS.md."
+      ],
+      "passes": true,
+      "notes": "Hecho. create-next-app instaló Next 16.3.2 (no 15) y Prisma 7.9.1 (no 6); ambos difieren de cuadrecaja y de lo que asumía el plan. Consecuencias registradas en docs/adr/0009 y docs/adr/0010."
+    },
+    {
+      "id": "F-002",
+      "category": "datos",
+      "status": "active",
+      "depends_on": ["F-001"],
+      "description": "Prisma contra PostgreSQL con el modelo completo y migración inicial versionada.",
+      "acceptance_criteria": [
+        "'npx prisma validate' termina con código 0.",
+        "Existe src/lib/prisma.ts exportando un singleton cacheado en globalThis.",
+        "Importar src/lib/prisma.ts sin DATABASE_URL definido NO lanza (la construcción es perezosa).",
+        "Existe al menos una migración en prisma/migrations/ y 'npx prisma migrate status' la reporta como aplicada.",
+        "La migración crea las extensiones unaccent y pg_trgm antes de las tablas.",
+        "'npm run seed' termina con código 0 y es idempotente (dos ejecuciones seguidas dan el mismo conteo).",
+        "Tras el seed hay 2 tiendas y menos canónicos que productos, porque los códigos de barras compartidos se fusionan.",
+        ".env está en .gitignore y no aparece en 'git status'."
+      ],
+      "passes": true,
+      "notes": "Hecho. Verificado: 20 productos → 17 canónicos. PostGIS se descartó (ver docs/adr/0011): las coordenadas se guardan como Decimal y la columna geography llegará con la búsqueda por cercanía. NO ejecutar 'prisma migrate reset' ni 'prisma db push'."
+    },
+    {
+      "id": "F-003",
+      "category": "diseno",
+      "status": "active",
+      "depends_on": ["F-001"],
+      "description": "Tema centralizado con tokens CSS y branding por tienda sin JavaScript.",
+      "acceptance_criteria": [
+        "src/theme/tokens.css define la paleta completa en :root y solo redefine bajo prefers-color-scheme: dark.",
+        "renderStoreTheme() rechaza valores que no sean colores CSS válidos y nombres de token desconocidos.",
+        "Dos tiendas del seed con themeTokens distintos renderizan paletas distintas: el HTML de una contiene un bloque [data-store=...] y el de la otra no.",
+        "El HTML servido no carga ningún JavaScript para aplicar el tema."
+      ],
+      "passes": true,
+      "notes": "Hecho. /tienda-dos emite su bloque scoped; /tienda-demo usa la paleta base y no emite <style>."
+    },
+    {
+      "id": "F-004",
+      "category": "tienda",
+      "status": "active",
+      "depends_on": ["F-002", "F-003"],
+      "description": "Rutas públicas /[slug] y /[slug]/p/[productSlug] renderizadas con ISR.",
+      "acceptance_criteria": [
+        "'npm run build' marca /[slug] y /[slug]/p/[productSlug] como ● (SSG), no como ƒ (Dynamic).",
+        "GET / responde 200.",
+        "GET /tienda-demo responde 200 y los nombres de los productos aparecen en el HTML, no solo tras hidratar.",
+        "GET /tienda-inexistente responde 404.",
+        "Un producto con priceOverride muestra el precio del override y nunca el sincronizado.",
+        "Un producto en USD se muestra convertido a CUP usando la tasa vigente.",
+        "'node scripts/check-bundle-budget.mjs' termina con código 0."
+      ],
+      "passes": true,
+      "notes": "Hecho. Verificado con curl contra 'next start'. El JS de cliente son ~180 KB gzip: es el suelo de Next 16 + React 19 App Router, no código propio. Lo que decide el primer pintado es el HTML (~3 KB) y la página es legible sin JavaScript. Ver F-013."
+    },
+    {
+      "id": "F-005",
+      "category": "integracion",
+      "status": "active",
+      "depends_on": ["F-002"],
+      "description": "Endpoint de sincronización de catálogo con inbox, identidad canónica y guarda anti-rancio.",
+      "acceptance_criteria": [
+        "POST /api/internal/sync/catalog con token inválido responde 401.",
+        "POST /api/internal/sync/catalog sin SYNC_TOKEN configurado en el servidor responde 503, nunca 200.",
+        "Un lote nuevo responde 207 con status 'processed' por evento.",
+        "Reenviar el MISMO lote responde 'duplicate' y no vuelve a aplicar nada.",
+        "Un evento previamente fallido NO se reporta como 'duplicate': se reprocesa.",
+        "Un evento de una tienda sin fila Store responde 'skipped_not_published', no error.",
+        "Un evento con updatedAt anterior al almacenado responde 'stale' y no pisa el valor nuevo.",
+        "Un producto sin EAN ni canonicalProductId crea un canónico con isExclusive = true.",
+        "Un product.update no modifica priceOverride, description, imageUrls, visible ni featured.",
+        "Tras un product.update, recargar /[slug] muestra el precio nuevo (cadena sync → inbox → revalidateTag → ISR)."
+      ],
+      "passes": true,
+      "notes": "Hecho. Verificado con scripts/send-catalog-batch.mjs en sus cinco modos. Durante la verificación aparecieron dos bugs reales, ambos corregidos y cubiertos por tests: el slug faltante en el create del upsert, y eventos fallidos reportados como duplicados (que habría perdido actualizaciones en silencio)."
+    },
+    {
+      "id": "F-006",
+      "category": "integracion",
+      "status": "active",
+      "depends_on": ["F-005"],
+      "description": "Endpoint de disponibilidad con enum de tres valores y confirmación por par.",
+      "acceptance_criteria": [
+        "POST /api/internal/sync/availability responde 200 con { applied, confirmed }.",
+        "'confirmed' contiene exactamente los pares que esta base pudo resolver.",
+        "Un producto de una tienda desconocida no aparece en 'confirmed'.",
+        "Reenviar el mismo valor deja applied en 0, porque el UPDATE es condicional.",
+        "Cambiar disponibilidad se refleja en /[slug] tras la revalidación."
+      ],
+      "passes": true,
+      "notes": "Hecho. Verificado el ciclo AVAILABLE → OUT_OF_STOCK → AVAILABLE contra el HTML servido."
+    },
+    {
+      "id": "F-007",
+      "category": "integracion",
+      "status": "active",
+      "depends_on": ["F-002"],
+      "description": "Pedidos por pull desde el POS y reporte de estado de vuelta.",
+      "acceptance_criteria": [
+        "GET /api/internal/orders?since=<id>&limit=<n> responde { orders, nextCursor } y respeta el cursor.",
+        "Un pedido devuelto pasa de PENDING a PULLED.",
+        "POST /api/internal/orders/status actualiza el estado y responde 404 para un pedido inexistente.",
+        "No existe en el código ninguna llamada saliente hacia cuadrecaja: 'grep -rn CUADRECAJA_API_URL src/' no devuelve nada."
+      ],
+      "passes": false,
+      "notes": "Depende de F-010: no hay forma de crear un pedido todavía, así que el pull solo se puede probar con filas insertadas a mano. Los endpoints existen y tipan; falta la verificación ejecutada."
+    },
+    {
+      "id": "F-008",
+      "category": "auth",
+      "status": "active",
+      "depends_on": ["F-002"],
+      "description": "SSO de un solo uso para el administrador, sin replicar credenciales.",
+      "acceptance_criteria": [
+        "Abrir /admin/sso con un token válido redirige a /admin y emite la cookie qab-admin-session httpOnly.",
+        "Reusar el MISMO token responde 401 con reason 'already_used'.",
+        "Un token expirado responde 401 con reason 'expired'.",
+        "Un token firmado con otro secreto responde 401 con reason 'invalid'.",
+        "GET /admin sin cookie redirige, no responde 200.",
+        "GET /admin con la cookie responde 200 y muestra la cantidad de tiendas del token.",
+        "El modelo AdminUser no tiene ningún campo de contraseña: 'grep -i password prisma/schema.prisma' no devuelve nada."
+      ],
+      "passes": true,
+      "notes": "Hecho. Verificado con scripts/mint-sso-token.mjs. El acceso a tiendas se re-deriva del token en cada login, así que revocar en el POS surte efecto al siguiente inicio de sesión."
+    },
+    {
+      "id": "F-009",
+      "category": "calidad",
+      "status": "active",
+      "depends_on": ["F-001"],
+      "description": "Pipeline de calidad: tests, lint, typecheck y presupuesto de bundle, en local y en CI.",
+      "acceptance_criteria": [
+        "'npm test' ejecuta la suite completa y pasa.",
+        "'bash .agent/init.sh' llega a ENTORNO LISTO sin advertencias de scripts faltantes.",
+        "Existe .github/workflows/ci.yml que corre typecheck, lint, format:check, prisma validate, test y build.",
+        "El hook de pre-commit ejecuta lint-staged.",
+        "La cobertura de src/lib/ es superior al 80% de líneas."
+      ],
+      "passes": false,
+      "notes": "Todo montado y verificado en local salvo dos criterios. Cobertura medida: 41.9% de líneas globales — alta en la lógica pura (money 96.9%, cache 94.4%, slug 93.8%, y canonical/pricing/availability/syncAuth/theming al 100%) y cero en los módulos que tocan Prisma, que se verificaron end-to-end contra base y servidor reales en vez de con unit tests. Para llegar al 80% hacen falta tests con Prisma mockeado en features/*/server. El CI necesita un PR real contra GitHub para verse en verde."
+    },
+    {
+      "id": "F-010",
+      "category": "tienda",
+      "status": "active",
+      "depends_on": ["F-004"],
+      "description": "Carrito y checkout: el cliente arma un pedido y lo confirma sin necesidad de cuenta.",
+      "acceptance_criteria": [
+        "El carrito persiste en localStorage con una clave namespaced por tienda.",
+        "Un producto con availability OUT_OF_STOCK no se puede agregar.",
+        "El checkout crea un Order con snapshot de contacto y de precios, y rateSnapshot con las tasas del momento.",
+        "Se puede completar un pedido sin iniciar sesión.",
+        "La página /[slug]/pedido/[code] muestra el pedido y no está cacheada.",
+        "Las rutas de carrito y checkout se marcan ƒ (Dynamic) en el build, nunca SSG."
+      ],
+      "passes": false,
+      "notes": "Sin empezar. Es el siguiente feature de producto y desbloquea F-007."
+    },
+    {
+      "id": "F-011",
+      "category": "admin",
+      "status": "active",
+      "depends_on": ["F-008"],
+      "description": "Panel de administración: publicar tienda, branding, imágenes, descripciones, overrides y promociones.",
+      "acceptance_criteria": [
+        "Un admin solo ve y edita las tiendas presentes en storeIds de su sesión.",
+        "Intentar editar una tienda ajena responde 403.",
+        "Editar description, imageUrls, priceOverride, visible o featured no se pierde tras un product.update del sync.",
+        "Subir una imagen la almacena en Supabase Storage y la sirve por next/image.",
+        "Guardar branding inválido es rechazado por themeTokensSchema y no llega a la base."
+      ],
+      "passes": false,
+      "notes": "Sin empezar. La invariante del tercer criterio ya está implementada en el handler del sync; falta la UI que la ejercite."
+    },
+    {
+      "id": "F-012",
+      "category": "auth",
+      "status": "active",
+      "depends_on": ["F-010"],
+      "description": "Cuenta opcional del cliente final con Supabase Auth.",
+      "acceptance_criteria": [
+        "Se puede iniciar sesión con Google, Facebook, Apple y correo.",
+        "El primer inicio de sesión crea un Customer enlazado por supabaseUserId.",
+        "Los datos de contacto guardados se autocompletan en el siguiente pedido.",
+        "Un pedido de invitado sigue siendo posible: la ruta de checkout no exige sesión.",
+        "Las sesiones de cliente y de admin no comparten cookie: sus nombres son distintos."
+      ],
+      "passes": false,
+      "notes": "Sin empezar. Los clientes de Supabase ya están en src/lib/supabase/."
+    },
+    {
+      "id": "F-013",
+      "category": "rendimiento",
+      "status": "active",
+      "depends_on": ["F-004"],
+      "description": "Reducir el JavaScript de cliente en las páginas de tienda.",
+      "acceptance_criteria": [
+        "Está medido y anotado en el progress qué parte de los ~180 KB es framework y qué parte es código propio.",
+        "Se evaluó y documentó si cacheComponents/PPR de Next 16 cambia el número.",
+        "Las páginas de tienda siguen siendo legibles con JavaScript deshabilitado.",
+        "El presupuesto de scripts/check-bundle-budget.mjs se bajó al número alcanzado."
+      ],
+      "passes": false,
+      "notes": "Abierto a propósito. El objetivo de 100 KB del plan no es alcanzable con Next 16 App Router: el suelo del framework son ~180 KB gzip incluso en una página sin interactividad. Importa porque el público objetivo tiene conexión limitada. Mitigación actual: todo es server component, así que el HTML (~3 KB) basta para leer el catálogo sin esperar el JavaScript."
+    },
+    {
+      "id": "F-014",
+      "category": "integracion",
+      "status": "active",
+      "depends_on": ["F-005"],
+      "description": "Reconciliación nocturna entre las dos bases.",
+      "acceptance_criteria": [
+        "GET /api/internal/reconciliation?storeId=<id> responde { products, hash }.",
+        "El hash cambia cuando cambia el precio o la disponibilidad de un producto.",
+        "El hash NO cambia cuando cambia un campo del panel (description, imageUrls, priceOverride).",
+        "Una tienda inexistente responde 404.",
+        "El algoritmo del hash está documentado en docs/sync-contract.md con el SQL equivalente para cuadrecaja."
+      ],
+      "passes": false,
+      "notes": "El endpoint existe. Falta verificarlo ejecutando y documentar el SQL espejo del lado del POS."
+    },
+    {
+      "id": "F-015",
+      "category": "marketplace",
+      "status": "active",
+      "depends_on": ["F-005"],
+      "description": "Búsqueda del marketplace sobre productos canónicos.",
+      "acceptance_criteria": [
+        "searchVector se puebla al sincronizar usando to_tsvector con unaccent.",
+        "Buscar 'cafe' encuentra un producto llamado 'Café'.",
+        "Los canónicos con isExclusive = true quedan FUERA de los resultados.",
+        "Un alias nuevo se refleja en los resultados sin reprocesar el catálogo."
+      ],
+      "passes": false,
+      "notes": "Sin empezar, y a propósito: el acuerdo fue anticipar el marketplace solo en el modelo de datos. Las tablas, el searchDocument y los índices GIN ya existen; falta poblar searchVector y construir la consulta."
+    }
+  ]
+}

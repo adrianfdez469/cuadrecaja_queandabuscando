@@ -39,3 +39,16 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
+
+# env — .env.example is the only one that may be committed
+.env
+.env.*
+!.env.example
+
+# prisma client is generated at postinstall
+/src/generated
+
+# test coverage
+/coverage
