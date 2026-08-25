@@ -68,7 +68,7 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
 
   return (
     <Container className="grid gap-8 py-8 md:grid-cols-2">
-      <div className="bg-surface-muted relative aspect-square overflow-hidden rounded-[--radius-lg]">
+      <div className="bg-surface-muted relative aspect-square overflow-hidden rounded-lg">
         {image ? (
           <Image
             src={image}
@@ -87,7 +87,7 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
         {product.categoryName && <p className="text-fg-muted text-sm">{product.categoryName}</p>}
         <h1 className="mt-1 text-2xl font-semibold">{product.name}</h1>
 
-        <p className="mt-4 text-3xl font-semibold">
+        <p className="text-brand mt-4 text-3xl font-semibold">
           {price ?? <span className="text-fg-muted">Consultar precio</span>}
         </p>
 

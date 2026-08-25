@@ -1,37 +1,18 @@
-@import "tailwindcss";
-@import "../theme/tokens.css";
-
 /**
- * Map the design tokens onto Tailwind's theme so utilities like `bg-surface`
- * and `text-fg-muted` resolve to the custom properties. A store's branding
- * override therefore reaches every utility class without touching markup.
+ * `source(none)` turns off Tailwind's automatic project scan, and the explicit
+ * @source below points it at the only directory that contains markup.
+ *
+ * Without this, Tailwind reads every file in the repo — including ones that
+ * merely TALK about class names. The theme checker quotes the broken syntax it
+ * exists to detect, and a feature note in .agent/ describes the same bug; both
+ * got compiled into real utilities, and the checker failed on its own
+ * documentation. Chasing that file by file does not converge. Scanning only
+ * where components live does.
  */
-@theme inline {
-  --color-brand: var(--color-brand);
-  --color-brand-contrast: var(--color-brand-contrast);
-  --color-accent: var(--color-accent);
-  --color-accent-contrast: var(--color-accent-contrast);
+@import "tailwindcss" source(none);
+@source "../../src";
 
-  --color-bg: var(--color-bg);
-  --color-surface: var(--color-surface);
-  --color-surface-muted: var(--color-surface-muted);
-  --color-border: var(--color-border);
-
-  --color-fg: var(--color-fg);
-  --color-fg-muted: var(--color-fg-muted);
-
-  --color-positive: var(--color-positive);
-  --color-warning: var(--color-warning);
-  --color-danger: var(--color-danger);
-
-  --radius-sm: var(--radius-sm);
-  --radius-md: var(--radius-md);
-  --radius-lg: var(--radius-lg);
-
-  --shadow-card: var(--shadow-card);
-
-  --font-sans: var(--font-app-sans), ui-sans-serif, system-ui, sans-serif;
-}
+@import "../theme/tokens.css";
 
 body {
   background-color: var(--color-bg);

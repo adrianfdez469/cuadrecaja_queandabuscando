@@ -27,6 +27,11 @@ export function ProductCard({
 
   return (
     <Card className="h-full overflow-hidden transition-shadow hover:shadow-lg">
+      {product.featured && (
+        <span className="bg-accent text-accent-contrast block px-3 py-1 text-xs font-medium">
+          Destacado
+        </span>
+      )}
       <Link href={`/${storeSlug}/p/${product.slug}`} className="block">
         <div className="bg-surface-muted relative aspect-square">
           {image ? (
@@ -49,8 +54,8 @@ export function ProductCard({
         <div className="space-y-1.5 p-3">
           <h3 className="line-clamp-2 text-sm font-medium">{product.name}</h3>
 
-          <p className="text-base font-semibold">
-            {price ?? <span className="text-fg-muted">Consultar</span>}
+          <p className="text-brand text-base font-semibold">
+            {price ?? <span className="text-fg-muted font-normal">Consultar</span>}
           </p>
 
           {shouldShowBadge(product.availability) && (

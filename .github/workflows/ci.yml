@@ -66,5 +66,8 @@ jobs:
 
       - run: npm run build
 
+      - name: Per-store theming still resolves through var()
+        run: npm run check:theme
+
       - name: Client bundle is within budget
         run: npm run check:bundle

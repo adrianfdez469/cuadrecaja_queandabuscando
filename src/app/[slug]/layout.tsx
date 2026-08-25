@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireStore } from "@/features/catalog/server/queries";
 import { renderStoreTheme } from "@/features/theming/storeTheme";
 import { Container } from "@/components/ui/Container";
@@ -25,10 +26,14 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[s
     <div data-store={store.slug} className="flex min-h-full flex-col">
       {themeCss && <style dangerouslySetInnerHTML={{ __html: themeCss }} />}
 
-      <header className="border-border bg-surface border-b">
-        <Container className="flex items-center gap-3 py-4">
-          <span className="text-lg font-semibold">{store.name}</span>
-          {store.city && <span className="text-fg-muted text-sm">· {store.city}</span>}
+      {/* The brand colour has to land somewhere the shopper actually looks, or
+          per-store theming is a mechanism with no visible effect. */}
+      <header className="bg-brand text-brand-contrast">
+        <Container className="flex items-center gap-3 py-5">
+          <Link href={`/${store.slug}`} className="text-xl font-semibold tracking-tight">
+            {store.name}
+          </Link>
+          {store.city && <span className="text-sm opacity-80">· {store.city}</span>}
         </Container>
       </header>
 

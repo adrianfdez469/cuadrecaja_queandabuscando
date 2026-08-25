@@ -64,7 +64,7 @@
         "El HTML servido no carga ningún JavaScript para aplicar el tema."
       ],
       "passes": true,
-      "notes": "Hecho. /tienda-dos emite su bloque scoped; /tienda-demo usa la paleta base y no emite <style>."
+      "notes": "Los criterios se cumplían pero NO probaban lo que importa: verificaban que se emitiera el bloque <style>, no que cambiara el render. Las dos tiendas se veían idénticas por dos bugs — @theme inline compila el VALOR dentro de la utilidad (ningún override en runtime la alcanza) y rounded-[--radius-lg] es sintaxis de Tailwind v3 que en v4 produce CSS inválido. Corregido en F-016, que sí lo verifica."
     },
     {
       "id": "F-004",
@@ -264,6 +264,22 @@
       ],
       "passes": false,
       "notes": "Sin empezar, y a propósito: el acuerdo fue anticipar el marketplace solo en el modelo de datos. Las tablas, el searchDocument y los índices GIN ya existen; falta poblar searchVector y construir la consulta."
+    },
+    {
+      "id": "F-016",
+      "category": "diseno",
+      "status": "active",
+      "depends_on": ["F-003"],
+      "description": "El branding por tienda cambia el render, no solo el HTML emitido (corrige los criterios de F-003).",
+      "acceptance_criteria": [
+        "El CSS compilado resuelve .bg-brand a background-color: var(--color-brand), no a un color literal.",
+        "El CSS compilado no contiene ninguna declaracion con una custom property desnuda como valor (p. ej. 'border-radius: --radius-lg').",
+        "'npm run check:theme' termina con codigo 0, y termina con codigo 1 si se revierte @theme a @theme inline.",
+        "Una captura de /tienda-demo y otra de /tienda-dos muestran cabeceras de color distinto y radios de esquina distintos.",
+        "El color de marca aparece en al menos dos lugares visibles del catalogo, no solo en la ficha de producto."
+      ],
+      "passes": true,
+      "notes": "Hecho y verificado con capturas reales en Chrome: /tienda-demo azul con esquinas suaves, /tienda-dos verde con esquinas redondeadas y acento coral. La regresion se probó rompiendo el tema a proposito y confirmando que check:theme falla. Trampa encontrada: Tailwind escanea scripts/, asi que el propio checker generaba las utilidades rotas que buscaba — resuelto con @source not en globals.css."
     }
   ]
 }

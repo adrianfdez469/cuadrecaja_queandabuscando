@@ -22,6 +22,7 @@
     "prepare": "husky",
     "postinstall": "prisma generate",
     "check:bundle": "node scripts/check-bundle-budget.mjs",
+    "check:theme": "node scripts/check-theme-tokens.mjs",
     "check:harness": "node scripts/check-harness.mjs"
   },
   "dependencies": {
