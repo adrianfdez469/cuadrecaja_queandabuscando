@@ -62,7 +62,8 @@ la lección es cuando todavía se recuerda.
 `visto_en` va acumulando los features en los que mordió cada trampa. En cuanto
 son dos o más, la ficha es candidata a subir a `AGENTS.md` § «Cosas que muerden»
 —que es la bitácora que se lee **antes** de fallar— y a marcarse aquí como
-`promovido_a_agents: sí`. `bash .agent/sdd.sh playbook` te dice cuáles lo son.
+`promovido_a_agents: sí`. `bash .agent/sdd.sh playbook` lo lista: la columna
+`→AG` dice cuáles ya subieron, y marca en amarillo las que deberían.
 
 Las fichas que ya nacieron promovidas vienen de esa sección: esto empezó
 copiando lo que el repo ya sabía.

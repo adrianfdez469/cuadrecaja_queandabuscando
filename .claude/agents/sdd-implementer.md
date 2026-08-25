@@ -1,6 +1,7 @@
 ---
 name: sdd-implementer
 description: Implementa un feature siguiendo la spec, la arquitectura y el diseño ya escritos en .agent/specs/<ID>/. Úsalo cuando esos documentos existen y no quedan preguntas abiertas. Escribe código de producto, ejecuta typecheck, lint y tests, y deja anotado qué construyó y qué desvió del plan.
+tools: Read, Write, Edit, Bash, Skill
 model: inherit
 ---
 

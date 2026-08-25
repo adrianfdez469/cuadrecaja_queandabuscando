@@ -171,7 +171,7 @@ AVISO
 
 # playbook [texto] — lista las fichas, o busca por texto en todas.
 cmd_playbook() {
-  local f slug sintoma visto n
+  local f slug sintoma visto n prom
   [ -d "$PLAYBOOK" ] || die "no existe $PLAYBOOK/."
 
   if [ $# -gt 0 ]; then
@@ -185,12 +185,14 @@ cmd_playbook() {
   fi
 
   n=0
-  printf '\033[1m%-34s %-10s %s\033[0m\n' FICHA ETAPA "VISTO EN"
+  printf '\033[1m%-34s %-10s %-4s %s\033[0m\n' FICHA ETAPA "→AG" "VISTO EN"
   for f in "$PLAYBOOK"/*.md; do
     case "${f##*/}" in README.md | TEMPLATE.md) continue ;; esac
     slug="$(basename "$f" .md)"
     visto="$(front "$f" visto_en)"
-    printf '  %-32s %-10s %s\n' "$slug" "$(front "$f" etapa)" "${visto:-—}"
+    # →AG: ya está en AGENTS.md § Cosas que muerden, la bitácora que se lee antes.
+    [ "$(front "$f" promovido_a_agents)" = "sí" ] && prom="sí" || prom="—"
+    printf '  %-32s %-10s %-4s %s\n' "$slug" "$(front "$f" etapa)" "$prom" "${visto:-—}"
     # Dos features distintos mordidos por la misma trampa: deja de ser anécdota.
     if [ "$(printf '%s' "$visto" | tr ',' '\n' | grep -c 'F-')" -ge 2 ] &&
       [ "$(front "$f" promovido_a_agents)" != "sí" ]; then

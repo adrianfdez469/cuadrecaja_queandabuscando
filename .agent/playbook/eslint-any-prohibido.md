@@ -3,7 +3,7 @@ slug: eslint-any-prohibido
 sintoma: "eslint falla con: Unexpected any. Specify a different type"
 firma: "@typescript-eslint/no-explicit-any"
 etapa: lint
-visto_en: F-007
+visto_en: —
 creado: 2026-08-25T19:11:02Z
 promovido_a_agents: sí
 arreglo: tipa el valor; si de verdad no se conoce, usa `unknown` y estrecha con un schema de Zod
