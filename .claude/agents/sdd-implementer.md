@@ -43,7 +43,7 @@ Después de **cada** intento de cambio, sin excepción y sin esperar a «termina
 
 ```bash
 bash .agent/verify.sh <ID>          # typecheck · lint · format · test
-bash .agent/verify.sh <ID> --full   # antes de entregar: + prisma · build · theme · bundle
+bash .agent/verify.sh <ID> --full   # antes de entregar: + harness · prisma · build · theme · bundle
 ```
 
 No lo sustituyas por correr los comandos a mano. El sensor hace tres cosas que

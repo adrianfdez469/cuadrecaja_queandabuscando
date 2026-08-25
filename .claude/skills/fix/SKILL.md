@@ -32,7 +32,7 @@ en el mismo movimiento — una ficha que miente cuesta más que ninguna.
 
 ```bash
 bash .agent/verify.sh                   # typecheck · lint · format · test
-bash .agent/verify.sh --full            # + prisma · build · theme · bundle
+bash .agent/verify.sh --full            # + harness · prisma · build · theme · bundle
 bash .agent/verify.sh --only test       # una sola etapa, cuando ya sabes cuál
 ```
 

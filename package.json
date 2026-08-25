@@ -21,7 +21,8 @@
     "seed": "tsx prisma/seed.ts",
     "prepare": "husky",
     "postinstall": "prisma generate",
-    "check:bundle": "node scripts/check-bundle-budget.mjs"
+    "check:bundle": "node scripts/check-bundle-budget.mjs",
+    "check:harness": "node scripts/check-harness.mjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

@@ -45,6 +45,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Harness prose matches its scripts
+        run: npm run check:harness
+
       - name: Prisma schema is valid
         run: npx prisma validate
 

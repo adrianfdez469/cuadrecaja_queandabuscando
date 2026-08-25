@@ -24,10 +24,11 @@ SMOKE_PORT="${SMOKE_PORT:-3100}"
 
 # Orden deliberado: lo que falla más rápido y señala más de cerca, primero.
 STAGES_RAPIDO="typecheck lint format test"
-STAGES_COMPLETO="typecheck lint format test prisma build theme bundle"
+STAGES_COMPLETO="harness typecheck lint format test prisma build theme bundle"
 
 stage_cmd() {
   case "$1" in
+    harness)   echo "npm run check:harness" ;;
     typecheck) echo "npm run typecheck" ;;
     lint)      echo "npm run lint" ;;
     format)    echo "npm run format:check" ;;

@@ -73,7 +73,7 @@ cambio, quien lo hizo ejecuta:
 
 ```bash
 bash .agent/verify.sh F-007          # typecheck · lint · format · test
-bash .agent/verify.sh F-007 --full   # + prisma · build · theme · bundle
+bash .agent/verify.sh F-007 --full   # + harness · prisma · build · theme · bundle
 bash .agent/verify.sh F-007 --smoke  # + la app levantada de verdad
 ```
 

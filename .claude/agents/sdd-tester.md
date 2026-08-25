@@ -42,7 +42,7 @@ parezca.
 4. **Ejecuta de verdad**, y hazlo con el sensor:
 
    ```bash
-   bash .agent/verify.sh <ID> --full    # typecheck · lint · format · test · prisma · build · theme · bundle
+   bash .agent/verify.sh <ID> --full    # harness · typecheck · lint · format · test · prisma · build · theme · bundle
    bash .agent/verify.sh <ID> --smoke   # + la app levantada y peticiones reales
    ```
 

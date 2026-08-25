@@ -94,8 +94,8 @@ ESLint impone la regla de que `components/` y `app/**/*.tsx` no importen Prisma.
 - **`any`.** Es error de ESLint.
 - **Magic strings y números.** A `src/constants/` o a un enum.
 - **Duplicar interfaces** entre la capa de datos y la vista.
-- **Leer cookies de sesión a mano.** Solo `lib/auth/adminSession.ts` y
-  `lib/auth/customerSession.ts`.
+- **Leer cookies de sesión a mano.** Solo `lib/auth/adminSession.ts` y, en
+  cuanto F-012 lo cree, `lib/auth/customerSession.ts`.
 
 ---
 
