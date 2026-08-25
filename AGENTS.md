@@ -8,6 +8,16 @@ El backlog y el protocolo de progreso están en [`.agent/`](.agent/README.md).
 
 ---
 
+## Cómo se trabaja
+
+Desarrollo dirigido por especificación: un orquestador reparte a cinco agentes
+especialistas —especificación, arquitectura, diseño, implementación y pruebas—
+que se coordinan por los archivos de `.agent/`. El humano abre con `/sdd F-NNN`.
+
+Quién es quién y dónde escribe cada uno: [`.agent/README.md`](.agent/README.md).
+
+---
+
 ## Stack
 
 Versiones **reales**, no rangos. Actualiza esta tabla cuando cambien.
@@ -28,17 +38,29 @@ Versiones **reales**, no rangos. Actualiza esta tabla cuando cambien.
 
 ```bash
 bash .agent/init.sh    # comprobar el entorno — hazlo primero
+bash .agent/verify.sh  # el sensor: typecheck·lint·format·test, y qué hacer si falla
 npm run dev            # servidor de desarrollo
 npm run typecheck      # tsc --noEmit
 npm run lint           # eslint
 npm run format         # prettier --write
+npm run format:check   # prettier --check — es lo que valida el CI
 npm test               # vitest run
 npm run test:coverage
 npm run db:migrate     # prisma migrate dev
 npm run seed           # datos de desarrollo (idempotente)
 npm run build
+npm run check:theme    # los tokens de tema resuelven a var() (tras build)
 npm run check:bundle   # presupuesto de JS de cliente (tras build)
 ```
+
+`verify.sh` se para en lo primero que falla y busca ese fallo en
+`.agent/playbook/` antes de que te pongas a depurar. Después de cada cambio se
+ejecuta él, no los comandos sueltos. Sin banderas corre
+typecheck·lint·format·test; con `--full` añade prisma·build·theme·bundle, que es
+todo lo que comprueba el CI salvo `prisma migrate deploy` y el `seed` doble —
+esos dos necesitan Postgres y solo se ven allí. El ciclo completo —captura del
+error, reintento, cuándo dejar de insistir— está en
+[`.agent/README.md`](.agent/README.md) § «Cuando algo falla».
 
 ### Comandos prohibidos
 
@@ -78,6 +100,11 @@ ESLint impone la regla de que `components/` y `app/**/*.tsx` no importen Prisma.
 ---
 
 ## Cosas que muerden
+
+Lo de esta sección se lee **antes** de fallar. Lo que ya nos hizo fallar alguna
+vez, con su arreglo, está fichado en [`.agent/playbook/`](.agent/playbook/README.md)
+y lo saca el sensor solo: `bash .agent/sdd.sh playbook` los lista. Una ficha que
+muerde en dos features distintos sube aquí.
 
 **El pooler de Supabase corre en modo transacción.** Ninguna query puede usar el
 cliente global dentro de un `$transaction`: hace deadlock contra la conexión
@@ -132,6 +159,8 @@ Un commit por unidad coherente. El hook de pre-commit corre `lint-staged`.
 ## Documentación
 
 - **Decisión estructural nueva** → una ADR en `docs/adr/`.
+- **Fallo que volverá a pasar** → una ficha en `.agent/playbook/`,
+  con `bash .agent/sdd.sh learn <slug>`.
 - **Convención que se repite en review** → una línea aquí.
 - **Feature nuevo** → entrada en `.agent/features.json`, **escrita por el humano**.
 - **Cambio en el contrato** → versión nueva en `docs/sync-contract.md`,

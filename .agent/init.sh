@@ -30,7 +30,7 @@ else
 fi
 
 echo "== Scripts declarados =="
-for s in dev build start lint format:check typecheck test seed db:migrate check:bundle; do
+for s in dev build start lint format format:check typecheck test seed db:generate db:migrate check:theme check:bundle; do
   if node -e "process.exit(require('./package.json').scripts['$s']?0:1)" 2>/dev/null; then
     ok "npm run $s"
   else
