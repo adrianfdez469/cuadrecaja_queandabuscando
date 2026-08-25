@@ -4,9 +4,11 @@
 
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
+# DIE_CODE existe para verify.sh, cuyo contrato distingue 1 (falla) de 3 (uso
+# incorrecto). Sin él, un error de invocación se leería como un fallo del código.
 die() {
   printf '\033[31m%s\033[0m\n' "$*" >&2
-  exit 1
+  exit "${DIE_CODE:-1}"
 }
 
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }

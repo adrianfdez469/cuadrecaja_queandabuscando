@@ -130,21 +130,33 @@ imprimir_entrada() { # <slug>
 # journal.tsv: ts \t intento \t etapa \t resultado \t firma \t log
 # Es scratch local (.gitignore): lo que sobrevive al feature es la bitácora.
 
+# Uso incorrecto: sale 3, no 1. No es que el código falle, es que la llamada
+# no significa nada.
+die_uso() { DIE_CODE=3 die "$@"; }
+
 journal_de() { echo "$RUNS/$1/journal.tsv"; }
 
+# Solo cuentan las ejecuciones reales del sensor: cada una escribe una fila
+# FALLA o PASA. DESCARTA no ejecuta nada y no debe desplazar el contador.
 siguiente_intento() {
   local j
   j="$(journal_de "$1")"
   [ -f "$j" ] || { echo 1; return; }
-  echo $(($(wc -l <"$j" | tr -d ' ') + 1))
+  echo $(($(awk -F'\t' '$4=="FALLA" || $4=="PASA"' "$j" | wc -l | tr -d ' ') + 1))
 }
 
 # Cuántas veces seguidas termina el historial con esta misma firma.
+# DESCARTA es contabilidad, no un intento: si reseteara la racha, descartar una
+# firma cualquiera desactivaría ESTANCADO para todas las demás.
 repeticiones() { # <feature> <firma>
   local j
   j="$(journal_de "$1")"
   [ -f "$j" ] || { echo 0; return; }
-  awk -F'\t' -v f="$2" '{ if ($4=="FALLA" && $5==f) n++; else n=0 } END { print n+0 }' "$j"
+  awk -F'\t' -v f="$2" '
+    $4=="DESCARTA" { next }
+    { if ($4=="FALLA" && $5==f) n++; else n=0 }
+    END { print n+0 }
+  ' "$j"
 }
 
 apuntar() { # <feature> <intento> <etapa> <resultado> <firma> <log>
@@ -204,8 +216,12 @@ correr_etapa() { # <etapa> <log>
 correr_smoke() { # <log>
   local script="$SPECS/$FEATURE/smoke.sh" srvlog pid i code=0
   if [ ! -f "$script" ]; then
-    echo "(no hay $script — nada que ejecutar en runtime)" >>"$1"
-    return 0
+    # Verde sin ejecutar nada es peor que rojo. El prefijo SMOKE FAIL es el que
+    # pesca extract_signature, así que entra al journal como cualquier fallo.
+    # La firma va sin ruta: normalize borra los directorios y la dejaría ilegible.
+    echo "SMOKE FAIL falta el guion de runtime del feature" >>"$1"
+    echo "  no existe $script — cópialo de .agent/templates/smoke.sh" >>"$1"
+    return 1
   fi
   srvlog="$(mktemp)"
   PORT="$SMOKE_PORT" npx next dev -p "$SMOKE_PORT" >"$srvlog" 2>&1 &
@@ -248,17 +264,23 @@ cmd_verify() {
   while [ $# -gt 0 ]; do
     case "$1" in
       F-[0-9][0-9][0-9]) FEATURE="$1" ;;
-      --full | --completo) etapas="$STAGES_COMPLETO" ;;
+      --full) etapas="$STAGES_COMPLETO" ;;
       --smoke) smoke=1 ;;
-      --only) shift; solo="${1:-}"; [ -n "$solo" ] || die "uso: --only <etapa>" ;;
-      *) die "opción desconocida: $1
+      --only) shift; solo="${1:-}"; [ -n "$solo" ] || die_uso "uso: --only <etapa>" ;;
+      *) die_uso "opción desconocida: $1
 uso: bash .agent/verify.sh [F-NNN] [--full] [--smoke] [--only <etapa>]" ;;
     esac
     shift
   done
 
   [ -n "$solo" ] && etapas="$solo"
-  [ "$smoke" = 1 ] && etapas="$etapas smoke"
+  if [ "$smoke" = 1 ]; then
+    # El guion de runtime vive en la spec del feature: sin ID no hay qué correr.
+    [ "$FEATURE" = "_libre" ] &&
+      die_uso "--smoke necesita un F-NNN: el guion vive en .agent/specs/<ID>/smoke.sh
+uso: bash .agent/verify.sh F-007 --smoke"
+    case " $etapas " in *" smoke "*) ;; *) etapas="$etapas smoke" ;; esac
+  fi
 
   local intento dir
   intento="$(siguiente_intento "$FEATURE")"
@@ -269,7 +291,7 @@ uso: bash .agent/verify.sh [F-NNN] [--full] [--smoke] [--only <etapa>]" ;;
 
   local st log t0 code=0 fallada=""
   for st in $etapas; do
-    stage_cmd "$st" >/dev/null || die "etapa desconocida: $st"
+    stage_cmd "$st" >/dev/null || die_uso "etapa desconocida: $st"
     log="$(printf '%s/%03d-%s.log' "$dir" "$intento" "$st")"
     t0=$SECONDS
     correr_etapa "$st" "$log"
@@ -384,8 +406,9 @@ case "${1:-}" in
     ;;
   -h | --help | help)
     cat <<'HELP'
-Sensor determinista del arnés. Corre lo mismo que el CI y, si algo falla,
-devuelve el feedback y lo que la bitácora sepa de ese fallo.
+Sensor determinista del arnés. Corre las comprobaciones del CI —salvo las que
+necesitan Postgres, que solo se ven allí— y, si algo falla, devuelve el feedback
+y lo que la bitácora sepa de ese fallo.
 
   bash .agent/verify.sh F-007              typecheck · lint · format · test
   bash .agent/verify.sh F-007 --full       + prisma · build · theme · bundle

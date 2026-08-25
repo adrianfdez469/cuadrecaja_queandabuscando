@@ -2,7 +2,7 @@
 slug: trampa-corta-en-kebab
 sintoma: la línea que verás en el log, no la causa
 firma: —
-etapa: typecheck | lint | format | test | build | theme | bundle | smoke | review
+etapa: typecheck | lint | format | test | prisma | build | theme | bundle | smoke | review
 visto_en: —
 creado: 1970-01-01T00:00:00Z
 promovido_a_agents: no
@@ -25,5 +25,6 @@ positivo, para que nadie aplique el arreglo equivocado con confianza.
 
 ## Cómo se evita
 
-Qué habría que hacer para no volver a tropezar. Si la respuesta es «saberlo»,
-la ficha es candidata a subir a `AGENTS.md` § Cosas que muerden.
+Qué habría que hacer para no volver a tropezar. Cuando `visto_en` acumula dos
+features, la ficha es candidata a subir a `AGENTS.md` § Cosas que muerden y a
+marcarse aquí `promovido_a_agents: sí`; `bash .agent/sdd.sh playbook` lo avisa.
