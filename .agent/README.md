@@ -46,7 +46,10 @@ describe **dónde vive el trabajo**, ese otro describe **cómo se reparte**.
    (`start F-007`) muestra solo ese.
 2. Leer `AGENTS.md` (convenciones) y `features.json` (backlog) completos.
 3. Elegir un feature con `passes: false` cuyos `depends_on` estén todos en
-   `true`. Si está sin empezar, `bash .agent/sdd.sh new F-007`.
+   `true`. Si está sin empezar, `bash .agent/sdd.sh new F-007`. El script se
+   niega si una dependencia no pasa (regla 5) o si el feature está
+   `deprecated` (regla 2); lo primero lo puede autorizar el humano con
+   `--pese-a '<motivo>'`, y el motivo queda escrito en el progreso.
 4. `/sdd F-007` para que el orquestador tome el mando.
 
 Una idea que todavía no es feature no se cuela en el backlog:

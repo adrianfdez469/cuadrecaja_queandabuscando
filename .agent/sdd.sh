@@ -29,10 +29,23 @@ feature() {
 }
 
 cmd_new() {
-  local id="$1"
+  local id="" motivo=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --pese-a) shift; motivo="${1:-}" ;;
+      *) id="$1" ;;
+    esac
+    shift
+  done
   valid_id "$id"
   feature "$id" 'x.id' >/dev/null ||
     die "$id no está en .agent/features.json. El backlog lo escribe el humano (regla 4): pídeselo antes de seguir."
+
+  # Regla 2: un feature retirado no se empieza; el humano lo reactiva si toca.
+  [ "$(feature "$id" "x.status || 'active'")" = "deprecated" ] &&
+    die "$id está marcado \"status\": \"deprecated\" en .agent/features.json (regla 2).
+$(feature "$id" "'  notes: ' + (x.notes || '(sin notes)')")
+Si hay que retomarlo, lo reactiva el humano — ese archivo es suyo."
 
   # Regla 5: no se empieza un feature cuyas dependencias no pasen todavía.
   local bloqueantes
@@ -41,8 +54,14 @@ cmd_new() {
       .filter((d) => !(f.features.find((y) => y.id === d) || {}).passes)
       .join(', ')
   ")"
-  [ -n "$bloqueantes" ] &&
-    printf '\033[33m  ! %s depende de %s, que no pasa(n) todavía (regla 5). Consúltalo con el humano antes de seguir.\033[0m\n' "$id" "$bloqueantes"
+  if [ -n "$bloqueantes" ]; then
+    # Se puede empezar igual, pero lo decide el humano y queda escrito. Mismo
+    # trato que `verify.sh dismiss`: el override existe y exige argumentarlo.
+    [ -n "$motivo" ] || die "$id depende de $bloqueantes, que no pasa(n) todavía (regla 5).
+Empezar igual lo decide el humano. Si ya lo decidió, dilo y queda anotado:
+  bash .agent/sdd.sh new $id --pese-a 'lo que dijo el humano'"
+    warn "$id se empieza con $bloqueantes sin pasar. Motivo: $motivo"
+  fi
 
   mkdir -p "$SPECS/$id"
   local created=0 dst
@@ -61,6 +80,10 @@ cmd_new() {
     printf '  = %s (ya existía, intacto)\n' "$PROG/$id.md"
   else
     sed -e "s/F-XXX/$id/g" -e "s/^actualizado: .*/actualizado: $(now)/" "$PROG/TEMPLATE.md" >"$PROG/$id.md"
+    # Una excepción que solo se imprimió se pierde con la sesión.
+    [ -n "$bloqueantes" ] && [ -n "$motivo" ] &&
+      sed -i.bak -e "s|^Nada, o el qué y el quién|$bloqueantes sin pasar (regla 5). El humano lo autorizó: $motivo|" \
+        "$PROG/$id.md" && rm -f "$PROG/$id.md.bak"
     printf '  + %s\n' "$PROG/$id.md"
   fi
   printf '\n%d artefactos nuevos. Los que ya existían NO se tocaron.\n' "$created"
@@ -195,7 +218,8 @@ cmd_status() {
     printf '\033[1m== %s ==\033[0m\n' "$id"
     if ! feature "$id" "
       '  ' + x.description + '\n' +
-      '  passes: ' + x.passes +
+      '  status: ' + (x.status || 'active') +
+      ' | passes: ' + x.passes +
       ' | depends_on: ' + (x.depends_on.join(', ') || '—') +
       ' | criterios: ' + x.acceptance_criteria.length
     "; then
@@ -373,6 +397,7 @@ Memoria del sistema de agentes SDD.
 
   bash .agent/sdd.sh start [F-007]    comprueba el entorno y muestra el estado
   bash .agent/sdd.sh new F-007        crea .agent/specs/F-007/ y el progreso
+       ... --pese-a '<motivo>'         empezar aunque un depends_on no pase
   bash .agent/sdd.sh propose <slug>   una idea que todavía no es feature
   bash .agent/sdd.sh status [F-007]   artefactos, ciclos, próximo paso y bitácora
   (el sensor va aparte: bash .agent/verify.sh --help)
