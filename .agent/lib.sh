@@ -13,7 +13,9 @@ die() {
 
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
-bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; }
+# FAIL lo lee init.sh, que acumula fallos en vez de abortar en el primero. El
+# valor por defecto es obligatorio: los tres scripts corren con `set -u`.
+bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; FAIL=$((${FAIL:-0} + 1)); }
 titulo() { printf '\033[1m%s\033[0m\n' "$*"; }
 
 # Lee un campo del frontmatter YAML de un archivo. front <archivo> <campo>

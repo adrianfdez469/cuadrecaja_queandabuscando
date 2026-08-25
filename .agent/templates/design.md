@@ -53,4 +53,4 @@ Qué mirar, en qué viewport y con qué datos para dar el diseño por correcto.
 
 ## Preguntas al humano
 
-`P1..Pn`, con opciones y recomendación.
+`DP1..DPn`, con opciones y recomendación.

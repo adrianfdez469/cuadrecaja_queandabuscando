@@ -50,7 +50,7 @@ Con cita de archivo y línea.
 
 ## Huecos y preguntas al humano
 
-`P1..Pn`. Cada una: qué falta, por qué bloquea, opciones y recomendación.
+`SP1..SPn`. Cada una: qué falta, por qué bloquea, opciones y recomendación.
 
 ## No decidido a propósito
 

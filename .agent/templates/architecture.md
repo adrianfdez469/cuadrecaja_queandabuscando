@@ -51,4 +51,4 @@ Sí/no. Si sí, número siguiente en `docs/adr/` y título propuesto.
 
 ## Preguntas al humano
 
-`P1..Pn`, con opciones y recomendación.
+`AP1..APn`, con opciones y recomendación.

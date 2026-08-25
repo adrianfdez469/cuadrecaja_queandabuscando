@@ -5,10 +5,10 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
 
+# shellcheck source=.agent/lib.sh
+. .agent/lib.sh
+
 FAIL=0
-ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
-warn() { printf '  \033[33m!\033[0m %s\n' "$1"; }
-bad()  { printf '  \033[31m✗\033[0m %s\n' "$1"; FAIL=1; }
 
 echo "== Node =="
 WANT="$(tr -d 'v \n' < .nvmrc 2>/dev/null)"
@@ -76,7 +76,7 @@ esac
 echo
 if [ "$FAIL" -eq 0 ]; then
   printf '\033[32mENTORNO LISTO\033[0m\n'
-  echo "Siguiente: lee AGENTS.md y .agent/features.json, y elige un feature con passes:false."
+  echo "Siguiente: elige un feature del backlog y abre con /sdd F-NNN."
 else
   printf '\033[31mENTORNO INCOMPLETO\033[0m — resuelve los ✗ de arriba.\n'
   exit 1

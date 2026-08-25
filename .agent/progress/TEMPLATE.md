@@ -1,6 +1,6 @@
 ---
 feature: F-XXX
-updated: 1970-01-01T00:00:00Z
+actualizado: 1970-01-01T00:00:00Z
 branch: feature/descripcion-corta
 ciclo: 0
 ---

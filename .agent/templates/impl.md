@@ -31,4 +31,4 @@ de ejemplo, qué es frágil.
 
 ## Preguntas al humano
 
-`P1..Pn`, con opciones y recomendación.
+`IP1..IPn`, con opciones y recomendación.

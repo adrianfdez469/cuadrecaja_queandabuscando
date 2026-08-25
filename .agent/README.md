@@ -40,13 +40,14 @@ describe **dónde vive el trabajo**, ese otro describe **cómo se reparte**.
 
 ## Al empezar una sesión
 
-1. `bash .agent/sdd.sh start <id>` — comprueba el entorno (debe terminar en
-   `ENTORNO LISTO`) y muestra el estado del feature: artefactos, ciclos de
-   prueba, próximo paso concreto y última entrada de bitácora.
+1. `bash .agent/sdd.sh start` — comprueba el entorno (debe terminar en
+   `ENTORNO LISTO`) y muestra cómo va cada feature en curso: artefactos, ciclos
+   de prueba, próximo paso concreto y última entrada de bitácora. Con un id
+   (`start F-007`) muestra solo ese.
 2. Leer `AGENTS.md` (convenciones) y `features.json` (backlog) completos.
 3. Elegir un feature con `passes: false` cuyos `depends_on` estén todos en
-   `true`. Si está sin empezar, `bash .agent/sdd.sh new <id>`.
-4. `/sdd <id>` para que el orquestador tome el mando.
+   `true`. Si está sin empezar, `bash .agent/sdd.sh new F-007`.
+4. `/sdd F-007` para que el orquestador tome el mando.
 
 Una idea que todavía no es feature no se cuela en el backlog:
 `bash .agent/sdd.sh propose <slug>` le da un sitio en `specs/propuestas/` hasta

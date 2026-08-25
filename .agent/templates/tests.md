@@ -46,3 +46,8 @@ Lo que no se probó y el riesgo de no probarlo.
 
 `LISTO` solo si **todos** los criterios de aceptación se verificaron ejecutando
 algo. Leer el código y concluir que debería funcionar no cuenta.
+
+## Preguntas al humano
+
+`TP1..TPn`, con opciones y recomendación. Un criterio que no se puede verificar
+tal como está escrito, o un fallo cuya gravedad es decisión de producto.

@@ -60,7 +60,7 @@ cmd_new() {
   if [ -f "$PROG/$id.md" ]; then
     printf '  = %s (ya existía, intacto)\n' "$PROG/$id.md"
   else
-    sed -e "s/F-XXX/$id/g" -e "s/^updated: .*/updated: $(now)/" "$PROG/TEMPLATE.md" >"$PROG/$id.md"
+    sed -e "s/F-XXX/$id/g" -e "s/^actualizado: .*/actualizado: $(now)/" "$PROG/TEMPLATE.md" >"$PROG/$id.md"
     printf '  + %s\n' "$PROG/$id.md"
   fi
   printf '\n%d artefactos nuevos. Los que ya existían NO se tocaron.\n' "$created"
@@ -263,7 +263,7 @@ cmd_log() {
   awk -v ts="$ts" -v inc="$inc" '
     NR==1 && $0=="---" { fm=1; print; next }
     fm && $0=="---"    { fm=0; print; next }
-    fm && /^updated:/  { print "updated: " ts; next }
+    fm && /^actualizado:/ { print "actualizado: " ts; next }
     fm && /^ciclo:/ && inc=="1" { print "ciclo: " ($2 + 1); next }
     { print }
   ' "$PROG/$id.md" >"$tmp" && mv "$tmp" "$PROG/$id.md"
@@ -348,11 +348,6 @@ case "${1:-}" in
     shift
     cmd_status "$@"
     ;;
-  verify)
-    shift
-    bash .agent/verify.sh "$@"
-    exit $?
-    ;;
   learn)
     shift
     [ $# -ge 1 ] || die "uso: sdd.sh learn <slug>"
@@ -380,7 +375,7 @@ Memoria del sistema de agentes SDD.
   bash .agent/sdd.sh new F-007        crea .agent/specs/F-007/ y el progreso
   bash .agent/sdd.sh propose <slug>   una idea que todavía no es feature
   bash .agent/sdd.sh status [F-007]   artefactos, ciclos, próximo paso y bitácora
-  bash .agent/sdd.sh verify F-007     el sensor: typecheck·lint·format·test
+  (el sensor va aparte: bash .agent/verify.sh --help)
   bash .agent/sdd.sh playbook [texto] bitácora de problemas ya resueltos
   bash .agent/sdd.sh learn <slug>     abre una ficha nueva en esa bitácora
   bash .agent/sdd.sh log F-007 sdd-architect <<'ENTRADA'
