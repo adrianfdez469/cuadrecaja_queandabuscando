@@ -37,9 +37,8 @@ Todo lo escribe `bash .agent/sdd.sh` (`start` · `new` · `propose` · `status` 
 
 Hay una segunda memoria, y es la que importa entre features:
 [`.agent/playbook/`](../../../.agent/playbook/README.md), la bitácora de
-problemas ya resueltos. `progress/<ID>.md` **se borra** al cerrar; `playbook/`
-se conserva y se commitea. Todo lo que el equipo aprendió arreglando algo vive
-ahí o no vive en ningún sitio.
+problemas ya resueltos. Todo lo que el equipo aprendió arreglando algo vive ahí
+o no vive en ningún sitio.
 
 ## Ciclo
 
@@ -138,14 +137,13 @@ casilla marcada con el comando que lo verifica:
 
 1. **Primero** propón al humano que ponga `"passes": true` en
    `.agent/features.json`. Ese archivo es suyo y esa firma es la que afirma que
-   el feature existe.
+   el feature existe. Es lo único de este paso que no puedes hacer tú.
 2. **Después** `bash .agent/sdd.sh done <ID>`, que comprueba las cuatro cosas
    —veredicto, criterios, firma del humano y que ningún fallo del ciclo se quedó
    sin lección— y borra el progreso.
 
-En ese orden. Al revés, el feature queda indistinguible de uno sin empezar
-(regla 6) y la sesión siguiente lo reempezaría encima de una spec completa; el
-script se niega a hacerlo.
+El orden importa y el script se niega a invertirlo; por qué, en
+[`.agent/README.md`](../../../.agent/README.md) § «Al completar un feature».
 
 ## Cuándo entra el humano
 

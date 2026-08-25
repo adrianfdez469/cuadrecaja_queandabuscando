@@ -16,20 +16,23 @@ otro agente: se coordinan por estos archivos.
 | `init.sh`          | Comprueba que el entorno sirve                                     | Nadie, se ejecuta      |
 | `runs/`            | Logs crudos de cada verificación (no se commitea)                  | `verify.sh`            |
 
-`progress/<id>.md` **se borra** al cerrar el feature; `playbook/` no. Esa es toda
-la diferencia entre las dos memorias: una lleva el estado de un trabajo, la otra
-lo que el proyecto aprendió y no quiere volver a aprender.
+Son tres memorias con tres destinos distintos al cerrar un feature:
+`progress/<id>.md` **se borra** —llevaba el estado de un trabajo que ya terminó—,
+`specs/<id>/` se conserva como la especificación de lo que existe, y `playbook/`
+se conserva y se commitea porque es lo que el proyecto aprendió y no quiere
+volver a aprender.
 
 ## Los agentes
 
-| Agente            | Produce             | Entra cuando                                  |
-| ----------------- | ------------------- | --------------------------------------------- |
-| `sdd-spec`        | `spec.md`           | la petición es vaga o el requisito estaba mal |
-| `sdd-architect`   | `architecture.md`   | hay que decidir piezas, contratos y escala    |
-| `sdd-designer`    | `design.md`         | hay interfaz que diseñar o revisar            |
-| `sdd-implementer` | código, `impl.md`   | los documentos previos están cerrados         |
-| `sdd-tester`      | pruebas, `tests.md` | hay algo que ejecutar o criterios que fijar   |
+| Agente            | Escribe             |
+| ----------------- | ------------------- |
+| `sdd-spec`        | `spec.md`           |
+| `sdd-architect`   | `architecture.md`   |
+| `sdd-designer`    | `design.md`         |
+| `sdd-implementer` | código, `impl.md`   |
+| `sdd-tester`      | pruebas, `tests.md` |
 
+Cuándo entra cada uno no se decide aquí: se decide al repartir.
 Sus instrucciones están en [`.claude/agents/`](../.claude/agents/). El criterio
 con el que el orquestador los elige y los encadena, en
 [`.claude/skills/sdd/SKILL.md`](../.claude/skills/sdd/SKILL.md) — este documento
@@ -75,10 +78,11 @@ cambio, quien lo hizo ejecuta:
 bash .agent/verify.sh F-007          # typecheck · lint · format · test
 bash .agent/verify.sh F-007 --full   # + harness · prisma · build · theme · bundle
 bash .agent/verify.sh F-007 --smoke  # + la app levantada de verdad
+bash .agent/verify.sh F-007 --only test   # una sola etapa, cuando ya sabes cuál
 ```
 
-Corre las mismas comprobaciones que el CI, en orden de coste creciente, y se
-para en la primera que falla. Lo que hace entonces es el ciclo entero:
+Corre las comprobaciones del CI —salvo las que necesitan Postgres, que solo se
+ven allí— en orden de coste creciente, y se para en la primera que falla. Lo que hace entonces es el ciclo entero:
 
 1. **Captura.** Guarda la salida cruda en `runs/<id>/` —traza del compilador,
    fallo de vitest, y con `--smoke` también lo que escribió el servidor— y la

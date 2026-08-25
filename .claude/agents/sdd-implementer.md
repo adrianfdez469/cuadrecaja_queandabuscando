@@ -50,48 +50,38 @@ No lo sustituyas por correr los comandos a mano. El sensor hace tres cosas que
 tú no: guarda la salida cruda, le pone una firma estable, y busca esa firma en
 `.agent/playbook/` — la bitácora de problemas ya resueltos de este repo.
 
-Lo gobiernan sus códigos de salida:
+Qué significa cada código de salida y cuándo hay que cortar está en
+[`.agent/README.md`](../../.agent/README.md) § «Cuando algo falla». Lo que te
+toca a ti dentro de ese ciclo:
 
-- **`0` — pasa.** Sigue. Si te dice que hay fallos sin lección escrita, escríbela
-  ahora (abajo).
-- **`1` — falla.** El feedback real está impreso encima; el log completo, en la
-  ruta que te da. **Si imprimió una ficha de la bitácora, léela antes de tocar
-  nada**: alguien ya perdió una tarde en ese fallo exacto y dejó el arreglo.
-  Arregla y vuelve a ejecutar. No pares, no preguntes, no informes a medias.
-- **`2` — estancado.** Tres intentos con la misma firma. Deja de auto-corregir:
-  el problema no es el código que estás tocando. Devuelve el control diciendo
-  qué firma se repitió y qué tres hipótesis descartaste.
+- **Si imprimió una ficha de la bitácora, léela antes de tocar nada**: alguien
+  ya perdió una tarde en ese fallo exacto y dejó el arreglo.
+- Mientras salga `1`: el feedback real está impreso encima y el log completo en
+  la ruta que te da. Arregla y vuelve a ejecutar. No pares, no preguntes, no
+  informes a medias.
+- Cuando salga `2`, el problema no es el código que estás tocando. Devuelve el
+  control diciendo qué firma se repitió y qué tres hipótesis descartaste.
 
-Rojo es rojo: no se informa «listo» con el sensor en `1`. Y no se informa «pasa»
-sin haberlo ejecutado — leer el código y concluir que debería funcionar no
-cuenta, por evidente que parezca.
+Rojo es rojo: no se informa «listo» con el sensor en `1`, ni «pasa» sin haberlo
+ejecutado.
 
 Cuando el cambio sea sustancial, pasa el skill `code-review` sobre el diff y
 arregla lo que salga antes de entregar.
 
 ## Lo que aprendas, se escribe
 
-`.agent/progress/<ID>.md` se borra cuando el feature cierra. La bitácora de
-problemas no. Si un fallo te costó entender —una trampa del stack, una
-restricción de infraestructura, algo que el CI impone y nada explica—:
+Un fallo que te costó entender —una trampa del stack, una restricción de
+infraestructura, algo que el CI impone y nada explica— se ficha; uno que fue un
+descuido tuyo se descarta. Los dos comandos y cuál va en cada caso, en
+[`.agent/README.md`](../../.agent/README.md) § «Lo que se aprendió no se pierde».
 
-```bash
-bash .agent/sdd.sh learn <slug>    # abre la ficha; rellénala con el fallo delante
-```
+Al rellenar la ficha, los dos campos que hacen el trabajo son `firma` (el ERE
+que reconocerá el próximo fallo igual) y `arreglo` (una línea imperativa).
+Comprueba que la firma pesca de verdad contra el log que acabas de generar: una
+ficha que no reconoce su propio fallo no sirve de nada.
 
-Los dos campos que hacen el trabajo son `firma` (el ERE que reconocerá el
-próximo fallo igual) y `arreglo` (una línea imperativa). Comprueba que la firma
-pesca de verdad contra el log que acabas de generar.
-
-Lo que fue un descuido tuyo no da lección a nadie y se cierra diciéndolo:
-
-```bash
-bash .agent/verify.sh dismiss <ID> '<firma>' 'motivo'
-```
-
-Anota unas y otras en «Problemas resueltos en este ciclo» del progreso.
-`sdd.sh done` no cierra el feature mientras quede un fallo sin fichar ni
-descartar.
+Anota unas y otras en «Problemas resueltos en este ciclo» del progreso. Ese
+archivo se borra al cerrar el feature, así que es ahora o nunca.
 
 ## Preguntas al humano
 

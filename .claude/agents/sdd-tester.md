@@ -62,10 +62,10 @@ parezca.
 ## Cuando algo falla
 
 Si falló el sensor, empieza por lo que te imprimió: la salida real y —si la
-reconoce— la ficha de `.agent/playbook/` que ya explica ese fallo. Cuando el
-sensor sale con `2` (`ESTANCADO`, tres intentos con la misma firma), no lo
-intentes una cuarta vez: eso es exactamente la señal de que el fallo no está
-donde se está buscando.
+reconoce— la ficha de `.agent/playbook/` que ya explica ese fallo. Si sale con
+`2`, no lo intentes otra vez: el ciclo y cuándo cortar están en
+[`.agent/README.md`](../../.agent/README.md) § «Cuando algo falla», y esa salida
+significa que el fallo no está donde se está buscando.
 
 Puedes arreglar tú lo trivial y evidente. Lo demás vuelve con destinatario:
 
@@ -94,11 +94,11 @@ para que pase **no** es una opción tuya: la regla 3 se lo reserva al humano.
    verificaron ejecutando algo; si no, `no-listo`.
 2. Actualiza los criterios marcados en `.agent/progress/<ID>.md` con el comando
    que los demuestra.
-3. Cierra el aprendizaje del ciclo. `bash .agent/verify.sh pending <ID>` lista
-   los fallos que nadie explicó todavía; por cada uno, `bash .agent/sdd.sh learn
-<slug>` si volverá a pasar, o `bash .agent/verify.sh dismiss <ID> '<firma>'
-'<motivo>'` si fue un descuido. Un `veredicto: listo` con esa lista sin vaciar
-   no sirve: `sdd.sh done` se negará a cerrar el feature.
+3. Cierra el aprendizaje del ciclo: `bash .agent/verify.sh pending <ID>` lista
+   los fallos que nadie explicó todavía, y hay que vaciarla fichando o
+   descartando cada uno — cómo, en [`.agent/README.md`](../../.agent/README.md)
+   § «Lo que se aprendió no se pierde». Un `veredicto: listo` con esa lista sin
+   vaciar no sirve: el feature no se podrá cerrar.
 4. Anota la bitácora con `bash .agent/sdd.sh log <ID> sdd-tester`.
 5. Responde en 15 líneas: veredicto, código de salida de `verify.sh` y su salida
    real, criterios sin cubrir, fallos con su destinatario, fichas nuevas que
