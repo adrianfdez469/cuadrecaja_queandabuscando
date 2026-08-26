@@ -14,7 +14,7 @@ PROP="$SPECS/propuestas"
 PROG=".agent/progress"
 TPL=".agent/templates"
 PLAYBOOK=".agent/playbook"
-ARTIFACTS="spec architecture design impl tests"
+ARTIFACTS="spec architecture design plan impl tests"
 ESTADOS="borrador listo obsoleto"
 
 # feature <id> <expresión js sobre el feature> — imprime el resultado, o falla.
@@ -236,6 +236,9 @@ cmd_status() {
         # El veredicto del probador es el que gobierna el cierre, no su estado.
         [ "$a" = "tests" ] &&
           st="$st | veredicto: $(campo_fmt "$(front "$file" veredicto)" listo no-listo)"
+        # Y la firma del humano en el plan es la que gobierna si se implementa.
+        [ "$a" = "plan" ] &&
+          st="$st | aprobado: $(campo_fmt "$(front "$file" aprobado)" sí no)"
         printf '  %-16s %-22s %s\n' "$a.md" "${up:-?}" "$st"
       else
         printf '  %-16s %s\n' "$a.md" "—"
@@ -299,6 +302,110 @@ cmd_log() {
   return 0
 }
 
+# ¿Está el plan firmado? gate <id> — es la puerta que abre la implementación.
+# Sale 0 si el humano lo aprobó, 1 si no. Lo ejecuta el implementador antes de
+# escribir la primera línea, y no es una formalidad: un plan sin firmar es un
+# plan que nadie ha leído.
+cmd_gate() {
+  local id="$1" plan ap
+  valid_id "$id"
+  plan="$SPECS/$id/plan.md"
+  [ -f "$plan" ] || die "no existe $plan.
+Antes de implementar hay un plan que el humano aprueba. Lo escribe el
+orquestador destilando spec.md + architecture.md (+ design.md):
+  bash .agent/sdd.sh new $id     si el feature no está empezado"
+
+  ap="$(front "$plan" aprobado)"
+  case "$ap" in
+    sí | si)
+      ok "$plan → aprobado: $ap"
+      printf '  Firma: %s\n' "$(grep -a '^- 2' "$plan" | tail -1)"
+      printf '  Implementa ESTE plan. Desviarse de un paso firmado se anota en\n'
+      printf '  impl.md § Desviaciones; cambiar el alcance vuelve al humano.\n'
+      return 0
+      ;;
+  esac
+
+  printf '\033[31m%s\033[0m\n' "$plan → aprobado: ${ap:-vacío}. El humano no ha firmado el plan." >&2
+  cat >&2 <<AVISO
+No se implementa. Lo que toca es al orquestador, no a ti:
+  · si el plan está a medias (estado: borrador) → terminarlo
+  · si está listo → enseñárselo al humano y, cuando diga que sí:
+      bash .agent/sdd.sh approve $id '<lo que dijo, literal>'
+AVISO
+  return 1
+}
+
+# approve <id> '<lo que dijo el humano>' — la firma del plan. Solo la ejecuta el
+# orquestador, y solo después de que el humano lo haya dicho de verdad: es el
+# mismo trato que "passes": true, el único punto donde alguien se moja.
+cmd_approve() {
+  local id="$1" palabras="${2:-}" plan a st
+  valid_id "$id"
+  plan="$SPECS/$id/plan.md"
+  [ -f "$plan" ] || die "no existe $plan — no hay nada que aprobar."
+  [ -n "${palabras// /}" ] || die "falta lo que dijo el humano, literal:
+  bash .agent/sdd.sh approve $id 'ok, pero sin el paso 4'
+Sin sus palabras esto sería el agente aprobándose a sí mismo."
+
+  case "$(front "$plan" aprobado)" in
+    sí | si)
+      printf '  = %s ya estaba aprobado (intacto).\n' "$plan"
+      printf 'Si el plan cambió de alcance, no se re-firma encima: se reescribe\n'
+      printf 'plan.md con estado: borrador y se vuelve a enseñar al humano.\n'
+      return 0
+      ;;
+  esac
+
+  st="$(front "$plan" estado)"
+  [ "$st" = "listo" ] ||
+    die "$plan está en estado: ${st:-vacío}. Un plan con preguntas abiertas (PP1..PPn)
+no se firma: se resuelven primero, se pone estado: listo y entonces se enseña."
+
+  # Firmar un plan construido sobre documentos a medias es firmar el aire.
+  for a in spec architecture; do
+    st="$(front "$SPECS/$id/$a.md" estado)"
+    [ "$st" = "listo" ] ||
+      die "$SPECS/$id/$a.md está en estado: ${st:-vacío}.
+El plan sale de ahí: mientras ese documento no esté listo, lo que se firmaría
+es una intención, no un plan. Vuelve al agente que lo escribe."
+  done
+  st="$(front "$SPECS/$id/design.md" estado)"
+  [ "$st" = "listo" ] ||
+    warn "design.md está en estado: ${st:-vacío} — correcto si el feature no tiene interfaz."
+
+  local ts
+  ts="$(now)"
+  local tmp
+  tmp="$(mktemp)"
+  awk -v ts="$ts" '
+    NR==1 && $0=="---" { fm=1; print; next }
+    fm && $0=="---"    { fm=0; print; next }
+    fm && /^actualizado:/ { print "actualizado: " ts; next }
+    fm && /^aprobado:/    { print "aprobado: sí"; next }
+    { print }
+  ' "$plan" >"$tmp" && mv "$tmp" "$plan"
+
+  # La firma va al pie, en § Aprobación: el plan que se implementa y la razón por
+  # la que se implementa viven en el mismo archivo. Las llaves de ${palabras} no
+  # son cosmética: bash 3.2 lee «$palabras» como el nombre `palabras»`.
+  printf '\n- %s — aprobado por el humano: «%s»\n' "$ts" "$palabras" >>"$plan"
+
+  ok "$plan → aprobado: sí"
+  if [ -f "$PROG/$id.md" ]; then
+    cmd_log "$id" humano <<ENTRADA
+- Hizo: aprobó el plan
+- Escribió: $plan (aprobado: sí)
+- Dijo: «${palabras}»
+- Siguiente agente sugerido: sdd-implementer (el plan ya es ejecutable)
+ENTRADA
+  else
+    warn "no existe $PROG/$id.md: la firma no quedó en ninguna bitácora."
+  fi
+  printf 'Ya se puede implementar. El implementador lo comprueba con:\n'
+  printf '  bash .agent/sdd.sh gate %s\n' "$id"
+}
+
 cmd_done() {
   local id="$1"
   valid_id "$id"
@@ -307,6 +414,18 @@ cmd_done() {
   local v
   v="$(front "$SPECS/$id/tests.md" veredicto)"
   [ "$v" = "listo" ] || die "tests.md dice veredicto: '${v:-vacío}'. Solo se cierra con 'listo'."
+
+  # Lo que se cierra tiene que ser lo que el humano aprobó. Si nunca firmó el
+  # plan, lo construido no se puede comparar con nada acordado.
+  local ap
+  ap="$(front "$SPECS/$id/plan.md" aprobado)"
+  case "$ap" in
+    sí | si) ;;
+    *) die "$SPECS/$id/plan.md dice aprobado: '${ap:-vacío}'.
+Este feature se construyó sin que el humano firmase el plan. Antes de cerrarlo,
+que lo lea y lo firme —o diga qué cambió— y quede escrito:
+  bash .agent/sdd.sh approve $id '<lo que dijo>'" ;;
+  esac
 
   # Los criterios marcados tienen que ser todos los del feature, no los que a
   # alguien le apeteció listar.
@@ -388,6 +507,16 @@ case "${1:-}" in
     [ $# -ge 1 ] || die "uso: sdd.sh log F-NNN <agente> < cuerpo"
     cmd_log "$@"
     ;;
+  approve)
+    shift
+    [ $# -ge 1 ] || die "uso: sdd.sh approve F-NNN '<lo que dijo el humano>'"
+    cmd_approve "$@"
+    ;;
+  gate)
+    shift
+    [ $# -ge 1 ] || die "uso: sdd.sh gate F-NNN"
+    cmd_gate "$@"
+    ;;
   done)
     shift
     [ $# -ge 1 ] || die "uso: sdd.sh done F-NNN"
@@ -403,6 +532,9 @@ Memoria del sistema de agentes SDD.
   bash .agent/sdd.sh propose <slug>   una idea que todavía no es feature
   bash .agent/sdd.sh status [F-007]   artefactos, ciclos, próximo paso y bitácora
   (el sensor va aparte: bash .agent/verify.sh --help)
+  bash .agent/sdd.sh gate F-007       ¿aprobó el humano el plan? (0 sí · 1 no)
+  bash .agent/sdd.sh approve F-007 '<lo que dijo el humano>'
+                                      firma el plan; sin esto no se implementa
   bash .agent/sdd.sh playbook [texto] bitácora de problemas ya resueltos
   bash .agent/sdd.sh learn <slug>     abre una ficha nueva en esa bitácora
   bash .agent/sdd.sh log F-007 sdd-architect <<'ENTRADA'

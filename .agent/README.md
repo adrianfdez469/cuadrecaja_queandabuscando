@@ -32,6 +32,10 @@ volver a aprender.
 | `sdd-implementer` | código, `impl.md`   |
 | `sdd-tester`      | pruebas, `tests.md` |
 
+Falta uno en esa tabla y no es un agente: `specs/<id>/plan.md` lo escribe el
+**orquestador**, y es el único artefacto que el humano firma. Sin esa firma no se
+implementa — § «La puerta: el plan que firma el humano».
+
 Cuándo entra cada uno no se decide aquí: se decide al repartir.
 Sus instrucciones están en [`.claude/agents/`](../.claude/agents/). El criterio
 con el que el orquestador los elige y los encadena, en
@@ -55,6 +59,36 @@ describe **dónde vive el trabajo**, ese otro describe **cómo se reparte**.
 Una idea que todavía no es feature no se cuela en el backlog:
 `bash .agent/sdd.sh propose <slug>` le da un sitio en `specs/propuestas/` hasta
 que el humano decida.
+
+## La puerta: el plan que firma el humano
+
+Entre planificar y programar hay una puerta. Con `spec.md` y `architecture.md`
+—y `design.md`, si hay interfaz— en `estado: listo`, el orquestador escribe
+`specs/<id>/plan.md`: los pasos en orden, con archivos, con qué verifica cada
+uno, qué queda fuera y qué se deshace si hay marcha atrás. Se lo enseña al
+humano, y solo cuando este lo aprueba:
+
+```bash
+bash .agent/sdd.sh approve F-007 'ok, pero sin el paso 4'
+```
+
+Eso pone `aprobado: sí` en el frontmatter, deja las palabras del humano al pie
+del propio plan y lo anota en la bitácora. Exige sus palabras a propósito: sin
+ellas sería el agente aprobándose a sí mismo.
+
+La puerta no depende de que nadie se acuerde. El implementador ejecuta, antes de
+escribir una línea:
+
+```bash
+bash .agent/sdd.sh gate F-007   # 0 el humano firmó · 1 no hay firma, no se implementa
+```
+
+Y `sdd.sh done` vuelve a exigirla al cerrar: un feature construido sin plan
+aprobado no se puede comparar con nada acordado.
+
+Si el alcance cambia a mitad, el plan **se reescribe y se vuelve a firmar**:
+`estado: borrador`, se actualiza, y otra vez al humano. `approve` se niega a
+firmar dos veces encima del mismo documento.
 
 ## Durante el trabajo
 
@@ -140,12 +174,14 @@ En este orden, que importa:
 1. El probador deja `veredicto: listo` en `tests.md`, y `progress/<id>.md` tiene
    una casilla marcada por **cada** `acceptance_criteria`, con el comando que lo
    verifica. No queda ningún fallo sin ficha ni descarte
-   (`bash .agent/verify.sh pending <id>` vacío).
+   (`bash .agent/verify.sh pending <id>` vacío). Y `specs/<id>/plan.md` sigue en
+   `aprobado: sí` — si el alcance cambió a mitad, se re-firmó entonces, no ahora.
 2. El humano pone `"passes": true` en `features.json`. Ese archivo es suyo y esa
    firma es el único punto donde alguien afirma que el feature existe.
-3. `bash .agent/sdd.sh done <id>` comprueba las cuatro cosas y borra
-   `progress/<id>.md`. `specs/<id>/` se conserva: es la especificación de lo que
-   existe.
+3. `bash .agent/sdd.sh done <id>` comprueba las cinco cosas —veredicto,
+   criterios, plan firmado, `passes: true` y que ningún fallo se quedó sin
+   lección— y borra `progress/<id>.md`. `specs/<id>/` se conserva: es la
+   especificación de lo que existe.
 
 Al revés no: borrar el progreso con `passes: false` deja el feature indistinguible
 de uno sin empezar (regla 6) y la sesión siguiente lo reempezaría encima de una
@@ -155,7 +191,7 @@ spec completa. El script se niega.
 
 Las del proyecto están donde siempre, en `rules` de
 [`features.json`](features.json) — ahí se leen, ahí se cambian. Este sistema de
-agentes solo añade tres:
+agentes solo añade cuatro:
 
 - **Cada agente escribe únicamente su artefacto.** Ni el del vecino, ni
   `features.json`.
@@ -164,3 +200,6 @@ agentes solo añade tres:
 - **Nadie declara que algo funciona sin que `verify.sh` haya salido `0`.** Leer
   el código y concluir que debería funcionar no cuenta, ni siquiera cuando es
   evidente.
+- **No se implementa un plan que el humano no firmó.** `plan.md` con
+  `aprobado: sí`, o no se escribe código: `sdd.sh gate <id>` lo comprueba y
+  `sdd.sh done` lo vuelve a comprobar al cerrar.

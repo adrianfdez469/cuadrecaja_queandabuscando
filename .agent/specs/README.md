@@ -8,12 +8,18 @@ Una carpeta por feature: `.agent/specs/F-NNN/`, creada con
 | `spec.md`         | `sdd-spec`        | Qué hay que construir y cómo se verifica             |
 | `architecture.md` | `sdd-architect`   | Con qué piezas, en qué capas, y qué pasa al escalar  |
 | `design.md`       | `sdd-designer`    | Qué ve y toca la persona, en cada tamaño de pantalla |
+| `plan.md`         | El orquestador    | Qué se va a hacer, en qué orden y qué queda fuera    |
 | `impl.md`         | `sdd-implementer` | Qué se construyó y dónde se desvió del plan          |
 | `tests.md`        | `sdd-tester`      | Qué se ejecutó, qué falló y si está listo            |
 | `smoke.sh`        | `sdd-tester`      | Qué se comprueba con la app levantada (opcional)     |
 
 Cada agente escribe **solo su archivo** y lee los de los demás. Las plantillas
 están en [`../templates/`](../templates/).
+
+`plan.md` es el único que no escribe un agente: lo escribe el orquestador
+destilando los tres de arriba, y es el único que **el humano firma** antes de que
+se programe nada. Cómo se firma y qué la exige, en
+[`../README.md`](../README.md) § «La puerta: el plan que firma el humano».
 
 `smoke.sh` no lo crea `sdd.sh new` porque no todo feature lo necesita: se copia
 de `../templates/smoke.sh` cuando hay algo que solo se ve en runtime, y lo
@@ -36,6 +42,7 @@ si hace falta uno, se añade aquí y en `ESTADOS` de `sdd.sh`.
 | `actualizado` | todos              | ISO-8601 UTC (`date -u +%Y-%m-%dT%H:%M:%SZ`) |
 | `estado`      | todos              | `borrador` · `listo` · `obsoleto`            |
 | `veredicto`   | solo en `tests.md` | `listo` · `no-listo`                         |
+| `aprobado`    | solo en `plan.md`  | `sí` · `no`                                  |
 
 `estado: borrador` significa que quedan preguntas abiertas o trabajo por hacer;
 `listo`, que el siguiente agente puede construir encima sin preguntar; `obsoleto`,
@@ -44,6 +51,12 @@ que el documento describe algo que ya no es cierto y hay que rehacerlo.
 Hay un cuarto valor, `propuesta`, que vive **solo** en `propuestas/<slug>.md` y no
 lo escribe ningún agente: lo pone `sdd.sh propose`. `sdd.sh status` no mira esa
 carpeta, así que no lo verás nunca en el estado de un feature.
+
+**Que se implemente lo gobierna `aprobado`, no `estado`.** Un `plan.md` en
+`estado: listo` con `aprobado: no` es un plan terminado que el humano todavía no
+ha firmado: `bash .agent/sdd.sh gate F-NNN` sale `1` y no se escribe código. Ese
+campo no se edita a mano — lo pone `bash .agent/sdd.sh approve F-NNN '<lo que
+dijo el humano>'`, que además deja sus palabras al pie del plan.
 
 **El cierre lo gobierna `veredicto`, no `estado`.** Un `tests.md` puede quedar en
 `estado: listo` con `veredicto: no-listo`: el trabajo de probar está terminado y
