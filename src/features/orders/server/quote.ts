@@ -1,6 +1,12 @@
 import { prisma } from "@/lib/prisma";
-import { convert, money, multiply, sum, type Money, type MoneyInput } from "@/lib/money";
-import { effectivePrice } from "@/lib/pricing";
+import { multiply, sum, type Money, type MoneyInput } from "@/lib/money";
+import { resolvePrice } from "@/lib/pricing";
+import {
+  indexPromotions,
+  orderDiscount,
+  type PromotionIndex,
+  type PromotionRow,
+} from "@/lib/promotions";
 import type { CheckoutMode } from "@/generated/prisma/enums";
 import type { QuoteLineReason, QuoteResponse } from "../types";
 
@@ -26,6 +32,12 @@ export type OrderStore = {
   deliveryFee: string | null;
   /** `Store.whatsapp ?? Store.phone`. `null` disables the wa.me link (E18). */
   whatsappNumber: string | null;
+  /** HD10-HD15: the checkout has to reject explicitly when this is not
+   *  `PUBLISHED` — the query below no longer filters by it. */
+  status: "DRAFT" | "PUBLISHED" | "SUSPENDED";
+  disabledReasonCode: string | null;
+  disabledMessage: string | null;
+  disabledAt: Date | null;
 };
 
 export type OrderableLine = {
@@ -36,6 +48,9 @@ export type OrderableLine = {
   orderable: true;
   unitPrice: Money;
   originalUnitPrice: Money;
+  /** HD3: the pre-discount price, in the order's currency. `null` unless a
+   *  PRODUCT/CATEGORY promotion actually won for this line. */
+  listUnitPrice: Money | null;
   lineTotal: Money;
 };
 
@@ -57,6 +72,8 @@ export type CartQuote = {
   lines: QuotedLine[];
   /** Sum of `lineTotal` for orderable lines only, in `store.currencyCode`. */
   subtotal: Money;
+  /** ORDER-scope discount (R29). `total = subtotal - discountTotal + deliveryFee`. */
+  discountTotal: Money;
   /** Every rate read for this business, fresh. Callers restrict to the
    *  currencies actually used before freezing a `rateSnapshot` (R9). */
   rates: Record<string, string>;
@@ -64,8 +81,10 @@ export type CartQuote = {
 };
 
 export async function loadStoreForOrder(slug: string): Promise<OrderStore | null> {
+  // HD11: no `status` filter — the checkout has to answer "closed", not
+  // "does not exist", for a store that is merely SUSPENDED.
   const store = await prisma.store.findFirst({
-    where: { slug, status: "PUBLISHED" },
+    where: { slug },
     select: {
       id: true,
       slug: true,
@@ -75,10 +94,14 @@ export async function loadStoreForOrder(slug: string): Promise<OrderStore | null
       deliveryFee: true,
       whatsapp: true,
       phone: true,
+      status: true,
+      disabledReasonCode: true,
+      disabledMessage: true,
+      disabledAt: true,
       business: { select: { id: true, baseCurrencyCode: true } },
     },
   });
-  if (!store) return null;
+  if (!store || store.status === "DRAFT") return null;
 
   return {
     id: store.id,
@@ -90,6 +113,10 @@ export async function loadStoreForOrder(slug: string): Promise<OrderStore | null
     deliveryEnabled: store.deliveryEnabled,
     deliveryFee: store.deliveryFee?.toString() ?? null,
     whatsappNumber: store.whatsapp ?? store.phone ?? null,
+    status: store.status,
+    disabledReasonCode: store.disabledReasonCode,
+    disabledMessage: store.disabledMessage,
+    disabledAt: store.disabledAt,
   };
 }
 
@@ -108,6 +135,39 @@ async function loadFreshRates(businessId: string): Promise<Record<string, string
   return latest;
 }
 
+/**
+ * HD3: fresh, never cached (unlike the storefront's `loadCatalog`) — the
+ * checkout has to see a promotion the instant it starts or ends, same as it
+ * already does for prices (R28's up-to-an-hour lag is a storefront trade-off
+ * this path does not inherit).
+ */
+async function loadFreshPromotions(storeId: string): Promise<PromotionIndex> {
+  const rows = await prisma.promotion.findMany({
+    where: { storeId, active: true },
+    select: {
+      id: true,
+      type: true,
+      scope: true,
+      value: true,
+      conditions: true,
+      startsAt: true,
+      endsAt: true,
+      active: true,
+    },
+  });
+  const promotionRows: PromotionRow[] = rows.map((row) => ({
+    id: row.id,
+    type: row.type,
+    scope: row.scope,
+    value: row.value.toString(),
+    conditions: row.conditions,
+    startsAt: row.startsAt,
+    endsAt: row.endsAt,
+    active: row.active,
+  }));
+  return indexPromotions(promotionRows, new Date());
+}
+
 type RequestedItem = { storeProductId: string; qty: number };
 
 type LoadedProduct = {
@@ -121,6 +181,7 @@ type LoadedProduct = {
   syncedPriceCurrency: string;
   priceOverride: MoneyInput | null;
   priceOverrideCurrency: string | null;
+  localCategoryId: string | null;
 };
 
 function quoteLine(
@@ -128,6 +189,7 @@ function quoteLine(
   product: LoadedProduct | undefined,
   storeCurrency: string,
   rates: Record<string, string>,
+  promotions: PromotionIndex,
 ): QuotedLine {
   if (!product) {
     return {
@@ -162,10 +224,14 @@ function quoteLine(
     };
   }
 
-  const original = effectivePrice(product);
-  let unitPrice: Money;
+  let resolved;
   try {
-    unitPrice = convert(original, storeCurrency, rates);
+    resolved = resolvePrice(product, {
+      targetCurrency: storeCurrency,
+      rates,
+      baseCurrency: storeCurrency, // Business.baseCurrencyCode === store.currencyCode here
+      promotions: promotions.forProduct(product.id, product.localCategoryId),
+    });
   } catch {
     return {
       storeProductId: product.id,
@@ -183,9 +249,13 @@ function quoteLine(
     name: product.localName,
     qty: requested.qty,
     orderable: true,
-    unitPrice,
-    originalUnitPrice: money(original.amount, original.currency),
-    lineTotal: multiply(unitPrice, requested.qty),
+    unitPrice: resolved.price,
+    // R29/hallazgo 1: with a promotion, the "effective before converting"
+    // price IS the discounted one — this is what OrderItem.originalUnitPrice
+    // publishes to the POS, and the contract's formula depends on it.
+    originalUnitPrice: resolved.beforeConversion,
+    listUnitPrice: resolved.listPrice,
+    lineTotal: multiply(resolved.price, requested.qty),
   };
 }
 
@@ -193,7 +263,7 @@ function quoteLine(
 export async function quoteCart(store: OrderStore, items: RequestedItem[]): Promise<CartQuote> {
   const ids = items.map((item) => item.storeProductId);
 
-  const [products, rates] = await Promise.all([
+  const [products, rates, promotions] = await Promise.all([
     ids.length === 0
       ? Promise.resolve([])
       : prisma.storeProduct.findMany({
@@ -209,14 +279,16 @@ export async function quoteCart(store: OrderStore, items: RequestedItem[]): Prom
             syncedPriceCurrency: true,
             priceOverride: true,
             priceOverrideCurrency: true,
+            localCategoryId: true,
           },
         }),
     loadFreshRates(store.businessId),
+    loadFreshPromotions(store.id),
   ]);
 
   const byId = new Map(products.map((product) => [product.id, product]));
   const lines = items.map((item) =>
-    quoteLine(item, byId.get(item.storeProductId), store.currencyCode, rates),
+    quoteLine(item, byId.get(item.storeProductId), store.currencyCode, rates, promotions),
   );
 
   const subtotal = sum(
@@ -224,14 +296,40 @@ export async function quoteCart(store: OrderStore, items: RequestedItem[]): Prom
     store.currencyCode,
   );
 
-  return { store, lines, subtotal, rates, capturedAt: new Date().toISOString() };
+  const { discount: discountTotal } = orderDiscount(subtotal, promotions.order, {
+    rates,
+    baseCurrency: store.currencyCode,
+  });
+
+  return { store, lines, subtotal, discountTotal, rates, capturedAt: new Date().toISOString() };
 }
 
-/** `null` when the store does not exist or is not published (E17 for the quote path). */
-export async function quoteBySlug(slug: string, items: RequestedItem[]): Promise<CartQuote | null> {
+export type QuoteBySlugResult =
+  | { kind: "not_found" }
+  | { kind: "closed"; reasonCode: string | null; message: string | null; disabledAt: Date | null }
+  | { kind: "ok"; quote: CartQuote };
+
+/**
+ * HD10-HD15: a store that exists but is not `PUBLISHED` is `"closed"`, not
+ * `"not_found"` — the route answers 409, not 404 (the store is there, the
+ * page for it responds 200, and this is not a server failure either).
+ */
+export async function quoteBySlug(
+  slug: string,
+  items: RequestedItem[],
+): Promise<QuoteBySlugResult> {
   const store = await loadStoreForOrder(slug);
-  if (!store) return null;
-  return quoteCart(store, items);
+  if (!store) return { kind: "not_found" };
+  if (store.status !== "PUBLISHED") {
+    return {
+      kind: "closed",
+      reasonCode: store.disabledReasonCode,
+      message: store.disabledMessage,
+      disabledAt: store.disabledAt,
+    };
+  }
+  const quote = await quoteCart(store, items);
+  return { kind: "ok", quote };
 }
 
 /** Shapes a `CartQuote` into what `POST /api/orders/quote` sends over the wire. */
@@ -257,6 +355,7 @@ export function toQuoteResponse(quote: CartQuote): QuoteResponse {
             lineTotal: line.lineTotal.amount,
             originalUnitPrice: line.originalUnitPrice.amount,
             originalCurrencyCode: line.originalUnitPrice.currency,
+            listUnitPrice: line.listUnitPrice?.amount ?? null,
             orderable: true as const,
           }
         : {
@@ -269,11 +368,13 @@ export function toQuoteResponse(quote: CartQuote): QuoteResponse {
             lineTotal: null,
             originalUnitPrice: null,
             originalCurrencyCode: null,
+            listUnitPrice: null,
             orderable: false as const,
             reason: line.reason,
           },
     ),
     subtotal: quote.subtotal.amount,
+    discountTotal: quote.discountTotal.amount,
     capturedAt: quote.capturedAt,
   };
 }

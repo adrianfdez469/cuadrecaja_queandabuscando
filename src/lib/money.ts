@@ -90,6 +90,26 @@ export function subtract(a: Money, b: Money): Money {
   };
 }
 
+/**
+ * `m` reduced by `percent` percent (R27), floored at 0 — a promotion never
+ * produces a negative price. `percent` is a plain decimal string ("20" for
+ * 20%), not a fraction.
+ */
+export function percentageOff(m: Money, percent: MoneyInput): Money {
+  const pct = parseToMinor(percent, 100n); // "20" -> 2000 at scale 100 -> /100 below
+  const minor = parseToMinor(m.amount);
+  const discount = divideRoundHalfUp(minor * pct, 10_000n); // percent scale (100) * money scale (100)
+  const result = minor - discount;
+  return { amount: minorToString(result < 0n ? 0n : result), currency: m.currency };
+}
+
+/** -1 / 0 / 1, same currency required — used to break ties deterministically (R26). */
+export function compare(a: Money, b: Money): -1 | 0 | 1 {
+  assertSameCurrency(a, b);
+  const diff = parseToMinor(a.amount) - parseToMinor(b.amount);
+  return diff < 0n ? -1 : diff > 0n ? 1 : 0;
+}
+
 /** Multiply by a quantity, which may itself be fractional (sold by weight). */
 export function multiply(m: Money, quantity: MoneyInput): Money {
   // Quantities carry 3 decimals in the schema, so scale by 1000 and divide back.

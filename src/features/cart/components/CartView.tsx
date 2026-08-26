@@ -10,7 +10,7 @@ import type { QuoteResponse } from "@/features/orders/types";
 import { useCart, useHydrated } from "../cartStore";
 import { CartLineRow } from "./CartLineRow";
 
-type QuoteStatus = "loading" | "ready" | "error" | "not-found";
+type QuoteStatus = "loading" | "ready" | "error" | "not-found" | "closed";
 
 /**
  * `/[slug]/carrito`. Cotiza against the server on mount and on every
@@ -54,6 +54,13 @@ export function CartView({ storeId, storeSlug }: { storeId: string; storeSlug: s
       if (response.status === 404) {
         setStatus("not-found");
         return;
+      }
+      if (response.status === 409) {
+        const data = await response.json().catch(() => null);
+        if (data?.error === "STORE_CLOSED") {
+          setStatus("closed");
+          return;
+        }
       }
       if (!response.ok) {
         setErrorStreak((n) => n + 1);
@@ -141,6 +148,24 @@ export function CartView({ storeId, storeSlug }: { storeId: string; storeSlug: s
     );
   }
 
+  if (status === "closed") {
+    return (
+      <div>
+        <h1 className="text-2xl font-semibold">Tu carrito</h1>
+        <Alert tone="danger" className="mt-6">
+          Esta tienda dejó de tomar pedidos.
+        </Alert>
+        <p className="text-fg-muted mt-3">
+          Si tenías productos en el carrito, siguen guardados en este teléfono: cuando la tienda
+          vuelva a abrir los vas a encontrar ahí.
+        </p>
+        <Link href={`/${storeSlug}`} className="text-brand mt-4 inline-block underline">
+          Volver a la tienda
+        </Link>
+      </div>
+    );
+  }
+
   const unavailableLines = quote?.lines.filter((line) => !line.orderable) ?? [];
   const hasQuote = quote !== null;
   const firstLoad = status === "loading" && !hasQuote;
@@ -205,6 +230,13 @@ export function CartView({ storeId, storeSlug }: { storeId: string; storeSlug: s
                 ? formatMoney(money(quotedLine.unitPrice, quotedLine.currencyCode))
                 : formatMoney(money(item.display.unitPrice, item.display.currency));
             const unitPriceMuted = !quotedLine?.unitPrice;
+            const listUnitPriceLabel =
+              orderable &&
+              quotedLine?.orderable &&
+              quotedLine.listUnitPrice &&
+              quotedLine.currencyCode
+                ? formatMoney(money(quotedLine.listUnitPrice, quotedLine.currencyCode))
+                : undefined;
 
             const lineTotalLabel =
               orderable && quotedLine?.lineTotal && quotedLine.currencyCode && !firstLoad
@@ -220,6 +252,7 @@ export function CartView({ storeId, storeSlug }: { storeId: string; storeSlug: s
                 qty={item.qty}
                 unitPriceLabel={unitPriceLabel}
                 unitPriceMuted={unitPriceMuted}
+                listUnitPriceLabel={listUnitPriceLabel}
                 lineTotalLabel={lineTotalLabel}
                 status={status2}
                 onIncrement={() => cart.setQty(item.storeProductId, item.qty + 1)}

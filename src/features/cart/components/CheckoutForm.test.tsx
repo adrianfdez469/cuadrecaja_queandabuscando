@@ -39,10 +39,12 @@ function quote(): QuoteResponse {
         lineTotal: "180.00",
         originalUnitPrice: "90.00",
         originalCurrencyCode: "CUP",
+        listUnitPrice: null,
         orderable: true,
       },
     ],
     subtotal: "180.00",
+    discountTotal: "0.00",
     capturedAt: new Date("2026-08-26T10:00:00Z").toISOString(),
   };
 }
