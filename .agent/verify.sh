@@ -357,6 +357,8 @@ uso: bash .agent/verify.sh F-007 --smoke"
     echo "Es la ${veces}ª vez seguida con la MISMA firma. Deja de auto-corregir:"
     echo "  · si el plan no aguanta   → vuelve a sdd-architect"
     echo "  · si el requisito no cierra → vuelve a sdd-spec"
+    echo "  · si hace falta más alcance del que el humano firmó en plan.md → se"
+    echo "    reescribe el plan y se vuelve a firmar; no se amplía por el camino"
     echo "  · si es decisión de producto o toca algo prohibido → pregunta al humano"
     return 2
   fi

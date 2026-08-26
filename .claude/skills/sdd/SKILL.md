@@ -20,20 +20,23 @@ equivocada**. Si te descubres editando `src/`, delegaste mal.
 | `sdd-spec`        | `spec.md`            | hay una petición vaga, o un fallo revela un requisito mal escrito          |
 | `sdd-architect`   | `architecture.md`    | la spec está cerrada y hay que decidir componentes, contratos y escala     |
 | `sdd-designer`    | `design.md`          | el feature tiene interfaz, o hay que revisar una pantalla existente        |
-| `sdd-implementer` | código + `impl.md`   | los documentos previos están `listo` y sin preguntas abiertas              |
+| `sdd-implementer` | código + `impl.md`   | el humano firmó `plan.md` (`sdd.sh gate <ID>` sale `0`)                    |
 | `sdd-tester`      | pruebas + `tests.md` | hay algo que ejecutar, o hay criterios que convertir en pruebas que fallen |
+
+`plan.md` no lo escribe ninguno de los cinco: **lo escribes tú**, y es lo único
+que el humano firma antes de que se programe. El paso 2.5 explica cómo.
 
 ## La memoria
 
 Vive en `.agent/`, es de archivos y sobrevive a la sesión: `specs/<ID>/` guarda
-los cinco artefactos y `progress/<ID>.md` el estado y la bitácora. Quién escribe
+los seis artefactos y `progress/<ID>.md` el estado y la bitácora. Quién escribe
 qué, qué significa cada `estado` y cómo se cierra un feature está en
 [`.agent/README.md`](../../../.agent/README.md) y
 [`.agent/specs/README.md`](../../../.agent/specs/README.md) — **léelos**, no los
 repitas aquí. Las reglas del proyecto están en `rules` de `.agent/features.json`.
 
 Todo lo escribe `bash .agent/sdd.sh` (`start` · `new` · `propose` · `status` ·
-`log` · `learn` · `playbook` · `done`). La bitácora nunca se edita a mano.
+`log` · `learn` · `playbook` · `gate` · `approve` · `done`). La bitácora nunca se edita a mano.
 
 Hay una segunda memoria, y es la que importa entre features:
 [`.agent/playbook/`](../../../.agent/playbook/README.md), la bitácora de
@@ -81,6 +84,42 @@ cuando ambos dependen solo de la spec. Pero decides tú:
 Antes de llamar a alguien, comprueba que sus entradas están `listo`. Llamar al
 implementador con una spec en `borrador` con preguntas abiertas es la forma más
 cara de descubrir que estaba mal.
+
+### 2.5. El plan, y la firma del humano
+
+Entre planificar y programar hay una puerta, y la abres tú. Cuando `spec.md` y
+`architecture.md` estén en `estado: listo` —y `design.md` también, si el feature
+tiene interfaz— y no quede ninguna pregunta abierta, **escribes tú**
+`.agent/specs/<ID>/plan.md` sobre `.agent/templates/plan.md`. No es un resumen:
+es la traducción de tres documentos técnicos a lo que se va a hacer, en qué
+orden, sobre qué archivos, con qué se verifica cada paso y —la mitad que
+importa— **qué queda fuera**. Cada paso sale de una línea de un documento
+anterior; un paso que no sale de ninguno es alcance que te inventaste.
+
+Luego se lo enseñas al humano. En una tanda, con `AskUserQuestion` para lo que
+haya que decidir, y con la lista de pasos y el «qué queda fuera» delante. Tres
+respuestas posibles:
+
+- **aprueba** → `bash .agent/sdd.sh approve <ID> '<lo que dijo, literal>'`. Eso
+  pone `aprobado: sí` en `plan.md`, escribe su firma al pie del documento y la
+  anota en la bitácora. Es la misma clase de firma que `"passes": true`: el único
+  punto donde alguien se moja, y por eso exige sus palabras.
+- **aprueba con cambios** → los aplicas al plan **antes** de firmar, y firmas con
+  lo que dijo («ok, pero sin el paso 4»). Un plan firmado que no es el plan que
+  leyó no sirve de nada.
+- **no** → el plan vuelve a `estado: borrador` y, según lo que objetó, vuelve
+  `sdd-spec` (el requisito no era eso) o `sdd-architect` (la forma no le cuadra).
+
+Mientras no esté firmado **no llamas a `sdd-implementer`**. Y si lo llamas, él
+mismo se para: lo primero que ejecuta es `bash .agent/sdd.sh gate <ID>`, que sale
+`1` si el plan no está aprobado. La puerta está en el script justamente para que
+no dependa de que tú te acuerdes.
+
+Si a mitad de la implementación el alcance cambia —el implementador vuelve
+diciendo que hace falta un paso que no estaba, o el probador descubre un criterio
+que el plan no cubría— **el plan se reescribe y se vuelve a firmar**. No se
+re-firma encima: `plan.md` a `estado: borrador`, se actualiza, y otra vez al
+humano. `sdd.sh approve` se niega a firmar dos veces sin pasar por ahí.
 
 ### 3. Llamar
 
@@ -138,9 +177,11 @@ casilla marcada con el comando que lo verifica:
 1. **Primero** propón al humano que ponga `"passes": true` en
    `.agent/features.json`. Ese archivo es suyo y esa firma es la que afirma que
    el feature existe. Es lo único de este paso que no puedes hacer tú.
-2. **Después** `bash .agent/sdd.sh done <ID>`, que comprueba las cuatro cosas
-   —veredicto, criterios, firma del humano y que ningún fallo del ciclo se quedó
-   sin lección— y borra el progreso.
+2. **Después** `bash .agent/sdd.sh done <ID>`, que comprueba las cinco cosas
+   —veredicto, criterios, `plan.md` firmado, firma del humano y que ningún fallo
+   del ciclo se quedó sin lección— y borra el progreso. Un feature que se
+   construyó sin plan aprobado no cierra: lo construido no se puede comparar con
+   nada acordado.
 
 El orden importa y el script se niega a invertirlo; por qué, en
 [`.agent/README.md`](../../../.agent/README.md) § «Al completar un feature».
@@ -152,6 +193,9 @@ Paras y preguntas, siempre, ante:
 - una incongruencia entre lo pedido y `features.json`, `AGENTS.md`, una ADR o el
   código;
 - una decisión de producto: qué se muestra, qué se cobra, qué prioridad tiene qué;
+- el plan, **siempre**: `plan.md` escrito y firmado con `sdd.sh approve` antes de
+  la primera línea de código (§ 2.5), y firmado otra vez si el alcance cambia a
+  mitad;
 - un feature nuevo, o un `acceptance_criteria` que habría que cambiar — las
   reglas 3 y 4 se lo reservan al humano;
 - una migración que puede perder datos, o cualquiera de los comandos que
