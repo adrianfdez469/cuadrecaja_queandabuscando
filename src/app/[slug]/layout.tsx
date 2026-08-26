@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireStore } from "@/features/catalog/server/queries";
 import { renderStoreTheme } from "@/features/theming/storeTheme";
 import { Container } from "@/components/ui/Container";
+import { CartBadge } from "@/features/cart/components/CartBadge";
 
 /**
  * ISR floor, in seconds. On-demand `revalidateTag` from the sync is what
@@ -30,10 +31,16 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[s
           per-store theming is a mechanism with no visible effect. */}
       <header className="bg-brand text-brand-contrast">
         <Container className="flex items-center gap-3 py-5">
-          <Link href={`/${store.slug}`} className="text-xl font-semibold tracking-tight">
+          <Link
+            href={`/${store.slug}`}
+            className="min-w-0 flex-1 truncate text-xl font-semibold tracking-tight"
+          >
             {store.name}
           </Link>
-          {store.city && <span className="text-sm opacity-80">· {store.city}</span>}
+          {store.city && (
+            <span className="hidden text-sm opacity-80 sm:inline">· {store.city}</span>
+          )}
+          <CartBadge storeId={store.id} storeSlug={store.slug} />
         </Container>
       </header>
 

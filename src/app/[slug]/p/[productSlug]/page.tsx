@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Image from "next/image";
 import { AVAILABILITY_LABEL, AVAILABILITY_TONE, isOrderable } from "@/lib/availability";
-import { displayPrice } from "@/lib/pricing";
+import { displayPrice, type EffectivePrice } from "@/lib/pricing";
 import { formatMoney } from "@/lib/money";
 import {
   getPublishedStoreSlugs,
@@ -11,8 +11,8 @@ import {
   requireStore,
 } from "@/features/catalog/server/queries";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
+import { AddToCartButton } from "@/features/cart/components/AddToCartButton";
 
 /**
  * Pre-render the catalogue of every published store. Like the store page, this
@@ -57,12 +57,17 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
   const product = catalog.find((candidate) => candidate.slug === productSlug);
   if (!product) notFound();
 
-  let price: string | null;
+  // R11: a price is part of what makes a product orderable, alongside
+  // availability. A product whose price cannot be resolved (no exchange
+  // rate) is not addable, even if it is technically in stock.
+  let effective: EffectivePrice | null;
   try {
-    price = formatMoney(displayPrice(product, store.baseCurrencyCode, rates));
+    effective = displayPrice(product, store.baseCurrencyCode, rates);
   } catch {
-    price = null;
+    effective = null;
   }
+  const price = effective ? formatMoney(effective) : null;
+  const canOrder = isOrderable(product.availability) && effective !== null;
 
   const image = product.imageUrls[0];
 
@@ -102,9 +107,16 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
         )}
 
         <div className="mt-8">
-          <Button size="lg" disabled={!isOrderable(product.availability)}>
-            {isOrderable(product.availability) ? "Agregar al carrito" : "Agotado"}
-          </Button>
+          <AddToCartButton
+            storeId={store.id}
+            storeSlug={slug}
+            storeProductId={product.id}
+            slug={product.slug}
+            name={product.name}
+            unitPrice={effective?.amount ?? "0.00"}
+            currencyCode={effective?.currency ?? store.baseCurrencyCode}
+            disabled={!canOrder}
+          />
         </div>
       </div>
     </Container>
