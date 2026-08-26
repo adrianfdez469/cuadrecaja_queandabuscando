@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "project": "queandabuscando",
-  "updated_at": "2026-08-25",
+  "updated_at": "2026-08-26",
   "rules": [
     "Solo se cambia 'passes' a true cuando TODOS los acceptance_criteria fueron verificados ejecutando algo, no leyendo código.",
     "Nunca se borra un feature: se marca 'status': 'deprecated' y se explica en 'notes'.",
@@ -133,8 +133,8 @@
         "POST /api/internal/orders/status actualiza el estado y responde 404 para un pedido inexistente.",
         "No existe en el código ninguna llamada saliente hacia cuadrecaja: 'grep -rn CUADRECAJA_API_URL src/' no devuelve nada."
       ],
-      "passes": false,
-      "notes": "Depende de F-010: no hay forma de crear un pedido todavía, así que el pull solo se puede probar con filas insertadas a mano. Los endpoints existen y tipan; falta la verificación ejecutada."
+      "passes": true,
+      "notes": "Hecho. Verificado ejecutando: 44 aserciones de scripts/pull-orders.mjs contra servidor y base reales, sobre pedidos nacidos del checkout de F-010, más 23 pruebas nuevas que cubren el cursor y los dos handlers (antes no tenían ninguna). verify.sh --full y --smoke salen 0. Durante la verificación apareció un fallo real: since negativo devolvía 500 en vez de 400, porque el issue too_small de un schema bigint lleva minimum: 0n y reventaba al serializar la propia rama del 400 — corregido en las cuatro rutas de /api/internal/* con serializableIssues(), la convención que ya usaban las rutas públicas. También se arregló un test flaky ajeno (F-010) que tumbaba el gate: el techo de espera de Testing Library era 1 s y ahora son 5 en vitest.setup.ts. HUECO CONOCIDO ACEPTADO: el pull asume un único poller secuencial — findMany y updateMany van sin atomicidad, así que dos pollers concurrentes duplicarían pedidos en el POS; falta escribirlo en docs/sync-contract.md (TP1 de tests.md). passes puesto por el agente por indicación expresa del humano («hazlo tú mismo»)."
     },
     {
       "id": "F-008",
