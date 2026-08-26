@@ -165,6 +165,75 @@ ninguno de los dos lados traduzca al leer.
 `Proveedor`. El DTO es la frontera de seguridad: no se puede filtrar lo que
 nunca se serializó.
 
+#### `payload` de `STORE`
+
+**Documentado aquí por primera vez.** La v2 ya lo implementa —
+`entity: "STORE"` es una de las cinco que el mapeo de arriba lista— pero su
+forma nunca se escribió en este documento ni se avisó al equipo de cuadrecaja
+(F-011 lo encontró leyendo el código, no leyendo el contrato). Va completo,
+con el único campo nuevo de la v3 marcado aparte.
+
+```jsonc
+{
+  "storeId": "uuid",
+  "businessId": "uuid",
+  "businessName": "La Rampa",
+  "name": "La Rampa · Vedado",
+  "description": "Todo para la casa, a dos cuadras de 23 y L.", // null
+  "slug": "tienda-demo", // null — solo se usa al CREAR, para el slug único
+  "address": "Calle 23 esq. L, Vedado", // null
+  "city": "La Habana", // null
+  "province": null,
+  "latitude": null,
+  "longitude": null,
+  "phone": null,
+  "whatsapp": "+5350000001", // null
+  "email": null,
+  "openingHours": null,
+  "baseCurrency": "CUP", // por defecto CUP si se omite
+  "publishToStore": true, // el opt-in del negocio para ESTA tienda
+  "unpublishReason": null, // string?, ≤ 160 caracteres — v3, ver abajo
+  "updatedAt": "2026-08-25T14:03:00.000Z", // guarda anti-rancio (HD10/AP6)
+}
+```
+
+`publishToStore: false` suspende la tienda (`Store.status = "SUSPENDED"`);
+`true` la publica o la reabre. Los campos vacíos con `null` omiten esa
+columna en la fila (o la dejan como está en un `UPDATE`), igual que en
+`PRODUCT`.
+
+##### Propuesta v3 — `unpublishReason`, aditiva, sin enviar todavía
+
+Un solo campo nuevo, opcional. **No hace falta ningún cambio en cuadrecaja**:
+omitirlo deja el comportamiento de hoy exactamente igual, y un lector que
+solo conoce la v2 sigue funcionando sin tocar una línea.
+
+| Campo             | Tipo    | Notas                                                                                                                                                                              |
+| ----------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `publishToStore`  | boolean | El opt-in del negocio para esta tienda. (ya en la v2)                                                                                                                              |
+| `unpublishReason` | string? | **v3, opcional.** Motivo visible al comprador cuando `publishToStore` es `false`. Texto plano, ≤ 160 caracteres, se pinta como texto. Se ignora cuando `publishToStore` es `true`. |
+| `updatedAt`       | string  | ISO 8601 con desplazamiento. Guarda anti-rancio. (ya en la v2)                                                                                                                     |
+
+Dos avisos de comportamiento que no cambian el cable pero sí lo que el POS
+puede observar (HD10-HD15, el interruptor del panel de administración):
+
+1. **El panel de administración puede cerrar y abrir la tienda por su
+   cuenta.** Un `GET` del POS puede encontrar una tienda cerrada que él nunca
+   cerró — el negocio la cerró desde queandabuscando, con un motivo de una
+   lista fija (vacaciones, adecuaciones, etc.) que el POS nunca ve.
+2. **Un evento `STORE` con `publishToStore: true` puede reabrir una tienda
+   que el negocio cerró desde el panel.** queandabuscando solo reescribe el
+   estado cuando el `publishToStore` del evento difiere del que ya tenía
+   registrado — una edición rutinaria (cambiar el teléfono, por ejemplo) que
+   repite el mismo valor no reabre nada — pero un evento que sí cambia el
+   opt-in siempre gana, sea cual sea su origen.
+
+**Qué tiene que hacer el otro equipo: nada**, salvo decidir si quiere mandar
+`unpublishReason` cuando desactive una tienda desde el propio POS. Y, aparte
+de esta propuesta: la sección `payload de STORE` de arriba documenta también
+lo que la v2 ya envía y nunca se comunicó — conviene que este anuncio lleve
+los dos avisos juntos, no solo el campo nuevo.
+
 ### Transformación en queandabuscando
 
 1. `publishToStore: false` → borrado suave del `StoreProduct`. Fin.
