@@ -146,8 +146,30 @@ model Store {
   deliveryFee     Decimal?     @db.Decimal(14, 2)
 
   publishedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+
+  /// HD10-HD15: the public on/off switch, independent of `status`'s DRAFT vs
+  /// PUBLISHED (the sync's own opt-in). Set by the panel's interruptor OR by
+  /// the sync when it suspends a store; cleared together whenever the store
+  /// republishes. `disabledReasonCode` is one of `STORE_DISABLED_REASONS`
+  /// (`src/constants/storeClosure.ts`) when the panel closed it, or `null`
+  /// when the sync did (the POS does not speak our reason vocabulary).
+  disabledReasonCode String?
+  disabledMessage    String?
+  disabledAt         DateTime?
+
+  /// HD10/AP6: the stale-write guard `StoreProduct` already has
+  /// (`sourceUpdatedAt`), applied here so a re-delivered STORE event cannot
+  /// resurrect a store the admin just closed by racing an older payload.
+  sourceUpdatedAt DateTime?
+  /// HD10/AP5(b): the POS's own `publishToStore` value, tracked separately
+  /// from `status` so the handler can tell "the opt-in changed" from "some
+  /// other field of the store changed" and only touch `status`/`disabled*`
+  /// in the first case — otherwise editing a phone number in the POS would
+  /// silently reopen a store the admin closed for vacation.
+  sourceOptIn Boolean?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   business    Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
   products    StoreProduct[]
@@ -322,6 +344,9 @@ model ExchangeRate {
 model Promotion {
   id         String         @id @default(uuid())
   storeId    String
+  /// PP3: admin-only label, never shown to a shopper. Optional — the
+  /// listing falls back to a derived label when empty (design.md § 5).
+  name       String?
   type       PromotionType
   scope      PromotionScope
   value      Decimal        @db.Decimal(14, 2)

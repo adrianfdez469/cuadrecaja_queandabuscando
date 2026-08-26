@@ -304,6 +304,21 @@ async function main() {
     categories,
   });
 
+  // HD12/F-011 fixture: a third store, deliberately never opened to the
+  // public. It is the "tienda ajena" 403 fixture (I7) that does not depend
+  // on scripts/mint-sso-token.mjs's --stores= flag, and it is what makes
+  // HD11's closed page verifiable right after `npm run seed`, with no
+  // endpoint call. Not in the SSO token, and not a store any other feature
+  // (F-004/F-005/F-006/F-010) reads.
+  await seedClosedStore({
+    businessId: business.id,
+    externalId: "seed-tienda-3",
+    slug: "tienda-cerrada",
+    name: "La Rampa · Marianao",
+    city: "La Habana",
+    address: "Calle 100, Marianao",
+  });
+
   const counts = {
     stores: await prisma.store.count(),
     canonical: await prisma.canonicalProduct.count(),
@@ -311,6 +326,41 @@ async function main() {
     products: await prisma.storeProduct.count(),
   };
   console.log("Done:", counts);
+}
+
+/**
+ * HD11 fixture: a store the panel closed, with a fixed reason. No products
+ * — nothing that reads the closed page is supposed to reach the catalogue
+ * query at all (architecture.md § La lectura pública).
+ */
+async function seedClosedStore(input: {
+  businessId: string;
+  externalId: string;
+  slug: string;
+  name: string;
+  city: string;
+  address: string;
+}) {
+  await prisma.store.upsert({
+    where: { externalId: input.externalId },
+    create: {
+      ...input,
+      status: "SUSPENDED",
+      disabledReasonCode: "VACACIONES",
+      disabledMessage: "Volvemos pronto — gracias por tu paciencia.",
+      disabledAt: now,
+      sourceOptIn: false,
+      sourceUpdatedAt: now,
+    },
+    update: {
+      ...input,
+      status: "SUSPENDED",
+      disabledReasonCode: "VACACIONES",
+      disabledMessage: "Volvemos pronto — gracias por tu paciencia.",
+      sourceOptIn: false,
+      sourceUpdatedAt: now,
+    },
+  });
 }
 
 async function seedStore(input: {
@@ -332,17 +382,32 @@ async function seedStore(input: {
 }) {
   const { products, categories, themeTokens, ...storeFields } = input;
 
+  // Deliberately fights HD12's migration (`_store_public_switch`), which
+  // closes every PUBLISHED store retroactively: F-010's checkout fixtures
+  // (I4) need `tienda-demo` and `tienda-dos` open, so re-running the seed
+  // re-opens them on purpose. `sourceOptIn`/`sourceUpdatedAt` are set too,
+  // so the very next real STORE event from the sync does not read as an
+  // opt-in "change" and second-guess this (AP5(b), `handlers/store.ts`).
+  // If this ever gets "fixed" to respect HD12, F-004/F-007/F-010's fixtures
+  // break along with `check:bundle` (architecture.md § Qué se rompe).
   const store = await prisma.store.upsert({
     where: { externalId: storeFields.externalId },
     create: {
       ...storeFields,
       status: "PUBLISHED",
       publishedAt: now,
+      sourceOptIn: true,
+      sourceUpdatedAt: now,
       ...(themeTokens ? { themeTokens: themeTokens as object } : {}),
     },
     update: {
       ...storeFields,
       status: "PUBLISHED",
+      disabledReasonCode: null,
+      disabledMessage: null,
+      disabledAt: null,
+      sourceOptIn: true,
+      sourceUpdatedAt: now,
       ...(themeTokens ? { themeTokens: themeTokens as object } : {}),
     },
   });

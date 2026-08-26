@@ -48,6 +48,16 @@ function toResponse(result: CreateOrderResult): NextResponse {
       return NextResponse.json({ error: "EMPTY_CART" }, { status: 400, headers: NO_STORE });
     case "store_not_found":
       return NextResponse.json({ error: "STORE_NOT_FOUND" }, { status: 404, headers: NO_STORE });
+    case "store_closed":
+      return NextResponse.json(
+        {
+          error: "STORE_CLOSED",
+          reasonCode: result.reasonCode,
+          message: result.message,
+          disabledAt: result.disabledAt,
+        },
+        { status: 409, headers: NO_STORE },
+      );
     case "items_unavailable":
       return NextResponse.json(
         { error: "ITEMS_UNAVAILABLE", lines: result.lines },

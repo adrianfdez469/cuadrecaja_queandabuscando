@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Image from "next/image";
 import { AVAILABILITY_LABEL, AVAILABILITY_TONE, isOrderable } from "@/lib/availability";
-import { displayPrice, type EffectivePrice } from "@/lib/pricing";
+import { resolvePrice, type ResolvedPrice } from "@/lib/pricing";
 import { formatMoney } from "@/lib/money";
 import {
   getPublishedStoreSlugs,
@@ -13,6 +13,7 @@ import {
 import { Badge } from "@/components/ui/Badge";
 import { Container } from "@/components/ui/Container";
 import { AddToCartButton } from "@/features/cart/components/AddToCartButton";
+import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
 
 /**
  * Pre-render the catalogue of every published store. Like the store page, this
@@ -33,6 +34,14 @@ export async function generateMetadata({
   params,
 }: PageProps<"/[slug]/p/[productSlug]">): Promise<Metadata> {
   const { slug, productSlug } = await params;
+  const store = await requireStore(slug);
+  // HD11: never read the product for a closed store — not even to build
+  // metadata. A closed store's product pages all share the store's own
+  // "closed" metadata, exactly like `/[slug]` itself.
+  if (store.status !== "PUBLISHED") {
+    return { title: `${store.name} · No disponible ahora`, robots: { index: false } };
+  }
+
   const product = (await getStoreCatalog(slug)).find((p) => p.slug === productSlug);
   if (!product) return { title: "Producto no encontrado" };
 
@@ -48,11 +57,28 @@ export async function generateMetadata({
 
 export default async function ProductPage({ params }: PageProps<"/[slug]/p/[productSlug]">) {
   const { slug, productSlug } = await params;
-  const [store, catalog, rates] = await Promise.all([
-    requireStore(slug),
-    getStoreCatalog(slug),
-    getStoreRates(slug),
-  ]);
+  const store = await requireStore(slug);
+
+  // HD11: the closed notice, WITHOUT reading the product — not even to
+  // decide it exists. One fewer query, and no way to leak whether a given
+  // productSlug exists in a store nobody can browse right now.
+  if (store.status !== "PUBLISHED") {
+    return (
+      <Container className="py-8">
+        <StoreClosedNotice
+          storeName={store.name}
+          disabledReasonCode={store.disabledReasonCode}
+          disabledMessage={store.disabledMessage}
+          disabledAt={store.disabledAt}
+          whatsapp={store.whatsapp}
+          phone={store.phone}
+          address={store.address}
+        />
+      </Container>
+    );
+  }
+
+  const [catalog, rates] = await Promise.all([getStoreCatalog(slug), getStoreRates(slug)]);
 
   const product = catalog.find((candidate) => candidate.slug === productSlug);
   if (!product) notFound();
@@ -60,14 +86,20 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
   // R11: a price is part of what makes a product orderable, alongside
   // availability. A product whose price cannot be resolved (no exchange
   // rate) is not addable, even if it is technically in stock.
-  let effective: EffectivePrice | null;
+  let resolved: ResolvedPrice | null;
   try {
-    effective = displayPrice(product, store.baseCurrencyCode, rates);
+    resolved = resolvePrice(product, {
+      targetCurrency: store.baseCurrencyCode,
+      rates,
+      baseCurrency: store.baseCurrencyCode,
+      promotions: product.promotions,
+    });
   } catch {
-    effective = null;
+    resolved = null;
   }
-  const price = effective ? formatMoney(effective) : null;
-  const canOrder = isOrderable(product.availability) && effective !== null;
+  const price = resolved ? formatMoney(resolved.price) : null;
+  const canOrder = isOrderable(product.availability) && resolved !== null;
+  const winningPromotion = product.promotions.find((p) => p.id === resolved?.promotionId) ?? null;
 
   const image = product.imageUrls[0];
 
@@ -95,6 +127,19 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
         <p className="text-brand mt-4 text-3xl font-semibold">
           {price ?? <span className="text-fg-muted">Consultar precio</span>}
         </p>
+        {resolved?.listPrice && (
+          <p className="text-fg-muted text-sm">
+            Antes <span className="line-through">{formatMoney(resolved.listPrice)}</span>
+          </p>
+        )}
+        {winningPromotion && (
+          <p className="text-fg-muted text-sm">
+            Promoción:{" "}
+            {winningPromotion.type === "PERCENTAGE"
+              ? `${winningPromotion.value}% de descuento.`
+              : `${winningPromotion.value} de descuento.`}
+          </p>
+        )}
 
         <div className="mt-3">
           <Badge tone={AVAILABILITY_TONE[product.availability]}>
@@ -113,8 +158,8 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
             storeProductId={product.id}
             slug={product.slug}
             name={product.name}
-            unitPrice={effective?.amount ?? "0.00"}
-            currencyCode={effective?.currency ?? store.baseCurrencyCode}
+            unitPrice={resolved?.price.amount ?? "0.00"}
+            currencyCode={resolved?.price.currency ?? store.baseCurrencyCode}
             disabled={!canOrder}
           />
         </div>

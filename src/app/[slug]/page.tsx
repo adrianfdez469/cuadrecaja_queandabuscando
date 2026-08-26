@@ -7,6 +7,7 @@ import {
 } from "@/features/catalog/server/queries";
 import { Container } from "@/components/ui/Container";
 import { ProductCard } from "@/components/store/ProductCard";
+import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
 
 /**
  * Pre-render every published store at build time. New stores that appear later
@@ -21,6 +22,13 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: PageProps<"/[slug]">): Promise<Metadata> {
   const { slug } = await params;
   const store = await requireStore(slug);
+  if (store.status !== "PUBLISHED") {
+    return {
+      title: `${store.name} · No disponible ahora`,
+      description: store.disabledMessage ?? undefined,
+      robots: { index: false },
+    };
+  }
   return {
     title: store.name,
     description: store.description ?? `Catálogo y pedidos de ${store.name}.`,
@@ -34,11 +42,27 @@ export async function generateMetadata({ params }: PageProps<"/[slug]">): Promis
 
 export default async function StorePage({ params }: PageProps<"/[slug]">) {
   const { slug } = await params;
-  const [store, products, rates] = await Promise.all([
-    requireStore(slug),
-    getStoreCatalog(slug),
-    getStoreRates(slug),
-  ]);
+  const store = await requireStore(slug);
+
+  // HD11: no catalog query at all for a closed store — one fewer query, and
+  // no chance of ever leaking catalog data through this branch.
+  if (store.status !== "PUBLISHED") {
+    return (
+      <Container className="py-8">
+        <StoreClosedNotice
+          storeName={store.name}
+          disabledReasonCode={store.disabledReasonCode}
+          disabledMessage={store.disabledMessage}
+          disabledAt={store.disabledAt}
+          whatsapp={store.whatsapp}
+          phone={store.phone}
+          address={store.address}
+        />
+      </Container>
+    );
+  }
+
+  const [products, rates] = await Promise.all([getStoreCatalog(slug), getStoreRates(slug)]);
 
   return (
     <Container className="py-8">

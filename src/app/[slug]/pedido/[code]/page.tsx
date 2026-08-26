@@ -7,6 +7,8 @@ import { OrderLinesTable } from "@/features/orders/components/OrderLinesTable";
 import { WhatsappOrderLink } from "@/features/orders/components/WhatsappOrderLink";
 import { Container } from "@/components/ui/Container";
 import { Card } from "@/components/ui/Card";
+import { Alert } from "@/components/ui/Alert";
+import { requireStore } from "@/features/catalog/server/queries";
 
 /**
  * The order confirmation / status page — 100% server, zero client modules of
@@ -20,13 +22,25 @@ export const metadata: Metadata = { robots: { index: false } };
 
 export default async function OrderPage({ params }: PageProps<"/[slug]/pedido/[code]">) {
   const { slug, code } = await params;
-  const order = await getOrderByCode(slug, code);
+  const [store, order] = await Promise.all([requireStore(slug), getOrderByCode(slug, code)]);
   if (!order) notFound();
 
   const whatsappUrl = orderWhatsappUrl(order);
 
   return (
     <Container className="max-w-2xl py-8 lg:max-w-4xl">
+      {/* HD11: an order already placed stays fully visible even after the
+          store closes — the receipt is the shopper's, not the storefront's. */}
+      {store.status !== "PUBLISHED" && (
+        <Alert tone="muted" className="mb-6">
+          <p>Esta tienda cerró sus pedidos online por ahora.</p>
+          <p>
+            Este pedido ya lo tiene la tienda. Si necesitas hablar con ellos, aquí abajo están sus
+            datos.
+          </p>
+        </Alert>
+      )}
+
       <div className="bg-positive/12 text-positive rounded-md p-4">
         <p className="text-lg font-semibold">¡Pedido recibido!</p>
       </div>

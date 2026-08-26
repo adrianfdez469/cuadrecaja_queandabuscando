@@ -39,6 +39,9 @@ export const storePayloadSchema = z.object({
   baseCurrency: z.string().length(3).default("CUP"),
   /** The business's opt-in for this specific location. */
   publishToStore: z.boolean(),
+  /** v3, optional (HD15, proposed in docs/sync-contract.md). Shown to the
+   *  shopper when `publishToStore` is false; ignored otherwise. */
+  unpublishReason: z.string().max(160).nullish(),
   updatedAt: isoDate,
 });
 
