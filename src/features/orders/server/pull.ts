@@ -125,8 +125,10 @@ export async function pullOrders(
   const last = rows.at(-1);
   return {
     orders,
-    // Null means "caught up". A cursor equal to the last id means there may be
-    // more; the POS keeps calling until it gets an empty page.
+    // Null means "caught up" and the POS stops there — it does NOT keep calling
+    // until it gets an empty page. Only a full page yields a cursor: a page that
+    // came back half empty already proves nothing is left behind, so spending a
+    // round-trip to confirm it would be waste. Contract: sync-contract.md § ③④.
     nextCursor: rows.length === limit && last ? last.id.toString() : null,
   };
 }
