@@ -86,6 +86,11 @@ Si una migración parece necesitar cualquiera de los dos, **pregunta**.
 
 ESLint impone la regla de que `components/` y `app/**/*.tsx` no importen Prisma.
 
+**Estado de cliente:** un módulo con `useSyncExternalStore`, no un gestor de
+estado ni un Context. Sin Zod en el árbol de cliente. Es lo que usa el carrito
+de F-010 (`src/features/cart/cartStore.ts`); no se cambia hasta que alguien lo
+justifique midiendo.
+
 ### Prohibiciones
 
 - **Prisma en componentes.** Pasa por `features/*/server/`.
