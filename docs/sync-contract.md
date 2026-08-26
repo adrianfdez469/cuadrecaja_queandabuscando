@@ -1,9 +1,20 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 1** · 25 de agosto de 2026
+**Versión 2** · 26 de agosto de 2026
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
 existe y está verificado contra los casos de abajo.
+
+## Cambios respecto a la v1
+
+**Todo es aditivo.** Ningún campo que la v1 ya definía cambia de nombre, de
+tipo ni de significado, y un lector que hoy solo conoce la v1 sigue
+funcionando sin tocar una línea. Lo único nuevo es § ③④ Pedidos: cuatro
+campos que F-010 añade porque ahora el pedido puede nacer con un producto
+priceado en una moneda distinta a la del pedido, y el POS puede querer saber
+cuál era esa moneda original además del importe ya convertido. Adoptarlos es
+opcional y a su propio ritmo — **no hace falta ningún cambio en cuadrecaja**
+para seguir funcionando con esta versión.
 
 ---
 
@@ -265,12 +276,87 @@ GET /api/internal/orders?since=<último id visto>&limit=100
 que el cursor es monotónico. Un pedido devuelto pasa de `PENDING` a `PULLED`,
 y **no se borra**: la página de estado del cliente sigue funcionando.
 
+Los campos que ya conocías siguen siendo exactamente lo que eran: `unitPrice`,
+`currencyCode`, `lineTotal`, `subtotal`, `discountTotal`, `deliveryFee` y
+`total` están **todos en la moneda del pedido** (`Order.currencyCode`), y
+`Σ lineTotal = subtotal` se sigue sosteniendo siempre. Un ejemplo completo de
+la v2, con un pedido de una línea priceada originalmente en USD:
+
+```jsonc
+{
+  "orders": [
+    {
+      "id": "42",
+      "code": "A7K3M9PQR2", // ver «Formato de Order.code» más abajo
+      "storeExternalId": "uuid",
+      "status": "PENDING",
+      "contact": { "name": "Ana Pérez", "phone": "+5355555555", "email": null, "address": null },
+      "currencyCode": "CUP",
+      "subtotal": "880.00",
+      "discountTotal": "0",
+      "deliveryFee": "0.00",
+      "total": "880.00",
+      "notes": null,
+      "createdAt": "2026-08-26T02:00:00.000Z",
+      // NUEVO en v2 — las tasas congeladas al confirmar (R9). `{}` cuando el
+      // pedido no necesitó convertir nada.
+      "rateSnapshot": {
+        "base": "CUP",
+        "capturedAt": "2026-08-26T02:00:00.000Z",
+        "rates": { "USD": "440.000000" },
+      },
+      "items": [
+        {
+          "storeProductExternalId": "uuid",
+          "name": "Cerveza Cristal",
+          "unitPrice": "880.00", // ya convertido — lo de siempre
+          "currencyCode": "CUP", // la moneda del pedido — lo de siempre
+          "quantity": "2.000",
+          "lineTotal": "880.00", // lo de siempre; sigue siendo lo que suma subtotal
+          // NUEVOS en v2 — el precio efectivo ANTES de convertir
+          "originalUnitPrice": "2.00",
+          "originalCurrencyCode": "USD",
+          "originalLineTotal": "4.00",
+        },
+      ],
+    },
+  ],
+  "nextCursor": null,
+}
+```
+
+Cómo se relacionan los campos nuevos con los de siempre, como fórmula:
+
+```
+unitPrice = convert(originalUnitPrice, currencyCode, rateSnapshot.rates)
+```
+
+—la misma función que usa queandabuscando internamente (`src/lib/money.ts`),
+así que recomputarlo con las tasas del `rateSnapshot` da el mismo céntimo.
+**Los importes originales no son sumables** (R5b): con varias líneas en
+monedas distintas su suma no significa nada, y `subtotal`/`total` **siguen
+siendo** la suma de los `lineTotal` ya convertidos — nunca la de los
+originales. Un pedido creado antes de esta versión no tiene los originales
+guardados; en ese caso **se emiten los valores ya convertidos como respaldo**,
+así que un lector que espera un número ahí nunca se encuentra con `null`.
+
+### Formato de `Order.code`
+
+Diez caracteres del alfabeto Crockford base32 en mayúsculas, sin separador:
+`0123456789ABCDEFGHJKMNPQRSTVWXYZ` (sin `I`, `L`, `O`, `U` — se confunden al
+dictarlos por teléfono). Regex: `^[0-9A-HJKMNP-TV-Z]{10}$`. Es la **única**
+credencial de `https://<tienda>/pedido/<code>`, una página pública que muestra
+nombre, teléfono y dirección de una persona — trátalo como un secreto de
+lectura, no como un identificador cualquiera para loguear o mostrar sin
+cuidado.
+
 ```
 POST /api/internal/orders/status
 { "orderId": "42", "status": "CONFIRMED", "reason": null }
 ```
 
-`status` ∈ `CONFIRMED` · `READY` · `DELIVERED` · `CANCELLED`.
+`status` ∈ `CONFIRMED` · `READY` · `DELIVERED` · `CANCELLED`. Sin cambios en
+la v2.
 
 ---
 

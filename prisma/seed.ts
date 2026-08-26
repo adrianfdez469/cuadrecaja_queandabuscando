@@ -276,6 +276,10 @@ async function main() {
     whatsapp: "+5350000001",
     // Default palette — no overrides.
     themeTokens: null,
+    // F-010 fixture (I4): checkout by WhatsApp, no delivery — E8, E18 with link.
+    checkoutMode: "WHATSAPP",
+    deliveryEnabled: false,
+    deliveryFee: null,
     products: DEMO_PRODUCTS,
     categories,
   });
@@ -291,6 +295,11 @@ async function main() {
     whatsapp: "+5350000002",
     // A visibly different brand, to prove per-tenant theming works.
     themeTokens: { brand: "oklch(0.62 0.17 145)", accent: "oklch(0.7 0.16 25)", radius: "round" },
+    // F-010 fixture (I4): checkout on-site with a flat delivery fee — E9, E18
+    // with no link.
+    checkoutMode: "ONSITE",
+    deliveryEnabled: true,
+    deliveryFee: "500",
     products: SECOND_STORE_PRODUCTS,
     categories,
   });
@@ -314,6 +323,10 @@ async function seedStore(input: {
   address: string;
   whatsapp: string;
   themeTokens: unknown;
+  /** F-010 fixture (I4): needed to exercise E8/E9/E18 and criteria 11/12. */
+  checkoutMode: "WHATSAPP" | "ONSITE";
+  deliveryEnabled: boolean;
+  deliveryFee: string | null;
   products: SeedProduct[];
   categories: Map<string, string>;
 }) {
