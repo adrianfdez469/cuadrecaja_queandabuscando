@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardInternalRequest } from "../_lib/guard";
+import { serializableIssues } from "../_lib/issues";
 import { pullOrders } from "@/features/orders/server/pull";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
 
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "INVALID_QUERY", issues: parsed.error.issues },
+      { error: "INVALID_QUERY", issues: serializableIssues(parsed.error) },
       { status: 400 },
     );
   }

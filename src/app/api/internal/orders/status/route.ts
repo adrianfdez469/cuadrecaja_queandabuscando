@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardInternalRequest } from "../../_lib/guard";
+import { serializableIssues } from "../../_lib/issues";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "INVALID_BODY", issues: parsed.error.issues },
+      { error: "INVALID_BODY", issues: serializableIssues(parsed.error) },
       { status: 400 },
     );
   }

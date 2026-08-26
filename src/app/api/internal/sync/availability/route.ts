@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardInternalRequest } from "../../_lib/guard";
+import { serializableIssues } from "../../_lib/issues";
 import { availabilityBatchSchema } from "@/features/sync/schemas";
 import { applyAvailability } from "@/features/sync/server/availability";
 
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
   const parsed = availabilityBatchSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "INVALID_BATCH", issues: parsed.error.issues },
+      { error: "INVALID_BATCH", issues: serializableIssues(parsed.error) },
       { status: 400 },
     );
   }

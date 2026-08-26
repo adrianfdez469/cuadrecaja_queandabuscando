@@ -1,10 +1,11 @@
 ---
 slug: check-harness-falso-positivo-ruta-abreviada
-sintoma: "check:harness dice que un archivo con ruta abreviada (tres puntos y el nombre, o una carpeta sin el prefijo src/) no existe, y el archivo real sí existe"
-firma: `\.\.\./[A-Za-z][A-Za-z0-9._-]*\.(ts|tsx)` does not exist
+sintoma: "check:harness dice que un archivo no existe, y el archivo real sí existe: la ruta estaba abreviada (tres puntos y el nombre, o una carpeta sin el prefijo src/)"
+firma: `[A-Za-z0-9._/-]+\.(ts|tsx)` does not exist
 etapa: harness
-visto_en: F-010
+visto_en: F-010, F-007
 creado: 2026-08-26T05:00:00Z
+actualizado: 2026-08-26T12:45:00Z
 promovido_a_agents: no
 arreglo: si el archivo existe, escribe la ruta completa en el documento que abrevió — y si ese documento no es tuyo, escala a quien pueda editarlo; no lo des por bueno
 ---
@@ -53,6 +54,20 @@ problema de un documento que lo _comete_.
    en `impl.md` § Desviaciones mientras se resuelve.
 5. Si el archivo citado con ruta abreviada **de verdad no existe**, entonces
    sí es la referencia muerta que el check pretende cazar — trátalo como tal.
+
+## Por qué la firma se ensanchó en F-007
+
+La firma original solo pescaba el patrón tres-puntos-y-nombre. En F-007 el mismo
+fallo llegó por la otra mitad del síntoma —una carpeta sin el prefijo `src/`,
+escrita dentro de una tabla ancha— y el sensor **no imprimió esta ficha**, con lo
+que la lección estaba escrita y nadie la vio. Costó un ciclo entero volver a
+diagnosticar lo que ya estaba aquí.
+
+La firma nueva pesca cualquier `does not exist` sobre un `.ts`/`.tsx`, que es lo
+correcto: el arreglo de esta ficha cubre **las dos** ramas —si el archivo existe,
+escribe la ruta completa; si de verdad no existe, es la referencia muerta que el
+check pretende cazar— así que no hay caso en el que salga de más y estorbe. Una
+ficha que solo reconoce la mitad de su propio síntoma vale la mitad.
 
 ## Cuándo NO es esto
 
