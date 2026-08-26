@@ -377,6 +377,10 @@ model Order {
   id   BigInt @id @default(autoincrement())
   code String @unique
 
+  /// One per checkout attempt (R26). Nullable: a caller with no key gets no
+  /// duplicate protection (R28) — Postgres does not count NULLs as colliding.
+  idempotencyKey String? @unique
+
   storeId    String
   customerId String?
 
@@ -423,6 +427,11 @@ model OrderItem {
   currencyCode   String
   quantity       Decimal @db.Decimal(14, 3)
   lineTotal      Decimal @db.Decimal(14, 2)
+
+  /// Effective price BEFORE converting to the order's currency (R5).
+  /// Informative only — never sumable, never used for any total (R5b).
+  originalUnitPrice    Decimal? @db.Decimal(14, 2)
+  originalCurrencyCode String?
 
   order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   storeProduct StoreProduct? @relation(fields: [storeProductId], references: [id])

@@ -19,7 +19,11 @@ import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import path from "node:path";
 
-const BUDGET_KB = Number(process.env.BUNDLE_BUDGET_KB ?? 190);
+// Raised from 190 to 193 by F-010 (SP4, consulted and authorized 2026-08-26):
+// the cart's first "use client" island lands on this SSG page, measured at
+// 182.1 KB gzip + the same ~10 KB margin the previous number already carried.
+// Bajarlo es F-013 — su criterio 4 lo dice literalmente.
+const BUDGET_KB = Number(process.env.BUNDLE_BUDGET_KB ?? 193);
 const APP_DIR = ".next/server/app";
 
 if (!existsSync(APP_DIR)) {

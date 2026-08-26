@@ -1,0 +1,408 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { money } from "@/lib/money";
+
+const orderFindMany = vi.fn();
+const orderFindFirst = vi.fn();
+const orderCreate = vi.fn();
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    order: {
+      findMany: (...args: unknown[]) => orderFindMany(...args),
+      findFirst: (...args: unknown[]) => orderFindFirst(...args),
+      create: (...args: unknown[]) => orderCreate(...args),
+    },
+  },
+}));
+
+const loadStoreForOrder = vi.fn();
+const quoteCart = vi.fn();
+
+vi.mock("./quote", () => ({
+  loadStoreForOrder: (...args: unknown[]) => loadStoreForOrder(...args),
+  quoteCart: (...args: unknown[]) => quoteCart(...args),
+}));
+
+const getOrderByCode = vi.fn();
+
+vi.mock("./read", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./read")>();
+  return {
+    ...actual,
+    getOrderByCode: (...args: unknown[]) => getOrderByCode(...args),
+  };
+});
+
+const { createOrder } = await import("./createOrder");
+
+const store = {
+  id: "store-1",
+  businessId: "biz-1",
+  slug: "tienda-demo",
+  name: "La Rampa",
+  currencyCode: "CUP",
+  checkoutMode: "WHATSAPP" as const,
+  deliveryEnabled: false,
+  deliveryFee: null as string | null,
+  whatsappNumber: "+5350000001",
+};
+
+function orderableLine(overrides: Record<string, unknown> = {}) {
+  return {
+    storeProductId: "sp-1",
+    slug: "cafe-cubita",
+    name: "Café Cubita",
+    qty: 2,
+    orderable: true as const,
+    unitPrice: money("450.00", "CUP"),
+    originalUnitPrice: money("450.00", "CUP"),
+    lineTotal: money("900.00", "CUP"),
+    ...overrides,
+  };
+}
+
+function baseBody(overrides: Record<string, unknown> = {}) {
+  return {
+    storeSlug: "tienda-demo",
+    items: [{ storeProductId: "sp-1", qty: 2 }],
+    contact: { name: "Ana Pérez", phone: "+5355555555" },
+    fulfillment: "PICKUP" as const,
+    expectedTotal: "900.00",
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  orderFindMany.mockReset().mockResolvedValue([]);
+  orderFindFirst.mockReset();
+  orderCreate.mockReset();
+  loadStoreForOrder.mockReset().mockResolvedValue(store);
+  quoteCart.mockReset().mockResolvedValue({
+    store,
+    lines: [orderableLine()],
+    subtotal: money("900.00", "CUP"),
+    rates: {},
+    capturedAt: "2026-08-26T02:00:00.000Z",
+  });
+  getOrderByCode.mockReset().mockResolvedValue(null);
+});
+
+describe("createOrder() — routing", () => {
+  it("returns store_not_found without calling quoteCart", async () => {
+    loadStoreForOrder.mockResolvedValue(null);
+    const result = await createOrder(baseBody());
+    expect(result).toEqual({ kind: "store_not_found" });
+    expect(quoteCart).not.toHaveBeenCalled();
+  });
+
+  it("returns empty_cart for an empty items array", async () => {
+    const result = await createOrder(baseBody({ items: [] }));
+    expect(result).toEqual({ kind: "empty_cart" });
+    expect(quoteCart).not.toHaveBeenCalled();
+  });
+
+  it("returns items_unavailable with every unorderable line's reason", async () => {
+    quoteCart.mockResolvedValue({
+      store,
+      lines: [
+        orderableLine(),
+        {
+          storeProductId: "sp-2",
+          slug: "x",
+          name: "x",
+          qty: 1,
+          orderable: false,
+          reason: "OUT_OF_STOCK",
+        },
+      ],
+      subtotal: money("900.00", "CUP"),
+      rates: {},
+      capturedAt: "now",
+    });
+    const result = await createOrder(baseBody());
+    expect(result).toEqual({
+      kind: "items_unavailable",
+      lines: [{ storeProductId: "sp-2", reason: "OUT_OF_STOCK" }],
+    });
+    expect(orderCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("createOrder() — price check (R7)", () => {
+  it("returns price_changed with was:null for ALL lines when no expectedUnitPrice was sent", async () => {
+    const result = await createOrder(baseBody({ expectedTotal: "999.00" }));
+    expect(result).toEqual({
+      kind: "price_changed",
+      lines: [{ storeProductId: "sp-1", was: null, now: "450.00" }],
+      total: "900.00",
+    });
+    expect(orderCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns price_changed with only the changed line when expectedUnitPrice was sent (AP1)", async () => {
+    const result = await createOrder(
+      baseBody({
+        items: [{ storeProductId: "sp-1", qty: 2, expectedUnitPrice: "400.00" }],
+        expectedTotal: "999.00",
+      }),
+    );
+    expect(result).toEqual({
+      kind: "price_changed",
+      lines: [{ storeProductId: "sp-1", was: "400.00", now: "450.00" }],
+      total: "900.00",
+    });
+  });
+
+  it("does not spend a rate-limit slot on a stale total (checked before the guard query)", async () => {
+    await createOrder(baseBody({ expectedTotal: "999.00" }));
+    expect(orderFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("createOrder() — idempotency and rate limit (R26-R31)", () => {
+  it("returns idempotent with the existing order when the key already has a row", async () => {
+    orderFindMany.mockResolvedValue([
+      {
+        id: 1n,
+        code: "A7K3M9PQR2",
+        idempotencyKey: "key-1",
+        status: "PENDING",
+        createdAt: new Date(),
+      },
+    ]);
+    getOrderByCode.mockResolvedValue(null); // ONSITE-equivalent: no whatsapp built
+    const result = await createOrder(baseBody({ idempotencyKey: "key-1" }));
+    expect(result).toMatchObject({ kind: "idempotent", code: "A7K3M9PQR2" });
+    expect(orderCreate).not.toHaveBeenCalled();
+  });
+
+  it("idempotency wins over an exhausted rate limit (R31)", async () => {
+    const now = new Date();
+    orderFindMany.mockResolvedValue([
+      { id: 1n, code: "A7K3M9PQR2", idempotencyKey: "key-1", status: "PENDING", createdAt: now },
+      { id: 2n, code: "B", idempotencyKey: null, status: "PENDING", createdAt: now },
+      { id: 3n, code: "C", idempotencyKey: null, status: "PENDING", createdAt: now },
+      { id: 4n, code: "D", idempotencyKey: null, status: "PENDING", createdAt: now },
+      { id: 5n, code: "E", idempotencyKey: null, status: "PENDING", createdAt: now },
+    ]);
+    const result = await createOrder(baseBody({ idempotencyKey: "key-1" }));
+    expect(result).toMatchObject({ kind: "idempotent", code: "A7K3M9PQR2" });
+  });
+
+  it("returns too_many_orders at the 5th PENDING order in the window, with no key", async () => {
+    const now = new Date();
+    orderFindMany.mockResolvedValue(
+      Array.from({ length: 5 }, (_, i) => ({
+        id: BigInt(i),
+        code: `CODE${i}`,
+        idempotencyKey: null,
+        status: "PENDING",
+        createdAt: now,
+      })),
+    );
+    const result = await createOrder(baseBody());
+    expect(result.kind).toBe("too_many_orders");
+    if (result.kind === "too_many_orders") {
+      expect(result.retryAfterSeconds).toBeGreaterThan(0);
+    }
+    expect(orderCreate).not.toHaveBeenCalled();
+  });
+
+  it("does not count a PULLED order towards the rate limit", async () => {
+    const now = new Date();
+    orderFindMany.mockResolvedValue(
+      Array.from({ length: 5 }, (_, i) => ({
+        id: BigInt(i),
+        code: `CODE${i}`,
+        idempotencyKey: null,
+        status: i === 0 ? "PULLED" : "PENDING",
+        createdAt: now,
+      })),
+    );
+    orderCreate.mockResolvedValue({ code: "NEWCODE0001" });
+    const result = await createOrder(baseBody());
+    expect(result.kind).not.toBe("too_many_orders");
+  });
+});
+
+describe("createOrder() — writing the order", () => {
+  it("creates the order with subtotal/deliveryFee/total and a rateSnapshot", async () => {
+    orderCreate.mockImplementation(async ({ data }: { data: { code: string } }) => ({
+      code: data.code,
+    }));
+    const result = await createOrder(baseBody());
+
+    expect(result.kind).toBe("created");
+    if (result.kind === "created") expect(result.code).toMatch(/^[0-9A-HJKMNP-TV-Z]{10}$/);
+    expect(orderCreate).toHaveBeenCalledOnce();
+    const data = orderCreate.mock.calls[0][0].data;
+    expect(data.subtotal).toBe("900.00");
+    expect(data.deliveryFee).toBe("0.00");
+    expect(data.total).toBe("900.00");
+    expect(data.discountTotal).toBe("0");
+    expect(data.rateSnapshot).toEqual({
+      base: "CUP",
+      capturedAt: "2026-08-26T02:00:00.000Z",
+      rates: {},
+    });
+    expect(data.items.create).toEqual([
+      {
+        storeProductId: "sp-1",
+        name: "Café Cubita",
+        unitPrice: "450.00",
+        currencyCode: "CUP",
+        quantity: 2,
+        lineTotal: "900.00",
+        originalUnitPrice: "450.00",
+        originalCurrencyCode: "CUP",
+      },
+    ]);
+  });
+
+  it("adds delivery fee to the total when DELIVERY is offered and chosen", async () => {
+    const deliveryStore = { ...store, deliveryEnabled: true, deliveryFee: "500.00" };
+    loadStoreForOrder.mockResolvedValue(deliveryStore);
+    quoteCart.mockResolvedValue({
+      store: deliveryStore,
+      lines: [orderableLine()],
+      subtotal: money("900.00", "CUP"),
+      rates: {},
+      capturedAt: "now",
+    });
+    orderCreate.mockResolvedValue({ code: "A7K3M9PQR2" });
+
+    const result = await createOrder(
+      baseBody({
+        fulfillment: "DELIVERY",
+        deliveryAddress: "Calle 23, Vedado",
+        expectedTotal: "1400.00",
+      }),
+    );
+
+    expect(result).toMatchObject({ kind: "created" });
+    const data = orderCreate.mock.calls[0][0].data;
+    expect(data.deliveryFee).toBe("500.00");
+    expect(data.total).toBe("1400.00");
+    expect(data.deliveryAddress).toBe("Calle 23, Vedado");
+  });
+
+  it("treats DELIVERY as PICKUP when the store does not offer it", async () => {
+    orderCreate.mockResolvedValue({ code: "A7K3M9PQR2" });
+    const result = await createOrder(
+      baseBody({ fulfillment: "DELIVERY", deliveryAddress: "x", expectedTotal: "900.00" }),
+    );
+    expect(result).toMatchObject({ kind: "created" });
+    const data = orderCreate.mock.calls[0][0].data;
+    expect(data.deliveryFee).toBe("0.00");
+    expect(data.deliveryAddress).toBeNull();
+  });
+
+  it("merges duplicate storeProductId lines, summing quantities, before quoting", async () => {
+    orderCreate.mockResolvedValue({ code: "A7K3M9PQR2" });
+    await createOrder(
+      baseBody({
+        items: [
+          { storeProductId: "sp-1", qty: 60 },
+          { storeProductId: "sp-1", qty: 60 },
+        ],
+      }),
+    );
+    expect(quoteCart).toHaveBeenCalledWith(store, [{ storeProductId: "sp-1", qty: 99 }]);
+  });
+
+  it("retries with a new code on a P2002 collision on code, up to the limit", async () => {
+    orderCreate
+      .mockRejectedValueOnce({ code: "P2002", meta: { target: ["code"] } })
+      .mockImplementationOnce(async ({ data }: { data: { code: string } }) => ({
+        code: data.code,
+      }));
+    const result = await createOrder(baseBody());
+    expect(result.kind).toBe("created");
+    expect(orderCreate).toHaveBeenCalledTimes(2);
+    if (result.kind === "created") {
+      expect(result.code).toBe(orderCreate.mock.calls[1][0].data.code);
+    }
+  });
+
+  it("returns failed after exhausting all code retries", async () => {
+    orderCreate.mockRejectedValue({ code: "P2002", meta: { target: ["code"] } });
+    const result = await createOrder(baseBody());
+    expect(result).toEqual({ kind: "failed" });
+  });
+
+  it("resolves a P2002 on idempotencyKey by rereading the row that won the race", async () => {
+    orderCreate.mockRejectedValue({ code: "P2002", meta: { target: ["idempotencyKey"] } });
+    orderFindFirst.mockResolvedValue({ code: "WINNERCODE" });
+    const result = await createOrder(baseBody({ idempotencyKey: "key-1" }));
+    expect(result).toMatchObject({ kind: "idempotent", code: "WINNERCODE" });
+  });
+
+  it("fails closed if the colliding idempotencyKey belongs to another store", async () => {
+    orderCreate.mockRejectedValue({ code: "P2002", meta: { target: ["idempotencyKey"] } });
+    orderFindFirst.mockResolvedValue(null);
+    const result = await createOrder(baseBody({ idempotencyKey: "key-1" }));
+    expect(result).toEqual({ kind: "failed" });
+  });
+
+  it("re-throws an unexpected database error instead of swallowing it", async () => {
+    orderCreate.mockRejectedValue(new Error("connection reset"));
+    await expect(createOrder(baseBody())).rejects.toThrow("connection reset");
+  });
+});
+
+describe("createOrder() — whatsappUrl", () => {
+  it("is null for ONSITE regardless of the store's number", async () => {
+    const onsiteStore = { ...store, checkoutMode: "ONSITE" as const };
+    loadStoreForOrder.mockResolvedValue(onsiteStore);
+    quoteCart.mockResolvedValue({
+      store: onsiteStore,
+      lines: [orderableLine()],
+      subtotal: money("900.00", "CUP"),
+      rates: {},
+      capturedAt: "now",
+    });
+    orderCreate.mockResolvedValue({ code: "A7K3M9PQR2" });
+    const result = await createOrder(baseBody());
+    expect(result).toMatchObject({ whatsappUrl: null });
+    expect(getOrderByCode).not.toHaveBeenCalled();
+  });
+
+  it("is built from the persisted snapshot for WHATSAPP", async () => {
+    orderCreate.mockImplementation(async ({ data }: { data: { code: string } }) => ({
+      code: data.code,
+    }));
+    getOrderByCode.mockResolvedValue({
+      code: "A7K3M9PQR2",
+      status: "PENDING",
+      storeSlug: "tienda-demo",
+      storeName: "La Rampa",
+      checkoutMode: "WHATSAPP",
+      whatsappNumber: "+5350000001",
+      contact: { name: "Ana Pérez", phone: "+5355555555", email: null },
+      fulfillment: "PICKUP",
+      deliveryAddress: null,
+      currencyCode: "CUP",
+      subtotal: "900.00",
+      deliveryFee: "0.00",
+      total: "900.00",
+      notes: null,
+      createdAt: "2026-08-26T02:00:00.000Z",
+      items: [
+        {
+          name: "Café Cubita",
+          unitPrice: "450.00",
+          currencyCode: "CUP",
+          quantity: "2",
+          lineTotal: "900.00",
+        },
+      ],
+    });
+    const result = await createOrder(baseBody());
+    expect(result).toMatchObject({ kind: "created" });
+    if (result.kind === "created") {
+      expect(result.whatsappUrl).toMatch(/^https:\/\/wa\.me\/5350000001\?text=/);
+    }
+    const usedCode = orderCreate.mock.calls[0][0].data.code;
+    expect(getOrderByCode).toHaveBeenCalledWith("tienda-demo", usedCode);
+  });
+});

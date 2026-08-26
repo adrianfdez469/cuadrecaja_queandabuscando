@@ -184,8 +184,8 @@
         "La página /[slug]/pedido/[code] muestra el pedido y no está cacheada.",
         "Las rutas de carrito y checkout se marcan ƒ (Dynamic) en el build, nunca SSG."
       ],
-      "passes": false,
-      "notes": "Sin empezar. Es el siguiente feature de producto y desbloquea F-007."
+      "passes": true,
+      "notes": "Hecho. Verificado ejecutando: verify.sh --full sale 0 en sus nueve etapas, 204 tests, y los seis criterios comprobados con curl, vitest y consultas a la base. El pedido creado por checkout SI lo recoge el pull de F-007 y pasa a PULLED, que era su verificacion bloqueada. Se anadio migracion aditiva (Order.idempotencyKey unico, OrderItem.originalUnitPrice y originalCurrencyCode) y docs/sync-contract.md paso a v2 de forma aditiva: falta avisar al equipo de cuadrecaja. Bundle medido en 182,1 KB y presupuesto fijado en 193 para que F-013 lo baje. HUECO CONOCIDO: los 22 pasos de verificacion visual y de accesibilidad (V7-V22 de design.md) NO se ejecutaron, porque ninguna sesion tuvo navegador disponible; ningun acceptance_criteria depende de ellos, pero nadie ha visto estas pantallas. El tope de abuso es por telefono y no frena a quien los rote: aceptado a sabiendas en docs/adr/0016."
     },
     {
       "id": "F-011",
