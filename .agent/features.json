@@ -82,7 +82,7 @@
         "'node scripts/check-bundle-budget.mjs' termina con código 0."
       ],
       "passes": true,
-      "notes": "Hecho. Verificado con curl contra 'next start'. El JS de cliente son ~180 KB gzip: es el suelo de Next 16 + React 19 App Router, no código propio. Lo que decide el primer pintado es el HTML (~3 KB) y la página es legible sin JavaScript. Ver F-013."
+      "notes": "Hecho. Verificado con curl contra 'next start'. El JS de cliente son ~180 KB gzip: es el suelo de Next 16 + React 19 App Router, no código propio. Lo que decide el primer pintado es el HTML (~3 KB) y la página es legible sin JavaScript. Ver F-013. ADR 0012 introduce Storefront por encima de Store: /[slug] pasara a resolver primero la marca y despues la sucursal. Los criterios de aqui siguen siendo ciertos y F-017 los extiende sin tocarlos — su E3 existe justamente para probar que un slug de tienda ya emitido sigue respondiendo 200."
     },
     {
       "id": "F-005",
@@ -134,7 +134,7 @@
         "No existe en el código ninguna llamada saliente hacia cuadrecaja: 'grep -rn CUADRECAJA_API_URL src/' no devuelve nada."
       ],
       "passes": true,
-      "notes": "Hecho. Verificado ejecutando: 44 aserciones de scripts/pull-orders.mjs contra servidor y base reales, sobre pedidos nacidos del checkout de F-010, más 23 pruebas nuevas que cubren el cursor y los dos handlers (antes no tenían ninguna). verify.sh --full y --smoke salen 0. Durante la verificación apareció un fallo real: since negativo devolvía 500 en vez de 400, porque el issue too_small de un schema bigint lleva minimum: 0n y reventaba al serializar la propia rama del 400 — corregido en las cuatro rutas de /api/internal/* con serializableIssues(), la convención que ya usaban las rutas públicas. También se arregló un test flaky ajeno (F-010) que tumbaba el gate: el techo de espera de Testing Library era 1 s y ahora son 5 en vitest.setup.ts. HUECO CONOCIDO ACEPTADO: el pull asume un único poller secuencial — findMany y updateMany van sin atomicidad, así que dos pollers concurrentes duplicarían pedidos en el POS; falta escribirlo en docs/sync-contract.md (TP1 de tests.md). passes puesto por el agente por indicación expresa del humano («hazlo tú mismo»)."
+      "notes": "Hecho. Verificado ejecutando: 44 aserciones de scripts/pull-orders.mjs contra servidor y base reales, sobre pedidos nacidos del checkout de F-010, más 23 pruebas nuevas que cubren el cursor y los dos handlers (antes no tenían ninguna). verify.sh --full y --smoke salen 0. Durante la verificación apareció un fallo real: since negativo devolvía 500 en vez de 400, porque el issue too_small de un schema bigint lleva minimum: 0n y reventaba al serializar la propia rama del 400 — corregido en las cuatro rutas de /api/internal/* con serializableIssues(), la convención que ya usaban las rutas públicas. También se arregló un test flaky ajeno (F-010) que tumbaba el gate: el techo de espera de Testing Library era 1 s y ahora son 5 en vitest.setup.ts. HUECO CONOCIDO ACEPTADO: el pull asume un único poller secuencial — findMany y updateMany van sin atomicidad, así que dos pollers concurrentes duplicarían pedidos en el POS; falta escribirlo en docs/sync-contract.md (TP1 de tests.md). passes puesto por el agente por indicación expresa del humano («hazlo tú mismo»). CORREGIDO POR F-018: ADR 0013 documenta que este pull no filtra por negocio (where: { id: { gt: since } }), asi que hoy un token puede leer los pedidos —con datos personales— de un negocio ajeno, y los handlers del sync toman businessId del payload en vez de del llamante. El cursor pasara a ser POR NEGOCIO, lo que cambia el contrato con cuadrecaja. Por la regla 3 los criterios de arriba no se tocan."
     },
     {
       "id": "F-008",
@@ -185,7 +185,7 @@
         "Las rutas de carrito y checkout se marcan ƒ (Dynamic) en el build, nunca SSG."
       ],
       "passes": true,
-      "notes": "Hecho. Verificado ejecutando: verify.sh --full sale 0 en sus nueve etapas, 204 tests, y los seis criterios comprobados con curl, vitest y consultas a la base. El pedido creado por checkout SI lo recoge el pull de F-007 y pasa a PULLED, que era su verificacion bloqueada. Se anadio migracion aditiva (Order.idempotencyKey unico, OrderItem.originalUnitPrice y originalCurrencyCode) y docs/sync-contract.md paso a v2 de forma aditiva: falta avisar al equipo de cuadrecaja. Bundle medido en 182,1 KB y presupuesto fijado en 193 para que F-013 lo baje. HUECO CONOCIDO: los 22 pasos de verificacion visual y de accesibilidad (V7-V22 de design.md) NO se ejecutaron, porque ninguna sesion tuvo navegador disponible; ningun acceptance_criteria depende de ellos, pero nadie ha visto estas pantallas. El tope de abuso es por telefono y no frena a quien los rote: aceptado a sabiendas en docs/adr/0016."
+      "notes": "Hecho. Verificado ejecutando: verify.sh --full sale 0 en sus nueve etapas, 204 tests, y los seis criterios comprobados con curl, vitest y consultas a la base. El pedido creado por checkout SI lo recoge el pull de F-007 y pasa a PULLED, que era su verificacion bloqueada. Se anadio migracion aditiva (Order.idempotencyKey unico, OrderItem.originalUnitPrice y originalCurrencyCode) y docs/sync-contract.md paso a v2 de forma aditiva: falta avisar al equipo de cuadrecaja. Bundle medido en 182,1 KB y presupuesto fijado en 193 para que F-013 lo baje. HUECO CONOCIDO: los 22 pasos de verificacion visual y de accesibilidad (V7-V22 de design.md) NO se ejecutaron, porque ninguna sesion tuvo navegador disponible; ningun acceptance_criteria depende de ellos, pero nadie ha visto estas pantallas. El tope de abuso es por telefono y no frena a quien los rote: aceptado a sabiendas en docs/adr/0016. La propuesta verificacion-visual-en-el-arnes ya construyo la etapa 'visual' de verify.sh y la puerta en sdd.sh done que cierran ese agujero estructural, pero .agent/specs/F-010/visual.mjs sigue siendo la plantilla: traducir V7-V22 esta pendiente de decision del humano (P3 de esa propuesta)."
     },
     {
       "id": "F-011",
@@ -201,7 +201,7 @@
         "Guardar branding inválido es rechazado por themeTokensSchema y no llega a la base."
       ],
       "passes": false,
-      "notes": "Sin empezar. La invariante del tercer criterio ya está implementada en el handler del sync; falta la UI que la ejercite."
+      "notes": "Sin empezar. La invariante del tercer criterio ya está implementada en el handler del sync; falta la UI que la ejercite. SUSTITUCION PARCIAL POR F-023: el cuarto criterio dice que la imagen se sirve por next/image, es decir optimizada en caliente por peticion; F-023 lo prohibe (las variantes se generan al subir y se sirven del CDN de Supabase) porque el optimizador de Vercel es un recurso medido y penaliza justo al comprador con conexion lenta. Por la regla 3 el criterio no se toca aqui, igual que hizo F-016 con F-003. El editor de horarios que la propuesta horarios-y-propiedad-de-campos asigna a este panel necesita Store.timezone, que trae F-022."
     },
     {
       "id": "F-012",
@@ -263,7 +263,7 @@
         "Un alias nuevo se refleja en los resultados sin reprocesar el catálogo."
       ],
       "passes": false,
-      "notes": "Sin empezar, y a propósito: el acuerdo fue anticipar el marketplace solo en el modelo de datos. Las tablas, el searchDocument y los índices GIN ya existen; falta poblar searchVector y construir la consulta."
+      "notes": "Sin empezar, y a propósito: el acuerdo fue anticipar el marketplace solo en el modelo de datos. Las tablas, el searchDocument y los índices GIN ya existen; falta poblar searchVector y construir la consulta. La busqueda DENTRO de una tienda no es este feature: es F-021. F-015 sigue siendo el buscador del marketplace sobre CanonicalProduct, con los exclusivos fuera de los resultados."
     },
     {
       "id": "F-016",
@@ -280,6 +280,140 @@
       ],
       "passes": true,
       "notes": "Hecho y verificado con capturas reales en Chrome: /tienda-demo azul con esquinas suaves, /tienda-dos verde con esquinas redondeadas y acento coral. La regresion se probó rompiendo el tema a proposito y confirmando que check:theme falla. Trampa encontrada: Tailwind escanea scripts/, asi que el propio checker generaba las utilidades rotas que buscaba — resuelto con @source not en globals.css."
+    },
+    {
+      "id": "F-017",
+      "category": "tienda",
+      "status": "active",
+      "depends_on": ["F-004"],
+      "description": "Storefront por encima de Store: una marca, N sucursales, un solo QR.",
+      "acceptance_criteria": [
+        "GET /[slug] de una marca con UNA sucursal responde 200 y el HTML no contiene el selector de sucursal.",
+        "GET /[slug] de una marca con DOS sucursales responde 200 y el HTML contiene ambas.",
+        "GET /[slug] de un slug de Store emitido antes de este cambio responde 200, ni 404 ni redireccion.",
+        "Crear una sucursal con un slug ya usado por una marca falla con error de restriccion unica.",
+        "Crear una tienda con slug 'admin' o 'api' falla.",
+        "Cambiar de sucursal con el carrito lleno muestra en pantalla que pasa con el carrito antes de aplicarlo.",
+        "'npm run build' sigue marcando las rutas de tienda como (SSG), no como Dynamic.",
+        "'bash .agent/verify.sh F-017 --full' termina con codigo 0."
+      ],
+      "passes": false,
+      "notes": "Anadido el 2026-08-26 por indicacion expresa del humano, no por iniciativa del agente (regla 4). Decision en docs/adr/0012-storefront-sobre-store.md; alcance en .agent/specs/propuestas/storefront-multisucursal.md. URGENTE POR UN MOTIVO FISICO: los QR se imprimen en papel y se pegan en la pared, asi que emitir hoy /lacasa-vedado y querer manana /lacasa obliga a reimprimir. Es la unica decision de esta tanda que no se revierte con una migracion. FUERA: inventario distribuido (catalogo union y pedidos partidos entre sucursales) y almacenes — un almacen no tiene precio en cuadrecaja, asi que nunca origina una tienda virtual; vender sus existencias es un traslado dentro del POS. Storefront es propio de queandabuscando: cuadrecaja no lo conoce. PREGUNTAS ABIERTAS: SP1 la marca se crea al publicar la primera sucursal o agrupando despues; SP2 al cambiar de sucursal con carrito lleno, re-preciar o vaciar."
+    },
+    {
+      "id": "F-018",
+      "category": "integracion",
+      "status": "active",
+      "depends_on": ["F-005", "F-007"],
+      "description": "La identidad del llamante sale del token y no del payload (corrige el pull sin filtrar de F-007).",
+      "acceptance_criteria": [
+        "Con el token del negocio A, GET /api/internal/orders no devuelve ningun pedido cuya tienda pertenezca a B, verificado con dos negocios sembrados.",
+        "POST /api/internal/sync/catalog con token de A y businessId de B en el payload responde 403 y no escribe nada.",
+        "Un token que no corresponde a ningun negocio responde 401.",
+        "Sin SYNC_TOKEN ni ningun hash configurado responde 503, nunca 200.",
+        "Rotar el token del negocio A no afecta al sync del negocio B.",
+        "'grep -n \"payload.businessId\" src/features/sync/server/handlers/' no aparece como origen de identidad en ningun where de resolucion de negocio.",
+        "EXPLAIN de la consulta del pull usa el indice (businessId, status, id).",
+        "El cursor por negocio esta documentado en docs/sync-contract.md, en Autenticacion y en la seccion de Pedidos.",
+        "'bash .agent/verify.sh F-018 --full' termina con codigo 0."
+      ],
+      "passes": false,
+      "notes": "Anadido el 2026-08-26 por indicacion expresa del humano, no por iniciativa del agente (regla 4). Decision en docs/adr/0013-identidad-de-integracion.md; alcance en .agent/specs/propuestas/identidad-integracion.md. Corrige F-007 sin tocar sus criterios (regla 3). El guard de src/app/api/internal/_lib/guard.ts devuelve hoy NextResponse | null —un booleano disfrazado— y no puede transportar identidad. Business.syncTokenHash y hashSyncToken existen en el schema y no los usa nadie: esa promesa a medias es la trampa que este feature cierra. ROMPE EL CONTRATO CON CUADRECAJA: el cursor del pull deja de ser global y el POS tiene que guardar un ultimoPedidoVisto por negocio. ADR 0016 lo nombra como uno de sus disparadores de reapertura. DECISION TOMADA POR EL AGENTE, PENDIENTE DE CONFIRMAR: SP1, token por negocio en vez de token unico de plataforma; si el humano prefiere plataforma hay que BORRAR syncTokenHash y hashSyncToken, no dejarlos. SP2: si la migracion admite los dos esquemas durante una ventana o va con corte de sync."
+    },
+    {
+      "id": "F-019",
+      "category": "tienda",
+      "status": "active",
+      "depends_on": ["F-007", "F-010"],
+      "description": "Renegociacion del pedido: la tienda propone un cambio, el comprador responde y el reloj corre.",
+      "acceptance_criteria": [
+        "Proponer una modificacion deja el pedido en AWAITING_CUSTOMER y GET /[slug]/pedido/[code] muestra el total anterior y el nuevo.",
+        "Aprobar la modificacion pasa el pedido a CONFIRMED con los importes nuevos y GET /api/internal/orders lo refleja.",
+        "Rechazarla pasa el pedido a CANCELLED con el motivo atribuido al comprador.",
+        "Un pedido AWAITING_CUSTOMER vencido cambia de estado sin intervencion de nadie, verificado forzando la fecha y no esperando.",
+        "REJECTED_BY_STORE y CANCELLED se distinguen en la respuesta del pull.",
+        "rateSnapshot no cambia entre la creacion del pedido y la aprobacion de la modificacion.",
+        "El comprador recibe un enlace a la pagina de su pedido por WhatsApp al crearlo.",
+        "El enum de estados ampliado esta documentado en docs/sync-contract.md.",
+        "'bash .agent/verify.sh F-019 --full' termina con codigo 0."
+      ],
+      "passes": false,
+      "notes": "Anadido el 2026-08-26 por indicacion expresa del humano, no por iniciativa del agente (regla 4). Alcance en .agent/specs/propuestas/pedido-renegociacion.md. Faltaban las dos mitades que hacen operable el flujo ya acordado: no habia estado para 'hay una modificacion esperando al cliente' ni reloj que lo venza. Y el disparador mas frecuente NO es la falta de stock: es el costo de envio definido al gestionar, que por diseno ocurre en todos los pedidos de esa modalidad — es el camino normal, no la excepcion. El comprador es invitado y pudo cerrar la pestana, asi que sin reloj el encargado se queda con medio pedido colgado. Los tres disparadores (stock, deriva de precio, envio) usan el MISMO bucle. FUERA: reserva de stock — dos compradores pueden pedir la ultima unidad y lo resuelve la confirmacion manual; reservar exigiria escribir en el camino de venta del POS, que es lo que evita ADR 0003. PREGUNTAS ABIERTAS: SP1 al vencer, cancelar o despachar lo disponible; SP2 si el reloj corre con la tienda cerrada (depende de Store.timezone, F-022); SP3 si el enlace de WhatsApp es automatico o lo manda el encargado."
+    },
+    {
+      "id": "F-020",
+      "category": "integracion",
+      "status": "active",
+      "depends_on": ["F-010"],
+      "description": "Timbre de Realtime sin datos: el POS se entera del pedido al instante y lo sigue leyendo por pull.",
+      "acceptance_criteria": [
+        "Crear un pedido emite un Broadcast en el canal negocio:{id} y el payload capturado no contiene code, total ni datos de contacto.",
+        "Un suscriptor autenticado como negocio B no recibe el timbre de un pedido del negocio A.",
+        "Con Realtime inalcanzable a proposito, crear un pedido sigue respondiendo con exito y el pedido aparece en el pull.",
+        "Diez pedidos en un minuto producen menos de diez timbres.",
+        "'grep -rn CUADRECAJA_API_URL src/' sigue sin devolver nada: el timbre no es una llamada saliente hacia el POS.",
+        "El canal esta autorizado con RLS sobre realtime.messages y esta documentado en docs/sync-contract.md como canal auxiliar fuera de la ruta critica.",
+        "'bash .agent/verify.sh F-020 --full' termina con codigo 0."
+      ],
+      "passes": false,
+      "notes": "Anadido el 2026-08-26 por indicacion expresa del humano, no por iniciativa del agente (regla 4). Decision en docs/adr/0014-timbre-de-realtime.md; alcance en .agent/specs/propuestas/timbre-realtime.md. El evento lleva CERO datos: solo dice 'hay pedidos pendientes' y el navegador del encargado dispara el pull. Asi se consigue la latencia que el humano pedia sin devolverle a queandabuscando la URL del POS ni un secreto de salida, que es lo que elimino ADR 0002. Broadcast y NO Postgres Changes: este ultimo evalua cada cambio contra el RLS de cada suscriptor y es la parte de Realtime que se degrada al crecer. EL CRON DE PULL NO SE QUITA — el timbre lo adelanta, no lo sustituye, y por eso degrada con gracia: si Realtime se cae, el pedido llega igual, solo mas tarde. Escala por conexiones, no por mensajes: ~$10 por cada 1.000 conexiones pico. FUERA: el cliente que escucha, que vive en el repo de cuadrecaja. PREGUNTAS ABIERTAS: SP1 ventana de coalescencia (recomendado 5 s); SP2 si el timbre suena tambien cuando el comprador aprueba una modificacion de F-019."
+    },
+    {
+      "id": "F-021",
+      "category": "tienda",
+      "status": "active",
+      "depends_on": ["F-004", "F-011"],
+      "description": "Busqueda dentro de una tienda, en tres capas y sin embeddings.",
+      "acceptance_criteria": [
+        "Buscar el nombre exacto de un producto de la tienda lo devuelve en la posicion 1.",
+        "Esa misma busqueda devuelve ademas al menos un producto de la misma categoria global.",
+        "'refresco' y 'refresco' con acento dan el mismo conjunto de resultados.",
+        "Una consulta con un caracter cambiado, como 'cocacola', devuelve el producto igual.",
+        "Buscar desde la tienda A nunca devuelve un producto de la tienda B.",
+        "Tras editar la descripcion de un producto en el panel, buscar por una palabra nueva de esa descripcion lo encuentra.",
+        "Una consulta sin resultados deja una fila registrada con 0 resultados.",
+        "EXPLAIN de la consulta usa los indices y no hace seq scan del catalogo.",
+        "'bash .agent/verify.sh F-021 --full' termina con codigo 0."
+      ],
+      "passes": false,
+      "notes": "Anadido el 2026-08-26 por indicacion expresa del humano, no por iniciativa del agente (regla 4). Alcance en .agent/specs/propuestas/busqueda-en-tienda.md. NO ES F-015: aquel es el buscador del marketplace sobre CanonicalProduct; este es el uso diario, dentro de un storeId, y hoy no tiene ni feature ni indice. El resultado esperado no es coincidencia exacta: para 'Refresco coca-cola 1.5 LT' se quiere ese producto primero, despues otros formatos de coca-cola, despues otros refrescos y muy al final 'Cola-loca'. Eso son tres capas —lexica ponderada con tsvector espanol y unaccent, difusa con pg_trgm, y expansion por GlobalCategory— no una tecnica. INCONGRUENCIA A RESOLVER: StoreProduct no tiene searchVector, y CanonicalProduct.searchDocument es nombre + alias, asi que deja fuera StoreProduct.description y localName, que es justo el texto que el comerciante escribe para mejorar la busqueda. Recalcular el documento es efecto del PANEL, no del sync (ADR 0007). PREGUNTAS ABIERTAS: SP1 embeddings — recomendado NO ahora, la expansion por categoria le gana para este caso; reabrir con datos si el registro de consultas muestra que las de cero resultados son fallos semanticos. SP2 pagina propia o filtro en la actual: recomendada pagina propia renderizada en servidor, por F-013."
+    },
+    {
+      "id": "F-022",
+      "category": "datos",
+      "status": "active",
+      "depends_on": ["F-002", "F-005"],
+      "description": "Zona horaria de la tienda y tabla exhaustiva de propiedad de campos en el contrato.",
+      "acceptance_criteria": [
+        "Publicar una tienda sin timezone falla.",
+        "Con timezone puesta y el reloj del proceso en otro huso (TZ=UTC), el calculo de abierto/cerrado coincide con la hora local de la tienda.",
+        "Un identificador de timezone invalido se rechaza al guardar.",
+        "docs/sync-contract.md contiene la tabla de propiedad y CADA campo de Store y StoreProduct aparece en ella con su dueno y que pasa si llega un evento que lo toca.",
+        "Un product.update del sync no altera ningun campo cuyo dueno sea el panel.",
+        "'grep -ri \"umbral\\|threshold\" src/ prisma/schema.prisma' no devuelve ningun campo almacenado.",
+        "'bash .agent/verify.sh F-022 --full' termina con codigo 0."
+      ],
+      "passes": false,
+      "notes": "Anadido el 2026-08-26 por indicacion expresa del humano, no por iniciativa del agente (regla 4). Alcance en .agent/specs/propuestas/horarios-y-propiedad-de-campos.md. Dos huecos pequenos con consecuencias desproporcionadas. (1) Store.openingHours es un Json? sin timezone, asi que 'las compras de madrugada se entregan al dia siguiente' se evalua contra el reloj del SERVIDOR y da resultados distintos segun donde se ejecute; tiene que ser un identificador IANA (America/Havana), no un desplazamiento fijo, o el horario de verano lo rompe. (2) ADR 0007 fija el dueno de cinco campos, pero el corte acordado —cuadrecaja publica, queandabuscando viste— alcanza a muchos mas: promociones, horarios, costo de envio, branding, slug. Cada campo sin dueno escrito es un bug de sync esperando. CORRIGE EL PLAN DE PRODUCTO ORIGINAL: alli el umbral de stock bajo se sincronizaba con el resto de los datos del producto, y eso contradice ADR 0003 — aqui nunca se ve el entero de existencias, solo el enum de tres valores, asi que el umbral se configura y se queda EN CUADRECAJA. Un umbral almacenado aqui seria un campo muerto que ademas sugiere que este lado calcula algo. PREGUNTAS ABIERTAS: SP1 timezone se sincroniza desde el POS o se elige en el panel (recomendado panel, con default por pais); SP2 si los horarios de entrega son distintos de los de apertura (recomendado si, dos calendarios)."
+    },
+    {
+      "id": "F-023",
+      "category": "rendimiento",
+      "status": "active",
+      "depends_on": ["F-011"],
+      "description": "Imagenes optimizadas al subir y servidas desde el CDN, nunca por peticion (sustituye el criterio de next/image de F-011).",
+      "acceptance_criteria": [
+        "Subir una imagen deja mas de un objeto en el bucket: original mas variantes.",
+        "El HTML servido de /[slug] no contiene ninguna URL de /_next/image.",
+        "El peso total de imagenes de una pagina de catalogo esta por debajo del presupuesto, medido sobre el servidor levantado.",
+        "Con Accept: image/avif se responde AVIF y sin el se responde el respaldo.",
+        "Reemplazar la imagen de un producto cambia lo que se ve tras la revalidacion, sin dejar variantes viejas servidas.",
+        "Borrar un producto no deja objetos huerfanos en el bucket.",
+        "'node scripts/check-bundle-budget.mjs' sigue terminando con codigo 0.",
+        "'bash .agent/verify.sh F-023 --full' termina con codigo 0."
+      ],
+      "passes": false,
+      "notes": "Anadido el 2026-08-26 por indicacion expresa del humano, no por iniciativa del agente (regla 4). Alcance en .agent/specs/propuestas/imagenes-sin-optimizacion-caliente.md. SUSTITUYE el cuarto criterio de F-011 ('la sirve por next/image'), que por la regla 3 no se toca alli — mismo patron que F-016 con F-003. next/image optimiza EN CALIENTE, por peticion, y en Vercel eso es un recurso medido: el costo que aparece de golpe cuando llega el trafico. Ademas choca con el objetivo del proyecto: las paginas ya salen del CDN con ~3 KB de HTML y si cada producto arrastra una imagen pesada, el trabajo de F-004 y F-013 se pierde en el primer <img>, penalizando justo al comprador con conexion lenta que es el publico objetivo. Habra que revisar next.config.ts: images.unoptimized o un loader propio. PREGUNTAS ABIERTAS: SP1 transformacion de imagenes de Supabase (de pago en algunos planes) o generarlas nosotros al subir (recomendado: al subir, es una vez por imagen y el resultado queda estatico en el CDN); SP2 de donde sale el presupuesto de peso por pagina — recomendado fijarlo mirando lo que ya mide F-013 para que las dos cifras cuenten la misma historia."
     }
   ]
 }
