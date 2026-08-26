@@ -1,0 +1,116 @@
+import type { Availability, StoreStatus } from "@/generated/prisma/enums";
+import type { StorageFailureReason as LibStorageFailureReason } from "@/lib/supabase/storage";
+
+/**
+ * Wire types for the admin panel.
+ *
+ * Only the product/image shapes this cycle needs — promotions arrive in the
+ * next one (`impl.md` § Desviaciones anota por qué). `AdminWriteResult` is
+ * the shared shape every write in `server/mutations.ts` returns; the route
+ * handlers under `app/api/admin/` map it to HTTP and nothing else does.
+ */
+
+export type AdminStoreListItem = {
+  id: string;
+  slug: string;
+  name: string;
+  status: StoreStatus;
+  city: string | null;
+  address: string | null;
+  disabledReasonCode: string | null;
+  disabledMessage: string | null;
+  disabledAt: string | null;
+};
+
+/** What `setStoreEnabled` returns and the switch's endpoint sends back. */
+export type AdminStoreRow = {
+  id: string;
+  slug: string;
+  status: StoreStatus;
+  disabledReasonCode: string | null;
+  disabledMessage: string | null;
+  disabledAt: string | null;
+};
+
+/** Discriminated by `enabled`, mirroring the Zod schema (HD14). */
+export type StoreStatusBody =
+  { enabled: true } | { enabled: false; reasonCode: string; message: string | null };
+
+export type AdminProductRow = {
+  id: string;
+  slug: string;
+  localName: string;
+  categoryName: string | null;
+  availability: Availability;
+  syncedAt: string;
+  deletedAt: string | null;
+  syncedPrice: string;
+  syncedPriceCurrency: string;
+  description: string | null;
+  imageUrls: string[];
+  priceOverride: string | null;
+  priceOverrideCurrency: string | null;
+  visible: boolean;
+  featured: boolean;
+};
+
+/** What the isla sends. `priceOverrideCurrency` is never accepted from the
+ *  client (R14): the server sets it to the product's `syncedPriceCurrency`. */
+export type ProductWriteBody = {
+  description: string | null;
+  imageUrls: string[];
+  priceOverride: string | null;
+  visible: boolean;
+  featured: boolean;
+};
+
+/** Alias of the shared shape in `@/lib/supabase/storage` (AGENTS.md: no duplicate interfaces). */
+export type StorageFailureReason = LibStorageFailureReason;
+
+/** HD3/PP3. Read shape for the panel's promotions screens. */
+export type AdminPromotionRow = {
+  id: string;
+  name: string | null;
+  type: "PERCENTAGE" | "FIXED";
+  scope: "PRODUCT" | "CATEGORY" | "ORDER";
+  value: string;
+  conditions: unknown;
+  startsAt: string;
+  endsAt: string | null;
+  active: boolean;
+};
+
+/** Discriminated by `scope`, mirroring `promotionBodySchema` (R30). */
+export type PromotionBody = {
+  name: string | null;
+  type: "PERCENTAGE" | "FIXED";
+  value: string;
+  startsAt: string;
+  endsAt: string | null;
+  active: boolean;
+} & (
+  | { scope: "PRODUCT"; conditions: { storeProductIds: string[] } }
+  | { scope: "CATEGORY"; conditions: { localCategoryIds: string[] } }
+  | { scope: "ORDER"; conditions: { minSubtotal: string | null } }
+);
+
+/**
+ * Every mutation in `server/mutations.ts` resolves to one of these.
+ *
+ * `"created"` carries only `value` — this cycle's one creator is the image
+ * upload, whose resource has no `id` distinct from its URL. `architecture.md`
+ * sketches `{ kind: "created"; id: string; value: T }` for the promotions
+ * that arrive in the next cycle; whoever adds them decides then whether `id`
+ * belongs at this level or inside `value` (see `impl.md` § Desviaciones).
+ */
+export type AdminWriteResult<T> =
+  | { kind: "saved"; value: T }
+  | { kind: "created"; value: T }
+  | { kind: "product_not_in_store" } // -> 403 (E19)
+  | { kind: "product_deleted" } // -> 409: a soft-deleted product is not editable
+  | { kind: "too_many_images" } // -> 409 (E23)
+  | { kind: "promotion_not_in_store" } // -> 403 (E33)
+  | { kind: "invalid_conditions"; issues: { path: (string | number)[]; message: string }[] } // -> 400 (R30)
+  | { kind: "storage_unavailable"; reason: StorageFailureReason } // -> 503 (E25)
+  | { kind: "not_found" } // -> 404: the authorized store was deleted mid-session
+  | { kind: "failed" }; // -> 500

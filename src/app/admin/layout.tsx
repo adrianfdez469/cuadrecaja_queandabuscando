@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getAdminSession } from "@/lib/auth/adminSession";
 import { Container } from "@/components/ui/Container";
@@ -13,7 +14,9 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
     <div className="flex min-h-full flex-col">
       <header className="border-border bg-surface border-b">
         <Container className="flex items-center justify-between py-4">
-          <span className="font-semibold">Panel de administración</span>
+          <Link href="/admin" className="font-semibold hover:underline">
+            Panel de administración
+          </Link>
           <span className="text-fg-muted text-sm">{session.name}</span>
         </Container>
       </header>

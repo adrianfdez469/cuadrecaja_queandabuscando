@@ -42,6 +42,13 @@ export default defineConfig({
           setupFiles: ["./vitest.setup.ts"],
           include: ["src/**/*.test.tsx"],
           exclude: ["src/generated/**"],
+          // The per-test ceiling, not Testing Library's own (that one is
+          // `asyncUtilTimeout` in vitest.setup.ts). With a bigger suite and a
+          // cold transform cache, a test with three sequential findBy*/waitFor
+          // calls can add up past the 5s DEFAULT test timeout even though each
+          // individual wait resolves in well under its own 5s ceiling — see
+          // the playbook ficha `testing-library-timeout-1s-bajo-carga`.
+          testTimeout: 15_000,
         },
       },
     ],
