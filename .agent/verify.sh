@@ -21,6 +21,8 @@ RUNS=".agent/runs"
 PLAYBOOK=".agent/playbook"
 SPECS=".agent/specs"
 SMOKE_PORT="${SMOKE_PORT:-3100}"
+# Distinto del de smoke: las dos etapas pueden pedirse en la misma ejecución.
+VISUAL_PORT="${VISUAL_PORT:-3101}"
 
 # Orden deliberado: lo que falla más rápido y señala más de cerca, primero.
 STAGES_RAPIDO="typecheck lint format test"
@@ -38,6 +40,7 @@ stage_cmd() {
     theme)     echo "npm run check:theme" ;;
     bundle)    echo "npm run check:bundle" ;;
     smoke)     echo "(servidor de desarrollo + .agent/specs/<ID>/smoke.sh)" ;;
+    visual)    echo "(servidor de desarrollo + chromium headless + .agent/specs/<ID>/visual.mjs)" ;;
     *)         return 1 ;;
   esac
 }
@@ -70,6 +73,7 @@ extract_signature() { # <etapa> <log>
     format)    line="$(grep -aqE 'Code style issues' "$log" && echo 'archivos sin formatear')" ;;
     test)      line="$(grep -aoE '(AssertionError|TypeError|ReferenceError|SyntaxError|RangeError|ZodError|Prisma[A-Za-z]*Error|Error): .*' "$log" | head -1)" ;;
     smoke)     line="$(grep -aoE 'SMOKE FAIL.*' "$log" | head -1)" ;;
+    visual)    line="$(grep -aoE 'VISUAL FAIL.*' "$log" | head -1)" ;;
   esac
   [ -z "$line" ] && line="$(primera_linea_de_error "$log")"
   [ -z "$line" ] && line="sin mensaje reconocible"
@@ -206,6 +210,8 @@ correr_etapa() { # <etapa> <log>
   printf '$ %s\n\n' "$cmd" >"$2"
   if [ "$1" = "smoke" ]; then
     correr_smoke "$2"
+  elif [ "$1" = "visual" ]; then
+    correr_visual "$2"
   else
     eval "$cmd" >>"$2" 2>&1
   fi
@@ -213,6 +219,42 @@ correr_etapa() { # <etapa> <log>
 
 # Feedback de ejecución, no de compilación: levanta la app de verdad, corre las
 # peticiones de .agent/specs/<ID>/smoke.sh y deja en el log TAMBIÉN lo que
+# Nadie más puede estar escuchando en el puerto que vamos a usar. Si lo está, el
+# `next dev` de abajo no consigue el puerto —o Next elige otro y nadie se enteraría—
+# y el sensor acabaría probando la aplicación de un extraño y saliendo VERDE. Pasó
+# de verdad: un `next dev` de OTRO checkout del mismo repo ocupando el 3000 hace
+# creer que un feature no se implementó. Verde contra la app equivocada es la peor
+# salida posible del sensor, así que esto falla antes de levantar nada.
+# El puerto de un `next-server` que ya esté corriendo DESDE ESTE directorio, o
+# vacío. Se compara el cwd del proceso, no el nombre: en esta máquina hay varios
+# checkouts del mismo repo y el de al lado sirve código distinto —fue justo la
+# confusión que hizo creer que F-010 no estaba implementado.
+servidor_propio() {
+  local raiz pid cwd puerto
+  raiz="$(pwd -P)"
+  for pid in $(pgrep -f 'next-server' 2>/dev/null); do
+    cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+    [ "$cwd" = "$raiz" ] || continue
+    puerto="$(lsof -Pan -p "$pid" -i -sTCP:LISTEN 2>/dev/null |
+      sed -n 's/.*:\([0-9]\{1,\}\) (LISTEN).*/\1/p' | head -1)"
+    [ -n "$puerto" ] && { echo "$puerto"; return 0; }
+  done
+  return 0
+}
+
+puerto_libre() { # <puerto> <prefijo-de-firma> <log>
+  local ocupa
+  ocupa="$(lsof -tPan -i "TCP:$1" -s TCP:LISTEN 2>/dev/null | head -1)"
+  [ -z "$ocupa" ] && return 0
+  {
+    printf '%s el puerto %s ya está ocupado por el PID %s\n' "$2" "$1" "$ocupa"
+    printf '  %s\n' "$(ps -p "$ocupa" -o command= 2>/dev/null | cut -c1-100)"
+    printf '  Levantar la app ahí probaría OTRA aplicación y podría salir verde.\n'
+    printf '  Ciérralo (kill %s) o usa otro puerto: SMOKE_PORT=3101 bash .agent/verify.sh …\n' "$ocupa"
+  } >>"$3"
+  return 1
+}
+
 # escribió el servidor. Un 500 sin la traza del servidor no es feedback.
 correr_smoke() { # <log>
   local script="$SPECS/$FEATURE/smoke.sh" srvlog pid i code=0
@@ -224,6 +266,7 @@ correr_smoke() { # <log>
     echo "  no existe $script — cópialo de .agent/templates/smoke.sh" >>"$1"
     return 1
   fi
+  puerto_libre "$SMOKE_PORT" "SMOKE FAIL" "$1" || return 1
   srvlog="$(mktemp)"
   PORT="$SMOKE_PORT" npx next dev -p "$SMOKE_PORT" >"$srvlog" 2>&1 &
   pid=$!
@@ -253,10 +296,86 @@ correr_smoke() { # <log>
   return $code
 }
 
+# Lo que `curl` no puede ver: si la lista salta, si el foco va donde debe, si el
+# formulario es anunciable, si la pantalla aguanta un viewport de 360 px o una
+# conexión de 3G. Levanta la app y se la entrega a un Chromium headless que
+# maneja `.agent/specs/<ID>/visual.mjs`.
+#
+# Headless y por Bash a propósito: la extensión de Chrome necesita que un humano
+# la conecte, no existe en CI y no es reproducible entre sesiones. Esta etapa la
+# corre cualquier agente que tenga Bash, que son todos.
+correr_visual() { # <log>
+  local script="$SPECS/$FEATURE/visual.mjs" srvlog shots pid i code=0
+  if [ ! -f "$script" ]; then
+    # Misma regla que smoke: un feature con interfaz que no tiene guion visual no
+    # está «sin comprobar», está en rojo. F-010 se cerró con 22 pasos visuales sin
+    # ejecutar precisamente porque nada lo impedía.
+    echo "VISUAL FAIL falta el guion visual del feature" >>"$1"
+    echo "  no existe $script — cópialo de .agent/templates/visual.mjs" >>"$1"
+    return 1
+  fi
+  if [ ! -d node_modules/playwright ]; then
+    echo "VISUAL FAIL playwright no está instalado" >>"$1"
+    echo "  npm install --save-dev playwright && npx playwright install chromium" >>"$1"
+    return 1
+  fi
+  shots="$RUNS/$FEATURE/shots"
+  rm -rf "$shots"
+  mkdir -p "$shots"
+
+  # Next 16 solo admite UN `next dev` por directorio, sea el puerto que sea: si
+  # ya hay uno de ESTE worktree, lanzar otro muere con «Another next dev server
+  # is already running» y el sensor solo veía «no llegó a levantar». Reutilizarlo
+  # es además lo correcto — es el servidor que el humano está mirando.
+  local puerto=""
+  puerto="$(servidor_propio)"
+  if [ -n "$puerto" ]; then
+    printf '  (reutilizo el next dev de este worktree en el puerto %s)\n' "$puerto" >>"$1"
+    srvlog="$(mktemp)"
+    pid=""
+  else
+    puerto="$VISUAL_PORT"
+    puerto_libre "$puerto" "VISUAL FAIL" "$1" || return 1
+    srvlog="$(mktemp)"
+    PORT="$puerto" npx next dev -p "$puerto" >"$srvlog" 2>&1 &
+    pid=$!
+    for i in $(seq 1 60); do
+      curl -sf -o /dev/null "http://localhost:$puerto/" && break
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 1
+    done
+  fi
+
+  if curl -sf -o /dev/null "http://localhost:$puerto/"; then
+    VISUAL_BASE_URL="http://localhost:$puerto" VISUAL_SHOTS="$shots" \
+      node "$script" >>"$1" 2>&1
+    code=$?
+  else
+    echo "VISUAL FAIL el servidor de desarrollo no responde en $puerto" >>"$1"
+    code=1
+  fi
+  if [ -n "$pid" ]; then
+    pkill -P "$pid" 2>/dev/null
+    kill "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+  fi
+  {
+    echo
+    printf -- '--- capturas en %s ---\n' "$shots"
+    ls -1 "$shots" 2>/dev/null | sed 's/^/  /'
+    echo
+    echo "--- salida del servidor (runtime feedback) ---"
+    tail -80 "$srvlog"
+  } >>"$1"
+  rm -f "$srvlog"
+  grep -aqE '(⨯|Unhandled|Error:)' "$srvlog" 2>/dev/null && code=1
+  return $code
+}
+
 # ------------------------------------------------------------------ verify ----
 
 cmd_verify() {
-  local etapas="$STAGES_RAPIDO" solo="" smoke=0
+  local etapas="$STAGES_RAPIDO" solo="" smoke=0 visual=0
   FEATURE="_libre"
   # La misma llamada, para repetirla tal cual tras arreglar. `_libre` es un
   # nombre interno para el trabajo sin feature: no se puede volver a pasar.
@@ -267,9 +386,10 @@ cmd_verify() {
       F-[0-9][0-9][0-9]) FEATURE="$1" ;;
       --full) etapas="$STAGES_COMPLETO" ;;
       --smoke) smoke=1 ;;
+      --visual) visual=1 ;;
       --only) shift; solo="${1:-}"; [ -n "$solo" ] || die_uso "uso: --only <etapa>" ;;
       *) die_uso "opción desconocida: $1
-uso: bash .agent/verify.sh [F-NNN] [--full] [--smoke] [--only <etapa>]" ;;
+uso: bash .agent/verify.sh [F-NNN] [--full] [--smoke] [--visual] [--only <etapa>]" ;;
     esac
     shift
   done
@@ -281,6 +401,14 @@ uso: bash .agent/verify.sh [F-NNN] [--full] [--smoke] [--only <etapa>]" ;;
       die_uso "--smoke necesita un F-NNN: el guion vive en .agent/specs/<ID>/smoke.sh
 uso: bash .agent/verify.sh F-007 --smoke"
     case " $etapas " in *" smoke "*) ;; *) etapas="$etapas smoke" ;; esac
+  fi
+
+  if [ "$visual" = 1 ]; then
+    # Igual que smoke: el guion visual vive en la spec del feature.
+    [ "$FEATURE" = "_libre" ] &&
+      die_uso "--visual necesita un F-NNN: el guion vive en .agent/specs/<ID>/visual.mjs
+uso: bash .agent/verify.sh F-010 --visual"
+    case " $etapas " in *" visual "*) ;; *) etapas="$etapas visual" ;; esac
   fi
 
   local intento dir
@@ -306,7 +434,7 @@ uso: bash .agent/verify.sh F-007 --smoke"
     fi
   done
 
-  [ -n "$fallada" ] || { pasa "$intento"; return 0; }
+  [ -n "$fallada" ] || { pasa "$intento" "$etapas"; return 0; }
 
   # ---- FALLA: capturar, firmar, consultar la bitácora, reinyectar ----
   local firma slugs veces
@@ -369,8 +497,11 @@ uso: bash .agent/verify.sh F-007 --smoke"
 
 # El handoff empieza aquí, no cuando alguien se acuerda: al pasar, el sensor
 # dice qué fallos de este ciclo siguen sin lección escrita.
-pasa() { # <intento>
-  apuntar "$FEATURE" "$1" "todas" "PASA" "—" "—"
+pasa() { # <intento> <etapas-que-corrieron>
+  # Se apuntan las etapas de verdad, no un "todas" que no dice nada: es lo que
+  # permite a `sdd.sh done` saber si la etapa `visual` llegó a ejecutarse alguna
+  # vez, y a quien lea el historial saber qué se comprobó en cada intento.
+  apuntar "$FEATURE" "$1" "${2:-—}" "PASA" "—" "—"
   echo
   printf '\033[32mPASA\033[0m\n'
   local pend
@@ -416,6 +547,7 @@ y lo que la bitácora sepa de ese fallo.
   bash .agent/verify.sh F-007              typecheck · lint · format · test
   bash .agent/verify.sh F-007 --full       + prisma · build · theme · bundle
   bash .agent/verify.sh F-007 --smoke      + app levantada y peticiones reales
+  bash .agent/verify.sh F-010 --visual     + chromium headless sobre las pantallas
   bash .agent/verify.sh F-007 --only test  una sola etapa
   bash .agent/verify.sh journal F-007      historial de intentos
   bash .agent/verify.sh pending F-007      fallos sin lección escrita

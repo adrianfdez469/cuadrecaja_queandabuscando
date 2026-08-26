@@ -1,7 +1,7 @@
 ---
 name: sdd-tester
 description: Escribe las pruebas de un feature y lo verifica de verdad — ejecutando comandos y peticiones, no leyendo código. Úsalo después de implementar, y también antes, para fijar los criterios de aceptación como pruebas que fallan. Emite un veredicto LISTO / NO LISTO por criterio y dice a qué agente vuelve cada fallo.
-tools: Read, Write, Edit, Bash
+tools: Read, Write, Edit, Bash, mcp__claude-in-chrome__list_connected_browsers, mcp__claude-in-chrome__select_browser, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__tabs_close_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__resize_window, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__read_page, mcp__claude-in-chrome__get_page_text, mcp__claude-in-chrome__find, mcp__claude-in-chrome__read_console_messages
 model: sonnet
 ---
 

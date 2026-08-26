@@ -455,6 +455,23 @@ Por cada uno, una de dos:
   bash .agent/verify.sh dismiss $id '<firma>' '<motivo>'   si fue un descuido
 La bitácora de problemas es lo único que sobrevive al feature; $PROG/$id.md no."
 
+  # Un feature con interfaz no se cierra sin que alguien haya MIRADO la interfaz.
+  # F-010 se cerró con sus 22 pasos visuales sin ejecutar —ningún agente tenía
+  # navegador— y quedó como «hueco conocido» porque nada lo impedía. Tener
+  # design.md en 'listo' es lo que declara que este feature tiene pantallas; a
+  # partir de ahí, la etapa `visual` del sensor tiene que haber salido PASA.
+  if [ "$(front "$SPECS/$id/design.md" estado)" = "listo" ]; then
+    local vis="$SPECS/$id/visual.mjs" jrn=".agent/runs/$id/journal.tsv"
+    [ -f "$vis" ] || die "$id tiene interfaz (design.md en 'listo') y no hay $vis.
+Los pasos visuales de design.md no se comprueban leyendo el documento: se ejecutan.
+  cp .agent/templates/visual.mjs $vis   # y traduce los pasos V* del diseño
+  bash .agent/verify.sh $id --visual"
+    awk -F'\t' '$4=="PASA" && $3 ~ /(^| )visual( |$)/' "$jrn" 2>/dev/null | grep -q . ||
+      die "$id tiene interfaz y la etapa visual nunca salió PASA.
+Un feature con pantallas que nadie miró no está terminado, está sin comprobar:
+  bash .agent/verify.sh $id --visual"
+  fi
+
   # Regla 6: un feature con passes:false y sin progreso se lee como SIN EMPEZAR.
   # Por eso el humano firma antes de que esto borre nada.
   local passes
