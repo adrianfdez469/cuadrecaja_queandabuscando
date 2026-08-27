@@ -102,6 +102,29 @@ justifique midiendo.
 - **Leer cookies de sesión a mano.** Solo `lib/auth/adminSession.ts` y, en
   cuanto F-012 lo cree, `lib/auth/customerSession.ts`.
 
+### El presupuesto de JavaScript no es un muro
+
+`npm run check:bundle` **no** es una regla estricta, y tratarla como tal ya nos
+hizo diseñar de menos. Lo dice el criterio 5 de F-013 y su nota: el objetivo es
+mantener el bundle lo más pequeño posible para el usuario, **no** convertirlo en
+un freno que degrade funcionalidad o diseño.
+
+Cómo se aplica, en una línea: **entre varias opciones, gana la que menos pese;
+si hace falta subir el número, se sube.** Lo que no se hace es recortar una
+pantalla, quitarle interactividad a algo que la necesita o esconder un feature
+para salvar unos kilobytes.
+
+Subir el presupuesto **nunca es silencioso**: se cambia `BUDGET_KB` en
+`scripts/check-bundle-budget.mjs` dejando en el comentario quién lo subió, por
+qué y **la medición**, como hizo F-010 al pasar de 190 a 193. Así el guion sigue
+haciendo su trabajo real, que es pescar la regresión que nadie pretendía —una
+librería de cliente pesada, un componente de catálogo que ganó un
+`"use client"`—, y no obligar a nadie a alcanzar un absoluto.
+
+Lo que **sí** sigue siendo estricto: la tienda se lee **sin esperar el
+JavaScript** (la prohibición de arriba sobre `"use client"` en algo que renderice
+catálogo). Eso no es presupuesto, es que el HTML tiene que bastar.
+
 ---
 
 ## Cosas que muerden
@@ -132,6 +155,16 @@ instala su propio `Uint8Array` y librerías como `jose` fallan el `instanceof`.
 **Todo lo que el sync escribe es idempotente y va guardado contra escrituras
 rancias** (`sourceUpdatedAt`). Gracias a eso el orden de entrega no importa. Si
 agregas un handler, mantén ambas propiedades o el reintento corrompe datos.
+
+**Un archivo que todavía no existe no se cita entre comillas invertidas.**
+`npm run check:harness` recorre la prosa del arnés y
+falla si una ruta entre `` ` `` no existe en el disco, que es lo que impide que
+un documento mande a un agente a un archivo inventado. El efecto secundario
+muerde justo a quien planifica bien: un `plan.md` o una `architecture.md` que
+nombran los archivos de una etapa futura ponen el sensor en rojo, y con él el
+criterio que exige `--full` en 0. Ya pasó en F-011 y en F-017. La convención:
+**un archivo que se va a crear se escribe sin comillas invertidas y con
+`(por crear)` o `(etapa N, por crear)` detrás.** Cuando exista, gana sus comillas.
 
 **Un evento fallido NO es un duplicado.** Reportarlo en `ok` haría que el POS
 marque su outbox como procesado y la actualización se pierda en silencio. Ver
