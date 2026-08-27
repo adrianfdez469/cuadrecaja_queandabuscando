@@ -33,3 +33,26 @@ ignore, no el archivo.
 
 Ejecuta el sensor (`bash .agent/verify.sh`) antes de dar nada por terminado:
 `format` es su tercera etapa justamente porque es la más barata de arreglar.
+
+## Por qué NO sube a AGENTS.md, aunque el contador diga que es candidata
+
+Decidido el 2026-08-27, después de la quinta vez. `bash .agent/sdd.sh playbook`
+la marca en amarillo y seguirá marcándola: el umbral es mecánico —dos features o
+más— y esta va por cinco. La decisión de no promoverla es a propósito, así que si
+llegas aquí por el amarillo, no hace falta volver a pensarlo.
+
+El motivo es lo que dice la primera línea de esta ficha: nada conceptual. Un
+párrafo en § «Cosas que muerden» sirve para lo que un agente no puede deducir del
+mensaje de error; `Code style issues found` ya dice qué pasa, y el arreglo es una
+orden de una línea. Ninguna de las cinco veces se perdió por ignorancia — se
+perdieron por declarar algo terminado sin correr el sensor, que es una regla que
+el protocolo ya tiene («nadie declara que algo funciona sin que `verify.sh` haya
+salido `0`»). Y esa sección se lee **completa** en cada arranque de sesión: cada
+párrafo que se añade diluye los que sí enseñan algo.
+
+Cinco repeticiones con arreglo trivial no piden documentación, piden que la
+herramienta lo haga. Eso está propuesto aparte, en
+`.agent/specs/propuestas/format-sin-stage-se-cuela-al-ci.md`: que la etapa
+`format` del sensor se auto-repare en voz alta en vez de solo quejarse. Si eso se
+implementa, esta ficha se queda por su rama E2 —lo que `prettier --write` no
+puede arreglar, como un `.prettierignore` mal puesto— y no por esta.
