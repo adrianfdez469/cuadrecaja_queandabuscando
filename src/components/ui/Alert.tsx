@@ -28,14 +28,18 @@ export function Alert({
   title,
   children,
   className,
+  id,
 }: {
   tone?: Tone;
   title?: string;
   children: ReactNode;
   className?: string;
+  /** So a disabled control elsewhere can point `aria-describedby` at this banner. */
+  id?: string;
 }) {
   return (
     <div
+      id={id}
       role={TONE_ROLE[tone]}
       className={cn("rounded-md border p-4 text-sm", TONE_CLASSES[tone], className)}
     >

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
-import { add, money, type Money } from "@/lib/money";
+import { add, money, subtract, type Money } from "@/lib/money";
 import { generateOrderCode } from "@/lib/orderCode";
 import { CART_MAX_QTY_PER_LINE, CART_MIN_QTY_PER_LINE } from "@/constants/cart";
 import {
@@ -30,6 +30,12 @@ export type CreateOrderResult =
   | { kind: "idempotent"; code: string; orderUrl: string; whatsappUrl: string | null }
   | { kind: "empty_cart" }
   | { kind: "store_not_found" }
+  | {
+      kind: "store_closed";
+      reasonCode: string | null;
+      message: string | null;
+      disabledAt: Date | null;
+    }
   | { kind: "items_unavailable"; lines: UnavailableLine[] }
   | { kind: "price_changed"; lines: PriceChangedLine[]; total: string }
   | { kind: "too_many_orders"; retryAfterSeconds: number }
@@ -105,6 +111,18 @@ export async function createOrder(body: CreateOrderRequest): Promise<CreateOrder
   const store = await loadStoreForOrder(body.storeSlug);
   if (!store) return { kind: "store_not_found" };
 
+  // 1.5. HD10-HD15: reject BEFORE quoting or the abuse guard (architecture.md
+  // § El checkout y el pedido) — a closed store must not spend a slot of the
+  // rate limit, and must not cost a price lookup either.
+  if (store.status !== "PUBLISHED") {
+    return {
+      kind: "store_closed",
+      reasonCode: store.disabledReasonCode,
+      message: store.disabledMessage,
+      disabledAt: store.disabledAt,
+    };
+  }
+
   // 2. Merge duplicate lines before anything else sees them.
   const mergedItems = mergeItems(body.items);
 
@@ -140,7 +158,10 @@ export async function createOrder(body: CreateOrderRequest): Promise<CreateOrder
     : money("0", store.currencyCode);
   const deliveryAddress = isDelivery ? (body.deliveryAddress ?? null) : null;
 
-  const total = add(quote.subtotal, deliveryFee);
+  // R29: total = subtotal - discountTotal + deliveryFee. discountTotal is
+  // ORDER-scope only (R30) — the line-level discount is already inside each
+  // line's unitPrice/lineTotal, folded into subtotal.
+  const total = add(subtract(quote.subtotal, quote.discountTotal), deliveryFee);
   const expectedTotal = money(body.expectedTotal, store.currencyCode);
 
   // 5. Price check, BEFORE the abuse guard: a stale total must not spend
@@ -232,7 +253,7 @@ export async function createOrder(body: CreateOrderRequest): Promise<CreateOrder
           status: "PENDING",
           currencyCode: store.currencyCode,
           subtotal: quote.subtotal.amount,
-          discountTotal: "0",
+          discountTotal: quote.discountTotal.amount,
           deliveryFee: deliveryFee.amount,
           total: total.amount,
           rateSnapshot,

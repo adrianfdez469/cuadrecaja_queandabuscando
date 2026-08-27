@@ -66,6 +66,28 @@ if (!worst.page) {
   process.exit(1);
 }
 
+// HD12 (F-011): the migration that closes every store retroactively means a
+// build with no PUBLISHED store prerenders NOTHING under `/[slug]` — this
+// script would then measure `index.html` and pass in green, silently
+// checking a different, much lighter page than the one this budget is
+// actually about (architecture.md § Qué se rompe de lo ya verificado). A
+// storefront page is a top-level `<slug>.html` that is none of the app's
+// other top-level routes.
+const NON_STORE_TOP_LEVEL_PAGES = new Set(["index.html", "_not-found.html", "_global-error.html"]);
+const hasStorePage = [...htmlFiles(APP_DIR)].some((file) => {
+  const rel = path.relative(APP_DIR, file);
+  return !rel.includes(path.sep) && !NON_STORE_TOP_LEVEL_PAGES.has(rel);
+});
+if (!hasStorePage) {
+  console.error(
+    "✗ No store page was prerendered — nothing PUBLISHED to measure.\n" +
+      "  check:bundle would otherwise pass measuring index.html, which is not\n" +
+      "  what this budget is for. Publish at least one store before building\n" +
+      "  (`npm run seed` keeps tienda-demo and tienda-dos open on purpose).",
+  );
+  process.exit(1);
+}
+
 const jsKb = worst.js / 1024;
 const htmlKb = worst.html / 1024;
 const ok = jsKb <= BUDGET_KB;

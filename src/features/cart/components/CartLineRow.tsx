@@ -24,6 +24,7 @@ export function CartLineRow({
   qty,
   unitPriceLabel,
   unitPriceMuted,
+  listUnitPriceLabel,
   lineTotalLabel,
   status,
   onIncrement,
@@ -37,6 +38,9 @@ export function CartLineRow({
   qty: number;
   unitPriceLabel: string;
   unitPriceMuted: boolean;
+  /** HD3: the pre-discount unit price, for the "Antes" strikethrough
+   *  (design.md § 7). `undefined` when no promotion won this line. */
+  listUnitPriceLabel?: string;
   lineTotalLabel: string | null;
   status: CartLineStatus;
   onIncrement: () => void;
@@ -62,6 +66,11 @@ export function CartLineRow({
         <p className={cn("text-sm", unitPriceMuted ? "text-fg-muted" : "text-fg")}>
           {isOk ? `${unitPriceLabel} c/u` : STATUS_LABEL[status]}
         </p>
+        {isOk && listUnitPriceLabel && (
+          <p className="text-fg-muted text-xs">
+            Antes <span className="line-through">{listUnitPriceLabel}</span>
+          </p>
+        )}
         {status === "OUT_OF_STOCK" && (
           <Badge tone="muted" className="mt-1">
             Agotado

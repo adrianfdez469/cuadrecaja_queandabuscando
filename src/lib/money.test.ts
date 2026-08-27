@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   add,
+  compare,
   convert,
   formatMoney,
   isZero,
   money,
   MoneyError,
   multiply,
+  percentageOff,
   subtract,
   sum,
 } from "./money";
@@ -107,5 +109,33 @@ describe("formatMoney()", () => {
   it("falls back for an unknown currency code", () => {
     const output = formatMoney(money("10", "XYZ"), { locale: "en-US", symbol: "¤" });
     expect(output).toMatch(/10\.00/);
+  });
+});
+
+describe("percentageOff()", () => {
+  it("takes a percentage off", () => {
+    expect(percentageOff(money("500", "CUP"), "20").amount).toBe("400.00");
+  });
+
+  it("floors at 0 rather than going negative", () => {
+    expect(percentageOff(money("10", "CUP"), "100").amount).toBe("0.00");
+  });
+
+  it("rounds half up on the smallest unit", () => {
+    // 50% of 10.03 is exactly 5.015; the DISCOUNT rounds up to 5.02, so the
+    // remaining price is 5.01, not 5.02 or a truncated 5.00.
+    expect(percentageOff(money("10.03", "CUP"), "50").amount).toBe("5.01");
+  });
+});
+
+describe("compare()", () => {
+  it("orders two amounts in the same currency", () => {
+    expect(compare(money("5", "CUP"), money("10", "CUP"))).toBe(-1);
+    expect(compare(money("10", "CUP"), money("5", "CUP"))).toBe(1);
+    expect(compare(money("5", "CUP"), money("5", "CUP"))).toBe(0);
+  });
+
+  it("throws on a currency mismatch, like the rest of the arithmetic", () => {
+    expect(() => compare(money("5", "CUP"), money("5", "USD"))).toThrow(MoneyError);
   });
 });

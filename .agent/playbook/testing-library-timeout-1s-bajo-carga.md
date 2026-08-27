@@ -1,12 +1,12 @@
 ---
 slug: testing-library-timeout-1s-bajo-carga
-sintoma: 'un test de componente falla con «Unable to find role=...» y un tiempo de ~1000-1100 ms, y vuelve a pasar si lo corres solo'
-firma: Unable to find role
+sintoma: "un test de componente falla con «Unable to find role=...» a ~1000-1100 ms, o con «Test timed out in 5000ms» cuando la suite crece, y vuelve a pasar si lo corres solo"
+firma: Unable to find role|Test timed out in [0-9]+ms
 etapa: test
-visto_en: F-007
+visto_en: F-007, F-011
 creado: 2026-08-26T12:20:00Z
 promovido_a_agents: no
-arreglo: no es tu cambio, es el timeout de 1 s de findBy*/waitFor agotado bajo carga — sube el timeout en ESE aserto (`{ timeout: 5000 }`), no toques el componente
+arreglo: no es tu cambio — sube `asyncUtilTimeout` (vitest.setup.ts) para el hallazgo de rol, y si el fallo es «Test timed out» sube también `testTimeout` del proyecto `ui` en vitest.config.mts (el techo del test completo, no el de findBy*/waitFor); no toques el componente
 ---
 
 ## Qué pasa de verdad
@@ -103,3 +103,18 @@ solo y falla en la suite no es un test que dependa de otro hasta que lo hayas
 descartado.** Antes de buscar estado compartido entre archivos, mira el reloj
 del aserto. Aquí el reloj lo decía todo y el estado compartido no tenía nada
 que ver.
+
+## Actualización (F-011)
+
+Con una suite más grande (~15 archivos de test nuevos), el mismo test volvió
+a fallar, pero con un mensaje distinto: **«Test timed out in 5000ms»**, sin
+ningún «Unable to find role». Es el mismo problema un escalón más arriba: la
+suma de los `findByRole`/`waitFor` del test (cada uno con su propio techo de
+`asyncUtilTimeout = 5000` ms) puede acercarse o superar el **`testTimeout`**
+por defecto de Vitest para el test completo, que también es 5000 ms — dos
+techos independientes, coincidentes por accidente. Subir solo
+`asyncUtilTimeout` no alcanza si el techo que se agota es el del test entero.
+
+Arreglo aplicado: `testTimeout: 15_000` en el proyecto `ui` de
+`vitest.config.mts`. Confirmado con `CheckoutForm.test.tsx` solo (146 ms) vs.
+la suite completa (flakeaba de forma intermitente antes del cambio).

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { cached, storeCatalogTag, storeTag } from "@/lib/cache";
+import { indexPromotions, type AppliedPromotion, type PromotionRow } from "@/lib/promotions";
 
 /**
  * Read side of the public storefront.
@@ -23,6 +24,12 @@ export type StoreSummary = {
   address: string | null;
   city: string | null;
   baseCurrencyCode: string;
+  /** HD10-HD15: DRAFT never renders in public (`requireStore` 404s it);
+   *  SUSPENDED renders as the closed notice, never as a 404 (HD11). */
+  status: "DRAFT" | "PUBLISHED" | "SUSPENDED";
+  disabledReasonCode: string | null;
+  disabledMessage: string | null;
+  disabledAt: Date | null;
 };
 
 export type CatalogProduct = {
@@ -38,11 +45,18 @@ export type CatalogProduct = {
   syncedPriceCurrency: string;
   priceOverride: string | null;
   priceOverrideCurrency: string | null;
+  /** R28: candidates already filtered by vigency and scope, from the SAME
+   *  cached read — `resolvePrice` (lib/pricing.ts) picks the winner. */
+  promotions: readonly AppliedPromotion[];
 };
 
 async function loadStore(slug: string): Promise<StoreSummary | null> {
+  // HD11: no `status` filter here — a SUSPENDED store still has to render
+  // its closed notice with a real name and theme, not a bare 404. The
+  // catalogue query below keeps the filter; this is the one read that needs
+  // to tell "does not exist" apart from "exists and is closed".
   const store = await prisma.store.findFirst({
-    where: { slug, status: "PUBLISHED" },
+    where: { slug },
     select: {
       id: true,
       slug: true,
@@ -55,6 +69,10 @@ async function loadStore(slug: string): Promise<StoreSummary | null> {
       phone: true,
       address: true,
       city: true,
+      status: true,
+      disabledReasonCode: true,
+      disabledMessage: true,
+      disabledAt: true,
       business: { select: { baseCurrencyCode: true } },
     },
   });
@@ -71,37 +89,77 @@ export function getStoreBySlug(slug: string): Promise<StoreSummary | null> {
   })(slug);
 }
 
-/** Throws the Next not-found boundary. For use directly in a page. */
+/**
+ * Throws the Next not-found boundary. For use directly in a page.
+ *
+ * HD11: only a missing row or a `DRAFT` one 404s — there is no QR pointing
+ * at a store that never published, and a closed page for something that
+ * never existed would give it a public presence it never had. `SUSPENDED`
+ * returns normally: the caller decides catalog vs. the closed notice.
+ */
 export async function requireStore(slug: string): Promise<StoreSummary> {
   const store = await getStoreBySlug(slug);
-  if (!store) notFound();
+  if (!store || store.status === "DRAFT") notFound();
   return store;
 }
 
 async function loadCatalog(slug: string): Promise<CatalogProduct[]> {
-  const products = await prisma.storeProduct.findMany({
-    where: {
-      store: { slug, status: "PUBLISHED" },
-      deletedAt: null,
-      visible: true,
-    },
-    orderBy: [{ featured: "desc" }, { localName: "asc" }],
-    select: {
-      id: true,
-      slug: true,
-      localName: true,
-      description: true,
-      imageUrls: true,
-      availability: true,
-      featured: true,
-      syncedPrice: true,
-      syncedPriceCurrency: true,
-      priceOverride: true,
-      priceOverrideCurrency: true,
-      localCategory: { select: { name: true } },
-      canonicalProduct: { select: { description: true, imageUrl: true } },
-    },
-  });
+  const [products, promotionRows] = await Promise.all([
+    prisma.storeProduct.findMany({
+      where: {
+        store: { slug, status: "PUBLISHED" },
+        deletedAt: null,
+        visible: true,
+      },
+      orderBy: [{ featured: "desc" }, { localName: "asc" }],
+      select: {
+        id: true,
+        slug: true,
+        localName: true,
+        description: true,
+        imageUrls: true,
+        availability: true,
+        featured: true,
+        syncedPrice: true,
+        syncedPriceCurrency: true,
+        priceOverride: true,
+        priceOverrideCurrency: true,
+        localCategoryId: true,
+        localCategory: { select: { name: true } },
+        canonicalProduct: { select: { description: true, imageUrl: true } },
+      },
+    }),
+    // R28: read inside the SAME cached function as the products, so a
+    // promotion write revalidates this exact tag (R10) — never a second,
+    // separately-cached lookup that could drift.
+    prisma.promotion.findMany({
+      where: { store: { slug }, active: true },
+      select: {
+        id: true,
+        type: true,
+        scope: true,
+        value: true,
+        conditions: true,
+        startsAt: true,
+        endsAt: true,
+        active: true,
+      },
+    }),
+  ]);
+
+  const promotionIndex = indexPromotions(
+    promotionRows.map((row): PromotionRow => ({
+      id: row.id,
+      type: row.type,
+      scope: row.scope,
+      value: row.value.toString(),
+      conditions: row.conditions,
+      startsAt: row.startsAt,
+      endsAt: row.endsAt,
+      active: row.active,
+    })),
+    new Date(),
+  );
 
   return products.map((product) => ({
     id: product.id,
@@ -117,6 +175,7 @@ async function loadCatalog(slug: string): Promise<CatalogProduct[]> {
           : [],
     availability: product.availability,
     featured: product.featured,
+    promotions: promotionIndex.forProduct(product.id, product.localCategoryId),
     categoryName: product.localCategory?.name ?? null,
     syncedPrice: product.syncedPrice.toString(),
     syncedPriceCurrency: product.syncedPriceCurrency,

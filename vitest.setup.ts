@@ -20,4 +20,4 @@ import { configure } from "@testing-library/dom";
  * Full diagnosis, and how to tell this apart from an element that genuinely
  * never renders: .agent/playbook/testing-library-timeout-1s-bajo-carga.md
  */
-configure({ asyncUtilTimeout: 5000 });
+configure({ asyncUtilTimeout: 8000 });

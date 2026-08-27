@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { Field } from "@/components/ui/Field";
 import { RadioCard } from "@/components/ui/RadioCard";
-import { add, formatMoney, money } from "@/lib/money";
+import { add, formatMoney, money, subtract } from "@/lib/money";
 import {
   CONTACT_NAME_MAX_LENGTH,
   CONTACT_NAME_MIN_LENGTH,
@@ -21,10 +21,11 @@ import {
 } from "@/constants/cart";
 import { generateUuidV4 } from "@/features/orders/idempotencyKey";
 import type { CreateOrderBody, Fulfillment, QuoteResponse } from "@/features/orders/types";
+import { resolveStoreClosureHeadline } from "@/lib/storeClosure";
 import { useCart, useHydrated } from "../cartStore";
 import { OrderSummary } from "./OrderSummary";
 
-type QuoteState = "loading" | "ready" | "error" | "not-found";
+type QuoteState = "loading" | "ready" | "error" | "not-found" | "closed";
 
 type FieldErrors = Partial<
   Record<"name" | "phone" | "email" | "deliveryAddress" | "notes", string>
@@ -50,6 +51,7 @@ type SubmitOutcome =
   | { kind: "too_many_orders"; retryAfterSeconds: number }
   | { kind: "invalid_body" }
   | { kind: "store_not_found" }
+  | { kind: "store_closed"; reasonCode: string | null; disabledAt: string | null }
   | { kind: "failed" }
   | { kind: "network_error" };
 
@@ -116,6 +118,13 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
       if (response.status === 404) {
         setQuoteState("not-found");
         return;
+      }
+      if (response.status === 409) {
+        const data = await response.json().catch(() => null);
+        if (data?.error === "STORE_CLOSED") {
+          setQuoteState("closed");
+          return;
+        }
       }
       if (!response.ok) {
         setQuoteState("error");
@@ -245,7 +254,13 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
         ? money(quote.store.deliveryFee, quote.store.currencyCode)
         : money("0", quote.store.currencyCode);
     const subtotalMoney = money(quote.subtotal, quote.store.currencyCode);
-    const expectedTotal = expectedTotalOverride ?? add(subtotalMoney, deliveryFee).amount;
+    const discountMoney = money(quote.discountTotal, quote.store.currencyCode);
+    // R29: subtotal - discountTotal + deliveryFee. Without subtracting the
+    // ORDER-scope discount here, every checkout with one active would send a
+    // stale expectedTotal and get a 409 PRICE_CHANGED on a price that never
+    // actually changed (architecture.md hallazgo 2).
+    const expectedTotal =
+      expectedTotalOverride ?? add(subtract(subtotalMoney, discountMoney), deliveryFee).amount;
     const idempotencyKey = getOrCreateIdempotencyKey();
 
     const body: CreateOrderBody = {
@@ -309,6 +324,15 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
         setOutcome({ kind: "store_not_found" });
         return;
       }
+      if (response.status === 409 && data?.error === "STORE_CLOSED") {
+        setOutcome({
+          kind: "store_closed",
+          reasonCode: data.reasonCode ?? null,
+          disabledAt: data.disabledAt ?? null,
+        });
+        setQuoteState("closed");
+        return;
+      }
       setOutcome({ kind: "failed" });
     } catch {
       setOutcome({ kind: "network_error" });
@@ -340,11 +364,19 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
       ? money(quote.store.deliveryFee as string, quote.store.currencyCode)
       : null;
   const subtotalLabel = quote ? formatMoney(money(quote.subtotal, quote.store.currencyCode)) : null;
+  const discountMoney =
+    quote && quote.discountTotal !== "0.00" && quote.discountTotal !== "0"
+      ? money(quote.discountTotal, quote.store.currencyCode)
+      : null;
+  const discountLabel = discountMoney ? `−${formatMoney(discountMoney)}` : undefined;
   const totalLabel =
     quote && quoteState === "ready"
       ? formatMoney(
           add(
-            money(quote.subtotal, quote.store.currencyCode),
+            subtract(
+              money(quote.subtotal, quote.store.currencyCode),
+              discountMoney ?? money("0", quote.store.currencyCode),
+            ),
             deliveryFeeMoney ?? money("0", quote.store.currencyCode),
           ),
         )
@@ -487,6 +519,18 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
         )}
         {outcome.kind === "store_not_found" && (
           <Alert tone="danger">Esta tienda ya no está disponible.</Alert>
+        )}
+        {outcome.kind === "store_closed" && (
+          <Alert id="checkout-store-closed" tone="danger">
+            <p>Esta tienda dejó de tomar pedidos.</p>
+            <p>
+              {resolveStoreClosureHeadline({
+                disabledReasonCode: outcome.reasonCode,
+                disabledAt: outcome.disabledAt,
+              })}
+            </p>
+            <p>No se creó ningún pedido.</p>
+          </Alert>
         )}
         {outcome.kind === "failed" && (
           <Alert tone="danger">
@@ -639,6 +683,11 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
         {quoteState === "not-found" && (
           <Alert tone="danger">Esta tienda ya no está disponible.</Alert>
         )}
+        {quoteState === "closed" && (
+          <Alert id="checkout-store-closed" tone="danger">
+            Esta tienda dejó de tomar pedidos.
+          </Alert>
+        )}
         {slow && quoteState === "loading" && (
           <p className="text-fg-muted mb-3 text-sm">
             Estamos calculando el total. En una conexión lenta puede tardar un poco.
@@ -647,6 +696,7 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
 
         <OrderSummary
           subtotalLabel={subtotalLabel}
+          discountLabel={discountLabel}
           deliveryFeeLabel={
             deliveryOffered
               ? deliveryFeeMoney
@@ -663,6 +713,7 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
           className="mt-4 w-full"
           disabled={!canSubmit}
           aria-busy={submitting}
+          aria-describedby={quoteState === "closed" ? "checkout-store-closed" : undefined}
           onClick={handlePrimaryClick}
         >
           {primaryLabel}

@@ -9,6 +9,7 @@
  */
 export function OrderSummary({
   subtotalLabel,
+  discountLabel,
   deliveryFeeLabel,
   totalLabel,
   busy = false,
@@ -16,6 +17,9 @@ export function OrderSummary({
   note,
 }: {
   subtotalLabel: string | null;
+  /** HD3: the ORDER-scope discount, already formatted with its own "−"
+   *  sign. `undefined` hides the row (no promotion applied). */
+  discountLabel?: string;
   deliveryFeeLabel?: string | null;
   totalLabel: string | null;
   busy?: boolean;
@@ -31,6 +35,13 @@ export function OrderSummary({
           {subtotalLabel ?? "Calculando…"}
         </span>
       </div>
+
+      {discountLabel && (
+        <div className="flex justify-between text-sm">
+          <span className="text-fg-muted">Descuento</span>
+          <span className="text-fg">{discountLabel}</span>
+        </div>
+      )}
 
       {deliveryFeeLabel !== undefined && (
         <div className="flex justify-between text-sm">

@@ -45,6 +45,10 @@ const store = {
   deliveryEnabled: false,
   deliveryFee: null as string | null,
   whatsappNumber: "+5350000001",
+  status: "PUBLISHED" as const,
+  disabledReasonCode: null,
+  disabledMessage: null,
+  disabledAt: null,
 };
 
 function orderableLine(overrides: Record<string, unknown> = {}) {
@@ -81,6 +85,7 @@ beforeEach(() => {
     store,
     lines: [orderableLine()],
     subtotal: money("900.00", "CUP"),
+    discountTotal: money("0", "CUP"),
     rates: {},
     capturedAt: "2026-08-26T02:00:00.000Z",
   });
@@ -99,6 +104,25 @@ describe("createOrder() — routing", () => {
     const result = await createOrder(baseBody({ items: [] }));
     expect(result).toEqual({ kind: "empty_cart" });
     expect(quoteCart).not.toHaveBeenCalled();
+  });
+
+  it("returns store_closed BEFORE quoting or the abuse guard (HD10-HD15)", async () => {
+    loadStoreForOrder.mockResolvedValue({
+      ...store,
+      status: "SUSPENDED",
+      disabledReasonCode: "VACACIONES",
+      disabledMessage: null,
+      disabledAt: new Date("2026-08-01T00:00:00Z"),
+    });
+    const result = await createOrder(baseBody());
+    expect(result).toEqual({
+      kind: "store_closed",
+      reasonCode: "VACACIONES",
+      message: null,
+      disabledAt: new Date("2026-08-01T00:00:00Z"),
+    });
+    expect(quoteCart).not.toHaveBeenCalled();
+    expect(orderFindMany).not.toHaveBeenCalled();
   });
 
   it("returns items_unavailable with every unorderable line's reason", async () => {
@@ -239,7 +263,7 @@ describe("createOrder() — writing the order", () => {
     expect(data.subtotal).toBe("900.00");
     expect(data.deliveryFee).toBe("0.00");
     expect(data.total).toBe("900.00");
-    expect(data.discountTotal).toBe("0");
+    expect(data.discountTotal).toBe("0.00");
     expect(data.rateSnapshot).toEqual({
       base: "CUP",
       capturedAt: "2026-08-26T02:00:00.000Z",
@@ -266,6 +290,7 @@ describe("createOrder() — writing the order", () => {
       store: deliveryStore,
       lines: [orderableLine()],
       subtotal: money("900.00", "CUP"),
+      discountTotal: money("0", "CUP"),
       rates: {},
       capturedAt: "now",
     });
@@ -358,6 +383,7 @@ describe("createOrder() — whatsappUrl", () => {
       store: onsiteStore,
       lines: [orderableLine()],
       subtotal: money("900.00", "CUP"),
+      discountTotal: money("0", "CUP"),
       rates: {},
       capturedAt: "now",
     });

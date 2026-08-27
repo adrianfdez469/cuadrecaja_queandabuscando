@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { AVAILABILITY_LABEL, AVAILABILITY_TONE, shouldShowBadge } from "@/lib/availability";
-import { displayPrice } from "@/lib/pricing";
+import { resolvePrice, type ResolvedPrice } from "@/lib/pricing";
 import { formatMoney } from "@/lib/money";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
@@ -22,7 +22,7 @@ export function ProductCard({
   displayCurrency: string;
   rates: Record<string, string>;
 }) {
-  const price = safePrice(product, displayCurrency, rates);
+  const resolved = safeResolve(product, displayCurrency, rates);
   const image = product.imageUrls[0];
 
   return (
@@ -55,8 +55,17 @@ export function ProductCard({
           <h3 className="line-clamp-2 text-sm font-medium">{product.name}</h3>
 
           <p className="text-brand text-base font-semibold">
-            {price ?? <span className="text-fg-muted font-normal">Consultar</span>}
+            {resolved ? (
+              formatMoney(resolved.price)
+            ) : (
+              <span className="text-fg-muted font-normal">Consultar</span>
+            )}
           </p>
+          {resolved?.listPrice && (
+            <p className="text-fg-muted text-xs">
+              Antes <span className="line-through">{formatMoney(resolved.listPrice)}</span>
+            </p>
+          )}
 
           {shouldShowBadge(product.availability) && (
             <Badge tone={AVAILABILITY_TONE[product.availability]}>
@@ -74,13 +83,18 @@ export function ProductCard({
  * Showing "Consultar" is a worse experience than a price, and a much better one
  * than a 500.
  */
-function safePrice(
+function safeResolve(
   product: CatalogProduct,
   displayCurrency: string,
   rates: Record<string, string>,
-): string | null {
+): ResolvedPrice | null {
   try {
-    return formatMoney(displayPrice(product, displayCurrency, rates));
+    return resolvePrice(product, {
+      targetCurrency: displayCurrency,
+      rates,
+      baseCurrency: displayCurrency,
+      promotions: product.promotions,
+    });
   } catch {
     return null;
   }

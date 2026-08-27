@@ -25,5 +25,119 @@ services:
       timeout: 5s
       retries: 10
 
+  # --- Supabase Storage emulator (HD1) ----------------------------------
+  # Four services so the panel's image upload (criterio 4) talks to the real
+  # Supabase Storage API, in local dev too — never a disk driver. Optional:
+  # a session that never touches images works fine with these stopped
+  # (`.agent/init.sh` only warns). See architecture.md § Emulador de Storage.
+
+  storage-db:
+    image: postgres:16-alpine
+    container_name: queandabuscando-storage-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: storage
+    volumes:
+      - queandabuscando-storage-pgdata:/var/lib/postgresql/data
+      # Only runs against an EMPTY volume — never the app's own Postgres.
+      - ./docker/storage-roles.sql:/docker-entrypoint-initdb.d/storage-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d storage"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  storage:
+    image: supabase/storage-api:v1.71.0
+    container_name: queandabuscando-storage
+    restart: unless-stopped
+    depends_on:
+      storage-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://supabase_storage_admin:postgres@storage-db:5432/storage
+      MULTI_TENANT: "false"
+      TENANT_ID: stub
+      REGION: stub
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      # 10 MB here, on purpose bigger than the app's own 4 MB (`constants/media.ts`):
+      # the limit that bites in every test must be ours, not the emulator's.
+      FILE_SIZE_LIMIT: "10485760"
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+      # Read from .env, which is gitignored: nothing key-shaped lives in this
+      # repository. Generate them with `node scripts/storage-dev-keys.mjs --write`.
+      # `?err` fails the command with that message instead of starting a
+      # container that would reject every request with an opaque 401.
+      PGRST_JWT_SECRET: "${STORAGE_JWT_SECRET:?missing, run node scripts/storage-dev-keys.mjs --write}"
+      ANON_KEY: "${NEXT_PUBLIC_SUPABASE_ANON_KEY:?missing, run node scripts/storage-dev-keys.mjs --write}"
+      SERVICE_KEY: "${SUPABASE_SERVICE_ROLE_KEY:?missing, run node scripts/storage-dev-keys.mjs --write}"
+    volumes:
+      - queandabuscando-storage-objects:/var/lib/storage
+    healthcheck:
+      # `127.0.0.1`, not `localhost`: this image resolves "localhost" to `::1`
+      # first and the server only binds IPv4, so the healthcheck would see
+      # "connection refused" forever despite the server being up.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5000/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  storage-gateway:
+    image: nginx:1.27-alpine
+    container_name: queandabuscando-storage-gateway
+    restart: unless-stopped
+    depends_on:
+      storage:
+        condition: service_healthy
+    ports:
+      - "54321:80"
+    volumes:
+      - ./docker/storage-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # One shot, idempotent, two jobs — `postgres:16-alpine` (already pulled for
+  # the app's own db) has both `psql` and `wget`, so one container covers both:
+  #
+  # 1. `GRANT USAGE ON SCHEMA storage` to anon/authenticated/service_role.
+  #    `storage-roles.sql` (docker-entrypoint-initdb.d) runs BEFORE `storage`
+  #    exists at all — the schema is created later, by `storage`'s OWN
+  #    migrations — so that grant has to happen here, after `storage` is
+  #    healthy. Its tenant migrations (0046/0049) grant TABLE privileges on
+  #    `storage.buckets`/`storage.objects`, but a table grant does not imply
+  #    schema USAGE: without this, every request answers 403 "permission
+  #    denied for schema storage" despite a perfectly valid JWT. Found by
+  #    running the emulator end to end, not by reading either migration.
+  # 2. Seed the public `store-media` bucket. On a second `docker compose up`
+  #    it already exists — this build of `storage-api` answers that with
+  #    HTTP **400**, not 409, and puts `"statusCode":"409"` only INSIDE the
+  #    JSON body (`"code":"BucketAlreadyExists"`). Checking just the real
+  #    HTTP status would treat an idempotent re-run as a failure — found by
+  #    running this twice, not by reading the API.
+  #
+  # A single `sh -c` line on purpose, not a wrapped one: a YAML folded scalar
+  # (`>`) stops folding a continuation line the moment it is indented one
+  # column deeper than the first, so a wrapped multi-line command silently
+  # keeps its raw newlines and `sh` reads the next line as its own command
+  # (`-H: not found`) — found by running this, not by reading YAML docs.
+  storage-bucket-init:
+    image: postgres:16-alpine
+    container_name: queandabuscando-storage-bucket-init
+    depends_on:
+      storage-gateway:
+        condition: service_started
+    restart: "no"
+    environment:
+      PGPASSWORD: postgres
+      SERVICE_KEY: "${SUPABASE_SERVICE_ROLE_KEY:?missing, run node scripts/storage-dev-keys.mjs --write}"
+    entrypoint:
+      - sh
+      - -c
+      - >
+        apk add --no-cache curl >/tmp/apk.log 2>&1; for i in $$(seq 1 20); do psql -h storage-db -U postgres -d storage -c "grant usage on schema storage to anon, authenticated, service_role;" >/tmp/grant.log 2>&1 && break; sleep 1; done; cat /tmp/grant.log; for i in $$(seq 1 20); do body=$$(curl -s -o /tmp/out -w '%{http_code}' -X POST http://storage-gateway/storage/v1/bucket -H "Authorization: Bearer $$SERVICE_KEY" -H "content-type: application/json" -d '{"name":"store-media","public":true}'); if [ "$$body" = "200" ] || [ "$$body" = "201" ] || grep -q BucketAlreadyExists /tmp/out; then exit 0; fi; sleep 1; done; cat /tmp/out; exit 1
+
 volumes:
   queandabuscando-pgdata:
+  queandabuscando-storage-pgdata:
+  queandabuscando-storage-objects:

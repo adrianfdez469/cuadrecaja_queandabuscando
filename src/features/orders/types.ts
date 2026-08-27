@@ -7,6 +7,7 @@
  * `satisfies` so the server's real validation cannot silently drift from what
  * the islands expect.
  */
+import type { SerializableIssue } from "@/lib/httpJson";
 
 export type QuoteLineReason = "OUT_OF_STOCK" | "REMOVED" | "NO_PRICE";
 
@@ -37,6 +38,9 @@ export type QuoteLine = {
   lineTotal: string | null;
   originalUnitPrice: string | null;
   originalCurrencyCode: string | null;
+  /** List price in the order's currency, HD3 — `null` unless a promotion
+   *  actually lowered this line (design.md § 7's "Antes {importe}"). */
+  listUnitPrice: string | null;
   orderable: boolean;
   reason?: QuoteLineReason;
 };
@@ -46,6 +50,8 @@ export type QuoteResponse = {
   lines: QuoteLine[];
   /** Sum of `lineTotal` for orderable lines only. */
   subtotal: string;
+  /** ORDER-scope discount (R29). "0" when none applies. */
+  discountTotal: string;
   capturedAt: string;
 };
 
@@ -86,7 +92,8 @@ export type CreateOrderSuccess = {
 
 export type CreateOrderIdempotentSuccess = CreateOrderSuccess & { idempotent: true };
 
-export type InvalidBodyIssue = { path: (string | number)[]; message: string };
+/** Alias of the shared shape in `@/lib/httpJson` (AGENTS.md: no duplicate interfaces). */
+export type InvalidBodyIssue = SerializableIssue;
 
 export type UnavailableLine = { storeProductId: string; reason: QuoteLineReason };
 export type PriceChangedLine = { storeProductId: string; was: string | null; now: string };

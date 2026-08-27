@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const storeFindFirst = vi.fn();
 const storeProductFindMany = vi.fn();
 const exchangeRateFindMany = vi.fn();
+const promotionFindMany = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     store: { findFirst: (...args: unknown[]) => storeFindFirst(...args) },
     storeProduct: { findMany: (...args: unknown[]) => storeProductFindMany(...args) },
     exchangeRate: { findMany: (...args: unknown[]) => exchangeRateFindMany(...args) },
+    promotion: { findMany: (...args: unknown[]) => promotionFindMany(...args) },
   },
 }));
 
@@ -18,6 +20,7 @@ beforeEach(() => {
   storeFindFirst.mockReset();
   storeProductFindMany.mockReset();
   exchangeRateFindMany.mockReset().mockResolvedValue([]);
+  promotionFindMany.mockReset().mockResolvedValue([]);
 });
 
 const store = {
@@ -30,6 +33,10 @@ const store = {
   deliveryEnabled: false,
   deliveryFee: null,
   whatsappNumber: "+5350000001",
+  status: "PUBLISHED" as const,
+  disabledReasonCode: null,
+  disabledMessage: null,
+  disabledAt: null,
 };
 
 function product(overrides: Record<string, unknown> = {}) {
@@ -150,9 +157,55 @@ describe("quoteCart()", () => {
 });
 
 describe("quoteBySlug()", () => {
-  it("returns null when the store is not found", async () => {
+  it("returns not_found when the store does not exist", async () => {
     storeFindFirst.mockResolvedValue(null);
-    expect(await quoteBySlug("no-existe", [])).toBeNull();
+    expect(await quoteBySlug("no-existe", [])).toEqual({ kind: "not_found" });
+  });
+
+  it("returns closed, not not_found, for a SUSPENDED store (HD11)", async () => {
+    storeFindFirst.mockResolvedValue({
+      id: "store-1",
+      slug: "tienda-demo",
+      name: "La Rampa",
+      checkoutMode: "WHATSAPP",
+      deliveryEnabled: false,
+      deliveryFee: null,
+      whatsapp: "+5350000001",
+      phone: null,
+      status: "SUSPENDED",
+      disabledReasonCode: "VACACIONES",
+      disabledMessage: null,
+      disabledAt: new Date("2026-08-01T00:00:00Z"),
+      business: { id: "biz-1", baseCurrencyCode: "CUP" },
+    });
+    const result = await quoteBySlug("tienda-demo", []);
+    expect(result).toEqual({
+      kind: "closed",
+      reasonCode: "VACACIONES",
+      message: null,
+      disabledAt: new Date("2026-08-01T00:00:00Z"),
+    });
+  });
+
+  it("returns ok with a real quote for a PUBLISHED store", async () => {
+    storeFindFirst.mockResolvedValue({
+      id: "store-1",
+      slug: "tienda-demo",
+      name: "La Rampa",
+      checkoutMode: "WHATSAPP",
+      deliveryEnabled: false,
+      deliveryFee: null,
+      whatsapp: "+5350000001",
+      phone: null,
+      status: "PUBLISHED",
+      disabledReasonCode: null,
+      disabledMessage: null,
+      disabledAt: null,
+      business: { id: "biz-1", baseCurrencyCode: "CUP" },
+    });
+    storeProductFindMany.mockResolvedValue([]);
+    const result = await quoteBySlug("tienda-demo", []);
+    expect(result.kind).toBe("ok");
   });
 });
 

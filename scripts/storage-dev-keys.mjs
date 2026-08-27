@@ -1,0 +1,70 @@
+#!/usr/bin/env node
+/**
+ * Mint the local Storage emulator's dev credentials.
+ *
+ * The emulator (docker-compose.yml) speaks the real Supabase Storage API, so it
+ * needs a JWT secret and two tokens signed with it. Those used to be hardcoded
+ * in `.env.example` and `docker-compose.yml` using Supabase's public demo keys.
+ * They were never real credentials, but committing key-shaped material teaches
+ * the next person to paste the real thing in the same slot, and every secret
+ * scanner flags it forever.
+ *
+ * So they are generated instead: unique per machine, living only in `.env`,
+ * which is gitignored. `docker compose` reads that same file, so the app and the
+ * emulator agree without either value existing in the repository.
+ *
+ *   node scripts/storage-dev-keys.mjs          # print the three lines
+ *   node scripts/storage-dev-keys.mjs --write  # append/replace them in .env
+ *
+ * After changing them, the emulator must be recreated so it reads the new
+ * secret: `docker compose up -d --force-recreate storage storage-gateway`.
+ */
+
+import { randomBytes } from "node:crypto";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { SignJWT } from "jose";
+
+// storage-api rejects a shorter secret outright.
+const SECRET_BYTES = 48;
+const YEARS = 10;
+
+const VARS = ["STORAGE_JWT_SECRET", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"];
+
+async function sign(role, secret) {
+  return new SignJWT({ role, iss: "queandabuscando-local" })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime(`${YEARS * 365}d`)
+    .sign(new TextEncoder().encode(secret));
+}
+
+const secret = randomBytes(SECRET_BYTES).toString("base64url");
+const lines = [
+  `STORAGE_JWT_SECRET="${secret}"`,
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY="${await sign("anon", secret)}"`,
+  `SUPABASE_SERVICE_ROLE_KEY="${await sign("service_role", secret)}"`,
+];
+
+if (!process.argv.includes("--write")) {
+  console.log(lines.join("\n"));
+  process.exit(0);
+}
+
+if (!existsSync(".env")) {
+  console.error("No .env here. Copy .env.example first, then run this again.");
+  process.exit(1);
+}
+
+// Replace in place when the key already exists, so the rest of .env is untouched
+// and the file never grows a second definition of the same variable.
+let env = readFileSync(".env", "utf8");
+for (const [i, name] of VARS.entries()) {
+  const line = lines[i];
+  const existing = new RegExp(`^${name}=.*$`, "m");
+  env = existing.test(env) ? env.replace(existing, line) : `${env.replace(/\n*$/, "\n")}${line}\n`;
+}
+writeFileSync(".env", env);
+
+console.log(`Wrote ${VARS.length} local Storage keys to .env.`);
+console.log("Now recreate the emulator so it reads the new secret:");
+console.log("  docker compose up -d --force-recreate storage storage-gateway");

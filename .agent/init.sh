@@ -47,7 +47,10 @@ else
   while IFS= read -r key; do
     val="$(grep -E "^${key}=" .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'"'"' ')"
     [ -z "$val" ] && MISSING="$MISSING $key"
-  done < <(grep -oE '^[A-Z_]+=' .env.example | tr -d '=' | grep -vE '^(SUPABASE_SERVICE_ROLE_KEY)$')
+  # Las tres claves locales de Storage no viven en el repo: las genera cada
+  # máquina con `node scripts/storage-dev-keys.mjs --write`, así que se avisan
+  # aparte y con su comando, no como «falta una variable» sin más.
+  done < <(grep -oE '^[A-Z_]+=' .env.example | tr -d '=' | grep -vE '^(SUPABASE_SERVICE_ROLE_KEY|NEXT_PUBLIC_SUPABASE_ANON_KEY|STORAGE_JWT_SECRET)$')
   if [ -n "$MISSING" ]; then
     warn "sin valor en .env:$MISSING"
   else
@@ -72,6 +75,19 @@ case "$DB_CHECK" in
   NOURL) bad "DATABASE_URL no está definida" ;;
   *) warn "Postgres no alcanzable: ${DB_CHECK#ERR }" ;;
 esac
+
+echo "== Storage =="
+# Nunca con `bad`: una sesión que no toca imágenes tiene que seguir leyendo
+# ENTORNO LISTO con el emulador parado (architecture.md § Emulador de Storage).
+SUPABASE_URL="$(grep -E '^NEXT_PUBLIC_SUPABASE_URL=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'"'"' ')"
+SERVICE_KEY="$(grep -E '^SUPABASE_SERVICE_ROLE_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'"'"' ')"
+if [ -z "$SUPABASE_URL" ] || [ -z "$SERVICE_KEY" ]; then
+  warn "claves locales de Storage sin generar — ejecuta: node scripts/storage-dev-keys.mjs --write"
+elif curl -fsS -m 3 "$SUPABASE_URL/storage/v1/bucket" -H "Authorization: Bearer $SERVICE_KEY" 2>/dev/null | grep -q store-media; then
+  ok "emulador de Storage arriba, bucket store-media presente"
+else
+  warn "emulador de Storage no responde — ejecuta: docker compose up -d"
+fi
 
 echo
 if [ "$FAIL" -eq 0 ]; then
