@@ -3,10 +3,10 @@ slug: testing-library-timeout-1s-bajo-carga
 sintoma: "un test de componente falla con «Unable to find role=...» a ~1000-1100 ms, o con «Test timed out in 5000ms» cuando la suite crece, y vuelve a pasar si lo corres solo"
 firma: Unable to find role|Test timed out in [0-9]+ms
 etapa: test
-visto_en: F-007, F-011, F-017
+visto_en: F-007, F-011, F-017, PR #7
 creado: 2026-08-26T12:20:00Z
 promovido_a_agents: no
-arreglo: no es tu cambio — sube `asyncUtilTimeout` (vitest.setup.ts) para el hallazgo de rol, y si el fallo es «Test timed out» sube también `testTimeout` del proyecto `ui` en vitest.config.mts (el techo del test completo, no el de findBy*/waitFor); no toques el componente
+arreglo: no es tu cambio y NO se arregla subiendo el techo — `asyncUtilTimeout` ya está en 8000 ms en vitest.setup.ts y el intermitente sigue cayendo ~1 de cada 3 suites completas; reintenta la suite para desbloquearte y lee § «Lo que ya se descartó» antes de gastar tiempo en una hipótesis
 ---
 
 ## Qué pasa de verdad
@@ -70,6 +70,34 @@ nada: `CheckoutForm` mueve el foco correctamente en el primer envío —eso es
 justamente la regresión que F-010 arregló y que estas dos pruebas fijan—, así
 que «arreglar» el componente sería perseguir un fantasma y probablemente
 romper lo que las pruebas protegen.
+
+## Lo que ya se descartó (PR #7)
+
+La receta de arriba **ya está aplicada** y ya no basta: `vitest.setup.ts`
+tiene `configure({ asyncUtilTimeout: 8000 })` y el fallo se reprodujo aun
+así, 2 veces en 4 suites completas seguidas, cayendo indistintamente en
+cualquiera de las dos pruebas de `CheckoutForm.test.tsx`. Ocho segundos no
+son «un pelo»: a partir de aquí la explicación del timeout justo no se
+sostiene, y subirlo más es gastar tiempo de CI sin comprar nada.
+
+Lo que se midió en el fallo real, con una sonda dentro del `catch` del
+`findByRole`:
+
+- el botón de enviar estaba **activo** (`disabled === false`),
+- el `fetch` de la cotización ya había corrido (`mock.calls.length === 1`),
+- y el `<div role="alert">` no apareció en 8 s.
+
+Eso **refuta** la hipótesis más obvia —que el clic caía sobre el botón
+todavía deshabilitado mientras cargaba la cotización, y `fireEvent.click`
+sobre un botón deshabilitado no dispara nada—, que era por dónde iba esta
+ficha a empujar al siguiente. Si el botón está activo, `submit()` corrió; si
+`submit()` corrió con los campos vacíos, `validate()` devolvió errores y el
+resumen debería renderizarse. Ahí se acabó la evidencia.
+
+Segunda sonda, instrumentando el estado en el instante del clic: **12 suites
+completas seguidas en verde**, no volvió a caer. Así que tampoco está
+caracterizado cuándo ocurre, y no hay arreglo que ofrecer: quien lo retome
+empieza por reproducirlo con la sonda puesta, no por subir un número.
 
 ## Cuándo NO es esto
 
