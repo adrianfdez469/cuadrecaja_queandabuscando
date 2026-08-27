@@ -34,4 +34,19 @@ columnas numéricas lo hacen igual de bien que una geometría para ese fin.
 
 ## Reabrir cuando
 
-Se implemente F-015 o cualquier consulta de tipo «tiendas a menos de N km».
+Cualquier consulta de tipo «tiendas a menos de N km».
+
+## Nota de F-015 · 27 de agosto de 2026
+
+El disparador original de esta ADR decía «se implemente F-015 o cualquier
+consulta de tipo tiendas a menos de N km». **F-015 se implementó, y esta ADR no
+se reabrió.** El humano lo decidió expresamente al abrir el feature: ninguno de
+los cuatro `acceptance_criteria` de F-015 menciona distancia, así que la búsqueda
+del marketplace se construyó sobre `tsvector` y el índice GIN, sin PostGIS, sin
+`geography` y sin GiST.
+
+Que un feature dispare una ADR no es lo mismo que que la necesite. Lo que
+mantiene viva la decisión es la **segunda** mitad de la frase, que es la que
+queda arriba: la primera consulta que ordene por distancia. `latitude` y
+`longitude` siguen llenándose desde el sync mientras tanto, que es justo lo que
+esta ADR quería asegurar.
