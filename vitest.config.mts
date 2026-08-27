@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 /**
- * Two projects, because the two kinds of test need different globals.
+ * Three projects.
  *
  * Server code (crypto, jose, Prisma helpers) must run in the node environment:
  * jsdom installs its own Uint8Array, and `instanceof` checks inside libraries
@@ -10,6 +10,15 @@ import react from "@vitejs/plugin-react";
  *
  * Component tests get jsdom. Splitting by extension keeps this automatic —
  * .test.tsx is a component test, .test.ts is not.
+ *
+ * `db` (F-015, architecture.md § Pruebas contra Postgres real) is the third:
+ * `*.db.test.ts` files that talk to a real Postgres, never mocked. Still
+ * node — the extension is what stays deducible at a glance
+ * (AGENTS.md § Cosas que muerden, ficha `test-en-entorno-equivocado`) — but
+ * with its own setup file, so `server`'s tests never pay for it and
+ * `src/lib/prisma.test.ts`'s `DATABASE_URL` stub is never shadowed by a
+ * global `dotenv/config`. `server` excludes `*.db.test.ts` so nothing runs
+ * twice.
  */
 export default defineConfig({
   test: {
@@ -28,7 +37,7 @@ export default defineConfig({
           environment: "node",
           globals: true,
           include: ["src/**/*.test.ts"],
-          exclude: ["src/generated/**"],
+          exclude: ["src/generated/**", "src/**/*.db.test.ts"],
         },
       },
       {
@@ -49,6 +58,25 @@ export default defineConfig({
           // individual wait resolves in well under its own 5s ceiling — see
           // the playbook ficha `testing-library-timeout-1s-bajo-carga`.
           testTimeout: 15_000,
+        },
+      },
+      {
+        extends: true,
+        resolve: { tsconfigPaths: true },
+        test: {
+          name: "db",
+          environment: "node",
+          globals: true,
+          setupFiles: ["./vitest.setup.db.ts"],
+          include: ["src/**/*.db.test.ts"],
+          exclude: ["src/generated/**"],
+          // Real network round trips against Postgres; the default 5s
+          // ceiling is tuned for mocked server tests, not this project.
+          testTimeout: 20_000,
+          // Techo declarado (architecture.md § Escalabilidad): 6
+          // `*.db.test.ts` files max, each its own PrismaClient (max: 5). No
+          // fileParallelism override here — today there are 2 files, well
+          // under the ceiling that would force one.
         },
       },
     ],
