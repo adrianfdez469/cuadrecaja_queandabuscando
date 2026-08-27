@@ -408,6 +408,18 @@ async function main() {
  * On `update` this only ever touches `name`/branding — never `slug` — so
  * re-running the seed cannot move a brand's URL out from under a QR that
  * might already be printed against it.
+ *
+ * Etapa 2: after "agrupar" (`groupStoreIntoBrand`), a fixture like
+ * `bodega-dos` no longer OWNS a `Storefront` at all — its brand slug was
+ * reassigned to the branch itself (kind `STOREFRONT` → `STORE`) and the
+ * emptied `Storefront` row was deleted (architecture.md § Qué les pasa a
+ * los slugs). Re-running the seed after that must not try to CREATE a new
+ * `Storefront` under that slug: the `Slug` row already exists with a
+ * DIFFERENT owner, and `slugEntry: { create: … } }` would collide with its
+ * primary key. So: no `Storefront` AND the slug already belongs to a
+ * `Store` → resolve THAT store's current `storefrontId` (whatever brand it
+ * ended up under) and change nothing — there is no brand left to rename or
+ * rebrand under a slug this run no longer owns.
  */
 async function seedStorefront(input: {
   businessId: string;
@@ -428,6 +440,18 @@ async function seedStorefront(input: {
       },
     });
     return existing.id;
+  }
+
+  const registryRow = await prisma.slug.findUnique({
+    where: { value: input.slug },
+    select: { storeId: true },
+  });
+  if (registryRow?.storeId) {
+    const groupedStore = await prisma.store.findUnique({
+      where: { id: registryRow.storeId },
+      select: { storefrontId: true },
+    });
+    if (groupedStore) return groupedStore.storefrontId;
   }
 
   const created = await prisma.storefront.create({

@@ -11,7 +11,11 @@ const promotionCreate = vi.fn();
 const promotionUpdate = vi.fn();
 const promotionDelete = vi.fn();
 const revalidateStores = vi.fn();
+const revalidateStorefronts = vi.fn();
+const revalidateSlugs = vi.fn();
 const uploadStoreObject = vi.fn();
+const storefrontFindUnique = vi.fn();
+const regroupStoreIntoBrand = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -27,6 +31,9 @@ vi.mock("@/lib/prisma", () => ({
       update: (...a: unknown[]) => storeUpdate(...a),
       findUnique: (...a: unknown[]) => storeFindUnique(...a),
     },
+    storefront: {
+      findUnique: (...a: unknown[]) => storefrontFindUnique(...a),
+    },
     promotion: {
       findFirst: (...a: unknown[]) => promotionFindFirst(...a),
       create: (...a: unknown[]) => promotionCreate(...a),
@@ -35,10 +42,24 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/cache", () => ({ revalidateStores: (...a: unknown[]) => revalidateStores(...a) }));
+vi.mock("@/lib/cache", () => ({
+  revalidateStores: (...a: unknown[]) => revalidateStores(...a),
+  revalidateStorefronts: (...a: unknown[]) => revalidateStorefronts(...a),
+  revalidateSlugs: (...a: unknown[]) => revalidateSlugs(...a),
+}));
 vi.mock("@/lib/supabase/storage", () => ({
   uploadStoreObject: (...a: unknown[]) => uploadStoreObject(...a),
 }));
+vi.mock("@/features/storefront/server/registry", async (importOriginal) => {
+  // `expandBrandTouch` is pure (no Prisma, no I/O) — keep the REAL
+  // implementation so this file exercises the same funnel production code
+  // does, and only stub the one export that touches the database.
+  const actual = await importOriginal<typeof import("@/features/storefront/server/registry")>();
+  return {
+    ...actual,
+    regroupStoreIntoBrand: (...a: unknown[]) => regroupStoreIntoBrand(...a),
+  };
+});
 
 const {
   saveProduct,
@@ -47,6 +68,7 @@ const {
   createPromotion,
   updatePromotion,
   deletePromotion,
+  groupStoreIntoBrand,
 } = await import("./mutations");
 
 function row(overrides: Partial<Record<string, unknown>> = {}) {
@@ -82,7 +104,11 @@ beforeEach(() => {
   promotionUpdate.mockReset();
   promotionDelete.mockReset();
   revalidateStores.mockReset();
+  revalidateStorefronts.mockReset();
+  revalidateSlugs.mockReset();
   uploadStoreObject.mockReset();
+  storefrontFindUnique.mockReset();
+  regroupStoreIntoBrand.mockReset();
 });
 
 const WRITE_BODY = {
@@ -247,6 +273,57 @@ describe("setStoreEnabled()", () => {
     expect(result).toEqual({ kind: "not_found" });
     expect(revalidateStores).not.toHaveBeenCalled();
   });
+
+  it("single-branch brand: never calls revalidateSlugs (nothing about a selector exists to go stale)", async () => {
+    storeUpdate.mockResolvedValue({
+      id: "store-1",
+      slug: null,
+      storefront: { slug: "tienda-demo", stores: [{ id: "store-1", slug: null }] },
+      status: "PUBLISHED",
+      disabledReasonCode: null,
+      disabledMessage: null,
+      disabledAt: null,
+    });
+
+    await setStoreEnabled("store-1" as never, { enabled: true });
+
+    expect(revalidateSlugs).not.toHaveBeenCalled();
+  });
+
+  it("multi-branch brand: a status flip revalidates the BRAND's slug and every sibling's own slug too — not only this store's own canonical", async () => {
+    // The same "revalidar solo lo que escribí" gap `regroupStoreIntoBrand`
+    // had: a status flip changes the Badge every cached selector page (and
+    // every sibling's own `branches[]`) shows for THIS store, without
+    // moving a single `Slug` row of its own.
+    storeUpdate.mockResolvedValue({
+      id: "store-1",
+      slug: "la-rampa-vedado",
+      storefront: {
+        slug: "la-rampa",
+        stores: [
+          { id: "store-1", slug: "la-rampa-vedado" },
+          { id: "store-2", slug: "la-rampa-playa" },
+        ],
+      },
+      status: "SUSPENDED",
+      disabledReasonCode: "VACACIONES",
+      disabledMessage: "Volvemos el 5",
+      disabledAt: new Date("2026-01-01T00:00:00Z"),
+    });
+
+    await setStoreEnabled("store-1" as never, {
+      enabled: false,
+      reasonCode: "VACACIONES",
+      message: "Volvemos el 5",
+    });
+
+    expect(revalidateStores).toHaveBeenCalledExactlyOnceWith(["la-rampa-vedado"]);
+    expect(revalidateSlugs).toHaveBeenCalledExactlyOnceWith([
+      "la-rampa",
+      "la-rampa-vedado",
+      "la-rampa-playa",
+    ]);
+  });
 });
 
 const PROMOTION_BODY_PRODUCT = {
@@ -364,5 +441,71 @@ describe("deletePromotion()", () => {
 
     expect(result).toEqual({ kind: "saved", value: { id: "promo-1" } });
     expect(revalidateStores).toHaveBeenCalledExactlyOnceWith(["tienda-demo"]);
+  });
+});
+
+describe("groupStoreIntoBrand() — HS8, etapa 2", () => {
+  it("maps DIFFERENT_BUSINESS/ALREADY_IN_BRAND/NOT_FOUND straight through", async () => {
+    regroupStoreIntoBrand.mockResolvedValueOnce({ ok: false, error: "DIFFERENT_BUSINESS" });
+    expect(await groupStoreIntoBrand("store-a" as never, "store-b" as never)).toEqual({
+      kind: "different_business",
+    });
+
+    regroupStoreIntoBrand.mockResolvedValueOnce({ ok: false, error: "ALREADY_IN_BRAND" });
+    expect(await groupStoreIntoBrand("store-a" as never, "store-b" as never)).toEqual({
+      kind: "already_in_brand",
+    });
+
+    regroupStoreIntoBrand.mockResolvedValueOnce({ ok: false, error: "NOT_FOUND" });
+    expect(await groupStoreIntoBrand("store-a" as never, "store-b" as never)).toEqual({
+      kind: "not_found",
+    });
+
+    expect(revalidateStores).not.toHaveBeenCalled();
+  });
+
+  it("on success, revalidates the three tag families and rereads the brand for the real URLs", async () => {
+    regroupStoreIntoBrand.mockResolvedValue({
+      ok: true,
+      storefrontId: "sf-a",
+      revalidate: {
+        canonicalSlugs: ["la-rampa", "la-rampa-vedado", "tienda-dos"],
+        brandSlugs: ["la-rampa"],
+        slugValues: ["la-rampa", "la-rampa-vedado", "tienda-dos"],
+      },
+    });
+    storefrontFindUnique.mockResolvedValue({
+      slug: "la-rampa",
+      stores: [
+        { id: "store-a", slug: "la-rampa-vedado" },
+        { id: "store-b", slug: "tienda-dos" },
+      ],
+    });
+
+    const result = await groupStoreIntoBrand("store-a" as never, "store-b" as never);
+
+    expect(revalidateStores).toHaveBeenCalledExactlyOnceWith([
+      "la-rampa",
+      "la-rampa-vedado",
+      "tienda-dos",
+    ]);
+    expect(revalidateStorefronts).toHaveBeenCalledExactlyOnceWith(["la-rampa"]);
+    expect(revalidateSlugs).toHaveBeenCalledExactlyOnceWith([
+      "la-rampa",
+      "la-rampa-vedado",
+      "tienda-dos",
+    ]);
+
+    expect(result).toEqual({
+      kind: "saved",
+      value: {
+        storefrontId: "sf-a",
+        brandSlug: "la-rampa",
+        branches: [
+          { storeId: "store-a", slug: "la-rampa-vedado", url: "/la-rampa-vedado" },
+          { storeId: "store-b", slug: "tienda-dos", url: "/tienda-dos" },
+        ],
+      },
+    });
   });
 });

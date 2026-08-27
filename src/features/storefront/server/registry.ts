@@ -197,3 +197,262 @@ export async function previewSlug(input: PreviewSlugInput): Promise<PreviewSlugR
   const resolvedSlug = await uniqueSlug(candidate, slugTaken, { fallback: "tienda" });
   return { candidate, available: false, reason: "taken", resolvedSlug, storeKnown };
 }
+
+/** A brand member the way every writer that touches `storefront.stores`
+ *  already selects it — this file never needs more than the own slug. */
+export type BrandMemberSlug = { slug: string | null };
+
+declare const slugTouchSetBrand: unique symbol;
+/**
+ * The array `expandBrandTouch()` returns, and nothing else. Nominally
+ * typed on purpose (`unique symbol`, erased at runtime — same trick as
+ * `PublicSlug` in `lib/publicSlug.ts`), so a hand-rolled array that
+ * happens to end up `string[]`-shaped — no matter which of the many
+ * equivalent ways someone writes "project this members list down to its
+ * slugs" (`.map`, destructuring, a `for` loop, `.reduce`, a named helper
+ * function…) — does NOT satisfy this type. `RegroupResult.revalidate.
+ * slugValues` and `HandlerOutcome.touchedSlugValues` (`features/sync/
+ * server/handlers/types.ts`) both require it, which makes writing the bug
+ * `.agent/playbook/revalida-solo-lo-que-se-escribe-no-lo-que-cambia-de-significado.md`
+ * fichó three times over a TYPE ERROR at those two sites, not something
+ * that depends on `boundaries.test.ts`'s grep noticing the right syntax
+ * shape. That grep test stays as a second, admittedly partial, line of
+ * defense — see its own comment for exactly what it does and does not
+ * catch, and why the real guarantee is this type, not the pattern match.
+ *
+ * `setStoreEnabled` (`features/admin/server/mutations.ts`) calls
+ * `revalidateSlugs(expandBrandTouch(...))` inline, with no field in
+ * between to brand — `revalidateSlugs` itself must keep accepting a plain
+ * `Iterable<string>` because most of its callers have nothing to do with
+ * a brand touch at all (a single canonical slug, a sync batch's mixed
+ * set…), so narrowing ITS signature would force every unrelated caller to
+ * contort its own array into this brand for no reason. That one call site
+ * is the one instance of the historical defect this type does not turn
+ * into a compile error; the grep test is what still watches it.
+ */
+export type SlugTouchSet = readonly string[] & { readonly [slugTouchSetBrand]: true };
+
+/**
+ * THE single place that turns "a brand's own slug, plus the FULL list of
+ * its members as they stand at this moment" into every slug VALUE whose
+ * cached resolution (`resolvePublicSlug`, `slugTag`) may have just changed
+ * meaning — not only the row a caller's write touched.
+ *
+ * `.agent/playbook/revalida-solo-lo-que-se-escribe-no-lo-que-cambia-de-significado.md`
+ * fichó the same defect three times over (`regroupStoreIntoBrand`,
+ * `setStoreEnabled`, the sync's routine `STORE` update) before this
+ * function existed — each writer had its own inline
+ * `.map((s) => s.slug).filter(...)`, and each forgot a different case
+ * (the brand's own slug, a preexisting sibling, a shrinking brand). Every
+ * one of them now calls THIS instead of hand-rolling the array again —
+ * and, for the two callers that store the result in a typed field instead
+ * of firing it inline, `SlugTouchSet` (above) makes a hand-rolled
+ * replacement fail to compile, in any syntactic shape, not only the one
+ * `boundaries.test.ts`'s grep happens to recognize.
+ *
+ * Zero queries: every caller already has `members` in memory from the SAME
+ * `select` it used to compute its own write — this only reshapes what is
+ * already loaded.
+ */
+export function expandBrandTouch(
+  brandSlug: string,
+  members: readonly BrandMemberSlug[],
+): SlugTouchSet {
+  const ownSlugValues = members
+    .map((member) => member.slug)
+    .filter((slug): slug is string => slug !== null);
+  return [brandSlug, ...ownSlugValues] as unknown as SlugTouchSet;
+}
+
+export type RegroupInput = { primaryStoreId: string; joiningStoreId: string };
+
+export type RegroupRejection = "DIFFERENT_BUSINESS" | "ALREADY_IN_BRAND" | "NOT_FOUND";
+
+export type RegroupResult =
+  | {
+      ok: true;
+      storefrontId: string;
+      /** Every slug value whose RESOLUTION changed — the brand's own value
+       *  did not necessarily move rows, but its resolver output did (1
+       *  branch → selector), which is exactly what `slugTag` exists to
+       *  invalidate (R18). `slugValues` is a `SlugTouchSet`: it can only
+       *  be built by concatenating `expandBrandTouch()` calls, never a
+       *  hand-rolled array (see that type's own comment). */
+      revalidate: { canonicalSlugs: PublicSlug[]; brandSlugs: string[]; slugValues: SlugTouchSet };
+    }
+  | { ok: false; error: RegroupRejection };
+
+/**
+ * Agrupar (HS8, architecture.md § Agrupar dos tiendas bajo una marca): moves
+ * `joiningStoreId` under `primaryStoreId`'s brand. The five writes and their
+ * ORDER live here, not in `features/admin/server/mutations.ts` — this file
+ * is the only one allowed to touch `Slug` (`boundaries.test.ts`), and the
+ * admin feature's own mutation calls this instead of duplicating it.
+ *
+ * Two shapes, decided by whether the joining store is the ONLY member of its
+ * current brand:
+ *
+ * - **Single-branch** (the common case, § Qué les pasa a los slugs): its
+ *   brand's slug is reassigned to the store itself (`kind: STOREFRONT` →
+ *   `STORE`) and the now-empty brand is deleted. Order matters: the
+ *   reassignment happens BEFORE the delete, or the registry row would lose
+ *   its owner and the URL would 404.
+ * - **Already multi-branch** (§ "Si B ya era una de varias sucursales de su
+ *   marca"): it already owns its own `Store.slug` by the multi-branch
+ *   invariant — only its `storefrontId` moves, and its old brand survives
+ *   with whichever siblings remain.
+ *
+ * Either way, if `primaryStoreId` had no `Store.slug` of its own yet (its
+ * brand had exactly one branch before this call), it mints one — but only
+ * once: a SECOND grouping onto an already-multi-branch primary skips this.
+ *
+ * One `prisma.$transaction([...])` in ARRAY form, never the interactive
+ * callback (ficha `pooler-transaccion-deadlock`): the pooler runs in
+ * transaction mode, and the global client has no "inside" to misuse in the
+ * array form.
+ */
+export async function regroupStoreIntoBrand(input: RegroupInput): Promise<RegroupResult> {
+  const [primary, joining] = await Promise.all([
+    prisma.store.findUnique({
+      where: { id: input.primaryStoreId },
+      select: {
+        id: true,
+        name: true,
+        businessId: true,
+        storefrontId: true,
+        slug: true,
+        // The FULL list of A's brand as it stood BEFORE this write — every
+        // one of them (except A itself, whose own tag is already handled
+        // separately) has to be revalidated too: their cached "branch"
+        // resolution carries the sibling list `/[slug]/sucursales` reads
+        // (resolve.ts's `branches?`), and that list is now stale the moment
+        // a new member joins (§ Tabla de errores no dice esto, pero I5/R18
+        // sí lo exigen — un fallo real, ver ficha
+        // `regroupStoreIntoBrand-revalida-solo-lo-que-escribe`).
+        storefront: {
+          select: { id: true, slug: true, stores: { select: { id: true, slug: true } } },
+        },
+      },
+    }),
+    prisma.store.findUnique({
+      where: { id: input.joiningStoreId },
+      select: {
+        id: true,
+        businessId: true,
+        storefrontId: true,
+        slug: true,
+        storefront: {
+          select: { id: true, slug: true, stores: { select: { id: true, slug: true } } },
+        },
+      },
+    }),
+  ]);
+
+  if (!primary || !joining) return { ok: false, error: "NOT_FOUND" };
+  if (primary.businessId !== joining.businessId) return { ok: false, error: "DIFFERENT_BUSINESS" };
+  if (primary.storefrontId === joining.storefrontId)
+    return { ok: false, error: "ALREADY_IN_BRAND" };
+
+  const joiningBrandSlug = joining.storefront.slug;
+  const joiningBrandIsSingle = joining.storefront.stores.length === 1;
+  // The joining store ends this call with its OWN `Store.slug` either way:
+  // it already had one (multi-branch case) or it inherits its old brand's
+  // (single-branch case).
+  const joiningOwnSlug = joining.slug ?? joiningBrandSlug;
+
+  const writes: Prisma.PrismaPromise<unknown>[] = [];
+
+  if (joiningBrandIsSingle) {
+    writes.push(
+      prisma.slug.update({
+        where: { value: joiningBrandSlug },
+        data: { kind: "STORE", storefrontId: null, storeId: joining.id },
+      }),
+      prisma.store.update({
+        where: { id: joining.id },
+        data: { slug: joiningBrandSlug, storefrontId: primary.storefrontId },
+      }),
+    );
+  } else {
+    writes.push(
+      prisma.store.update({
+        where: { id: joining.id },
+        data: { storefrontId: primary.storefrontId },
+      }),
+    );
+  }
+
+  let primaryOwnSlug = primary.slug;
+  if (!primaryOwnSlug) {
+    // DP5: the SAME function the preview screen calls (§ Agrupar dos
+    // tiendas, "de dónde sale ese qué va a cambiar") — never a second
+    // derivation that could promise a string this write does not produce.
+    primaryOwnSlug = (await previewSlug({ slug: null, name: primary.name, storeExternalId: null }))
+      .resolvedSlug;
+    writes.push(
+      prisma.store.update({ where: { id: primary.id }, data: { slug: primaryOwnSlug } }),
+      prisma.slug.create({ data: { value: primaryOwnSlug, kind: "STORE", storeId: primary.id } }),
+    );
+  }
+
+  // The now-empty brand disappears LAST: by the time this runs, its slug
+  // row was already re-pointed at the joining store (or never touched, in
+  // the multi-branch case) — never the other way around, or `/b` would 404
+  // between the two writes (architecture.md § Cómo se escribe).
+  if (joiningBrandIsSingle) {
+    writes.push(prisma.storefront.delete({ where: { id: joining.storefront.id } }));
+  }
+
+  await prisma.$transaction(writes);
+
+  const primaryBrandSlug = primary.storefront.slug;
+
+  // Every string whose CACHED RESOLUTION changes meaning, not only the ones
+  // this call writes a row for (I5/R18 — the trap this whole feature exists
+  // to close, and the one a first pass of this function still fell into).
+  // `expandBrandTouch` is given the membership AFTER this write, for BOTH
+  // brands that could still exist once it settles:
+  //
+  // 1. A's brand, with its pre-existing members (`primary.storefront.stores`,
+  //    self included) PLUS the joining store — covers A's own slug (or the
+  //    brand slug, if A had none yet), every PRE-EXISTING sibling of A (a
+  //    repeat grouping's `branches[]` they did not know about yet), and B's
+  //    final own slug.
+  // 2. B's OLD brand, but ONLY when it survives (it was already
+  //    multi-branch): its own slug — a selector that just lost a member, or
+  //    that dropped to exactly one and started resolving that ONE remaining
+  //    branch AS the brand slug — and every sibling LEFT BEHIND.
+  //
+  // Neither snapshot gets every one of its entries a `Slug`/`Store` row
+  // written FOR IT in this call — exactly why revalidating "only what I
+  // wrote" is not enough here.
+  const primaryMembersAfterJoin: BrandMemberSlug[] = [
+    ...primary.storefront.stores.map((store) =>
+      store.id === primary.id ? { slug: primaryOwnSlug } : store,
+    ),
+    { slug: joiningOwnSlug },
+  ];
+  const joiningRemainingMembers: BrandMemberSlug[] = joiningBrandIsSingle
+    ? []
+    : joining.storefront.stores.filter((store) => store.id !== joining.id);
+
+  // Concatenating two `SlugTouchSet`s with `[...a, ...b]` re-widens the
+  // result to a plain `string[]` (spread erases the brand) — re-asserting
+  // it here is safe because BOTH operands already went through
+  // `expandBrandTouch()`, and this is the one place in the whole codebase
+  // allowed to make that claim.
+  const touchedSlugValues = [
+    ...expandBrandTouch(primaryBrandSlug, primaryMembersAfterJoin),
+    ...(joiningBrandIsSingle ? [] : expandBrandTouch(joiningBrandSlug, joiningRemainingMembers)),
+  ] as unknown as SlugTouchSet;
+
+  return {
+    ok: true,
+    storefrontId: primary.storefrontId,
+    revalidate: {
+      canonicalSlugs: touchedSlugValues as unknown as PublicSlug[],
+      brandSlugs: joiningBrandIsSingle ? [primaryBrandSlug] : [primaryBrandSlug, joiningBrandSlug],
+      slugValues: touchedSlugValues,
+    },
+  };
+}

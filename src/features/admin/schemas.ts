@@ -7,7 +7,7 @@ import {
   STORE_DISABLED_MESSAGE_MAX_LENGTH,
 } from "@/constants/storeClosure";
 import { PROMOTION_MAX_PRODUCTS, PROMOTION_NAME_MAX_LENGTH } from "@/constants/promotions";
-import type { ProductWriteBody, PromotionBody, StoreStatusBody } from "./types";
+import type { GroupStoresBody, ProductWriteBody, PromotionBody, StoreStatusBody } from "./types";
 
 /**
  * Validation for the panel's writes.
@@ -69,6 +69,12 @@ export const storeStatusBodySchema = z.discriminatedUnion("enabled", [
       path: ["message"],
     }),
 ]) satisfies z.ZodType<StoreStatusBody>;
+
+/** HS8, etapa 2: the endpoint's whole body is one id — everything else
+ *  (which stores, which brand) comes from the URL and the session. */
+export const groupStoresBodySchema = z
+  .object({ joiningStoreId: z.string().uuid() })
+  .strict() satisfies z.ZodType<GroupStoresBody>;
 
 /**
  * HD3/PP3. `scope` decides the shape of `conditions` (R30) — a `PRODUCT`

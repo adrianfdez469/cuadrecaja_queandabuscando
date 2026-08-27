@@ -37,6 +37,13 @@ export async function processCatalogBatch(
   const touchedStores = new Set<PublicSlug>();
   const touchedBrands = new Set<string>();
   const touchedProducts = new Set<string>();
+  // F-017 ALTA fix (tests.md § Fallos encontrados #3): raw slug VALUES a
+  // handler reported beyond its own touched canonical — the brand's own
+  // slug and every sibling's own slug, already expanded by
+  // `expandBrandTouch` inside the handler. Merged into the SAME
+  // `revalidateSlugs` call below, not a second one, so a 500-event batch
+  // still fires one deduplicated invalidation per tag family.
+  const touchedSlugValues = new Set<string>();
   const processed: string[] = [];
   const skipped: string[] = [];
   const failed: { eventId: string; error: string }[] = [];
@@ -48,6 +55,9 @@ export async function processCatalogBatch(
       if (outcome.touchedStoreSlug) touchedStores.add(outcome.touchedStoreSlug);
       if (outcome.touchedBrandSlug) touchedBrands.add(outcome.touchedBrandSlug);
       if (outcome.touchedProductId) touchedProducts.add(outcome.touchedProductId);
+      if (outcome.touchedSlugValues) {
+        for (const value of outcome.touchedSlugValues) touchedSlugValues.add(value);
+      }
 
       if (outcome.status === "processed") processed.push(event.eventId);
       else skipped.push(event.eventId);
@@ -65,7 +75,11 @@ export async function processCatalogBatch(
   revalidateStores(touchedStores);
   // R18/HS2: a brand new brand must be reachable without waiting for the
   // 3600s floor — invalidate the resolver's own tag for the same values.
-  revalidateSlugs(touchedStores);
+  // `touchedSlugValues` (the brand's own slug + every sibling's own slug,
+  // for any touched branch that belongs to a multi-branch brand) rides in
+  // the SAME call: no store's own resolution and no sibling's leftover
+  // resolution goes stale from a single sync batch.
+  revalidateSlugs(new Set([...touchedStores, ...touchedSlugValues]));
   // Fired from stage 1 on even though its only reader (the selector)
   // arrives in etapa 2 — so the sync is touched once, not twice.
   revalidateStorefronts(touchedBrands);

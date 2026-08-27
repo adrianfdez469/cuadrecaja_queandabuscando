@@ -1,5 +1,6 @@
 import type { EventStatus } from "../../schemas";
 import type { PublicSlug } from "@/lib/publicSlug";
+import type { SlugTouchSet } from "@/features/storefront/server/registry";
 
 /** What a handler reports back so the batch can build its response. */
 export type HandlerOutcome = {
@@ -12,6 +13,18 @@ export type HandlerOutcome = {
   touchedBrandSlug?: string;
   /** StoreProduct id whose detail page must be invalidated. */
   touchedProductId?: string;
+  /**
+   * F-017 ALTA fix (tests.md § Fallos encontrados #3): additional raw slug
+   * VALUES — the brand's own slug and every sibling's own slug — whose
+   * cached RESOLUTION (`slugTag`) may have just changed meaning even though
+   * this handler wrote no row of THEIRS. Only present when the touched
+   * branch belongs to a brand with more than one renderable store. Always
+   * computed by `features/storefront/server/registry.ts::expandBrandTouch`
+   * — typed as `SlugTouchSet`, its own exported brand, so a hand-rolled
+   * replacement fails to COMPILE here, in any syntactic shape, rather than
+   * depending on `boundaries.test.ts`'s (partial) grep to notice.
+   */
+  touchedSlugValues?: SlugTouchSet;
 };
 
 export const PROCESSED: HandlerOutcome = { status: "processed" };

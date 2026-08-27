@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { requireStore } from "@/features/catalog/server/queries";
+import { getStorefrontBranding, requireStore } from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
 import { renderStoreTheme } from "@/features/theming/storeTheme";
 import { Container } from "@/components/ui/Container";
@@ -20,12 +19,38 @@ export const revalidate = 3600;
 export default async function StoreLayout({ children, params }: LayoutProps<"/[slug]">) {
   const { slug } = await params;
   const resolution = await requireResolution(slug);
-  // Etapa 2 (the selector) is not built in this stage: nothing in the
-  // registry can produce a brand with more than one renderable branch yet
-  // (grouping is `groupStoreIntoBrand`, not shipped here), so this branch
-  // is unreachable today — it exists only so a future selector page does
-  // not have to touch this file's control flow.
-  if (resolution.kind === "selector") notFound();
+
+  // Etapa 2, criterio 2: a brand that groups 2+ renderable branches gets a
+  // DIFFERENT header — the brand's own name and theme, no link (there is
+  // nowhere else to go from the root of the brand) and no `CartBadge` (a
+  // brand has no cart of its own; each branch keeps its own, HS5).
+  if (resolution.kind === "selector") {
+    const branding = await getStorefrontBranding(resolution);
+    const themeCss = renderStoreTheme(resolution.brandSlug, branding?.themeTokens ?? null);
+
+    return (
+      <div data-store={resolution.brandSlug} className="flex min-h-full flex-col">
+        {themeCss && <style dangerouslySetInnerHTML={{ __html: themeCss }} />}
+
+        <header className="bg-brand text-brand-contrast">
+          <Container className="flex items-center gap-3 py-5">
+            <span className="min-w-0 flex-1 truncate text-xl font-semibold tracking-tight">
+              {resolution.brandName}
+            </span>
+          </Container>
+        </header>
+
+        <main className="flex-1">{children}</main>
+
+        <footer className="border-border border-t py-8">
+          <Container className="text-fg-muted text-sm">
+            <p>Publicado con queandabuscando</p>
+          </Container>
+        </footer>
+      </div>
+    );
+  }
+
   const store = await requireStore(resolution);
 
   // Branding is plain CSS in the HTML: no JavaScript, no flash of the wrong

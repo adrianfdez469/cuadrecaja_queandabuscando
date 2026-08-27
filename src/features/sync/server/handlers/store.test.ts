@@ -206,3 +206,71 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
     expect(storeUpdate).not.toHaveBeenCalled();
   });
 });
+
+describe("handleStore() — F-017 ALTA #3 (tests.md § Fallos encontrados #3): a routine sync update in a multi-branch brand reports the brand + every sibling", () => {
+  it("a routine name/city edit on one branch of a two-branch brand reports the brand's own slug AND the sibling's own slug", async () => {
+    storeFindUnique.mockResolvedValue(
+      existingStore({
+        slug: "bodega-dos",
+        sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"),
+        storefront: {
+          slug: "bodega-uno",
+          stores: [
+            { id: "store-1", slug: "bodega-uno-2" },
+            { id: "store-2", slug: "bodega-dos" },
+          ],
+        },
+      }),
+    );
+    storeUpdate.mockResolvedValue({ slug: "bodega-dos" });
+
+    const outcome = await handleStore(
+      payload({
+        updatedAt: "2026-08-27T00:00:00.000Z",
+        name: "Bodega Dos RENOMBRADA",
+        city: "Nueva ciudad",
+      }),
+      "UPDATE",
+    );
+
+    expect(outcome.status).toBe("processed");
+    expect(outcome.touchedStoreSlug).toBe("bodega-dos");
+    // The MISSING piece before this fix: the brand's own slug (the
+    // selector every visitor of `/bodega-uno` reads) and the sibling's own
+    // slug (`/bodega-uno-2/sucursales`) — neither has a `Slug`/`Store` row
+    // written FOR IT by this event, so nothing else would ever bust their
+    // cached resolution.
+    expect(outcome.touchedSlugValues).toEqual(["bodega-uno", "bodega-uno-2", "bodega-dos"]);
+  });
+
+  it("the same routine edit while UNPUBLISHING (opt-out branch) also reports the brand + sibling", async () => {
+    storeFindUnique.mockResolvedValue(
+      existingStore({
+        slug: "bodega-dos",
+        sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"),
+        storefront: {
+          slug: "bodega-uno",
+          stores: [
+            { id: "store-1", slug: "bodega-uno-2" },
+            { id: "store-2", slug: "bodega-dos" },
+          ],
+        },
+      }),
+    );
+
+    const outcome = await handleStore(payload({ publishToStore: false }), "UPDATE");
+
+    expect(outcome.status).toBe("processed");
+    expect(outcome.touchedSlugValues).toEqual(["bodega-uno", "bodega-uno-2", "bodega-dos"]);
+  });
+
+  it("does not report touchedSlugValues when the brand has a single branch — nothing about a selector exists to go stale", async () => {
+    storeFindUnique.mockResolvedValue(
+      existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z") }),
+    );
+
+    const outcome = await handleStore(payload({ updatedAt: "2026-08-27T00:00:00.000Z" }), "UPDATE");
+
+    expect(outcome.touchedSlugValues).toBeUndefined();
+  });
+});

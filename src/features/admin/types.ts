@@ -39,6 +39,40 @@ export type AdminStoreRow = {
 export type StoreStatusBody =
   { enabled: true } | { enabled: false; reasonCode: string; message: string | null };
 
+/** What `POST /api/admin/stores/{storeId}/branches` accepts (HS8, etapa 2):
+ *  the store id — from `session.storeIds`, authorized separately from the
+ *  one in the route (architecture.md § La forma). */
+export type GroupStoresBody = { joiningStoreId: string };
+
+/** One row of what `groupStoreIntoBrand` returns — the URL a shopper (or a
+ *  QR) actually reaches, never a promise computed apart from the write. */
+export type GroupStoresBranch = { storeId: string; slug: PublicSlug; url: string };
+
+export type GroupStoresRow = {
+  storefrontId: string;
+  brandSlug: PublicSlug;
+  branches: GroupStoresBranch[];
+};
+
+/** DP2/HS12: a sibling branch of the admin's OWN brand that this admin does
+ *  NOT manage — name and city only, and DELIBERATELY no `storeId`: the panel
+ *  cannot build a link or a form out of this even if someone tries later. */
+export type BrandBranch = {
+  name: string;
+  city: string | null;
+  canonicalSlug: PublicSlug;
+  status: StoreStatus;
+};
+
+/** A candidate for `GroupStoresForm`'s radios — always a store the admin
+ *  already manages (`session.storeIds`), so a `storeId` here is fine. */
+export type GroupCandidate = {
+  id: string;
+  name: string;
+  city: string | null;
+  canonicalSlug: PublicSlug;
+};
+
 export type AdminProductRow = {
   id: string;
   slug: string;
@@ -116,4 +150,6 @@ export type AdminWriteResult<T> =
   | { kind: "invalid_conditions"; issues: { path: (string | number)[]; message: string }[] } // -> 400 (R30)
   | { kind: "storage_unavailable"; reason: StorageFailureReason } // -> 503 (E25)
   | { kind: "not_found" } // -> 404: the authorized store was deleted mid-session
+  | { kind: "different_business" } // -> 409 (HS8): grouping across businesses
+  | { kind: "already_in_brand" } // -> 409 (HS8): nothing to do
   | { kind: "failed" }; // -> 500

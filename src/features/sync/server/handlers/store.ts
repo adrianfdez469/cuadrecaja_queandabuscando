@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { canonicalSlug } from "@/lib/publicSlug";
-import { createStorefrontWithStore } from "@/features/storefront/server/registry";
+import { createStorefrontWithStore, expandBrandTouch } from "@/features/storefront/server/registry";
 import type { StorePayload } from "../../schemas";
 import { SKIPPED, STALE, type HandlerOutcome } from "./types";
 
@@ -32,6 +32,19 @@ import { SKIPPED, STALE, type HandlerOutcome } from "./types";
  * only writer of `Slug`/`Storefront`. `Business.slug` no longer exists to
  * write (I1): a business's name never resolves a URL, so it never entered
  * the registry.
+ *
+ * F-017 (etapa 2, ALTA — tests.md § Fallos encontrados #3): a ROUTINE event
+ * updating a branch that already belongs to a multi-branch brand changes
+ * what the brand's selector and every sibling's own `/sucursales` show
+ * (name, city, closed Badge inputs) without writing a `Slug` row for any of
+ * them. `touchedSlugValues` reports the brand's own slug and every
+ * sibling's own slug so `processBatch.ts` busts their cached resolution too
+ * — the same "revalida solo lo que se escribe" gap
+ * `regroupStoreIntoBrand`/`setStoreEnabled` had, now closed by the single
+ * `expandBrandTouch` funnel (ficha
+ * `revalida-solo-lo-que-se-escribe-no-lo-que-cambia-de-significado`). Zero
+ * extra queries: `existing.storefront.stores` already carried this brand's
+ * member list for `brandBranchCount` — it only gained `slug` in the select.
  */
 export async function handleStore(
   payload: StorePayload,
@@ -58,7 +71,11 @@ export async function handleStore(
       storefront: {
         select: {
           slug: true,
-          stores: { where: { status: { not: "DRAFT" } }, select: { id: true } },
+          // `slug` here (not just `id`), like `mutations.ts`'s
+          // `STORE_CANONICAL_SELECT`, is what lets a routine update revalidate
+          // every sibling's own slug tag when the brand is multi-branch —
+          // free on this query, it already selects the row.
+          stores: { where: { status: { not: "DRAFT" } }, select: { id: true, slug: true } },
         },
       },
     },
@@ -108,6 +125,7 @@ export async function handleStore(
       status: "processed",
       touchedStoreSlug: canonical,
       touchedBrandSlug: existing.storefront.slug,
+      touchedSlugValues: siblingTouch(existing.storefront),
     };
   }
 
@@ -192,5 +210,19 @@ export async function handleStore(
     status: "processed",
     touchedStoreSlug: canonical,
     touchedBrandSlug: existing.storefront.slug,
+    touchedSlugValues: siblingTouch(existing.storefront),
   };
+}
+
+/**
+ * `undefined` for a single-branch brand (nothing about a selector or a
+ * sibling's `/sucursales` exists to go stale — playbook § Cuándo NO es
+ * esto), otherwise the brand's own slug plus every sibling's own slug, via
+ * the ONE shared funnel (`expandBrandTouch`) — never a hand-rolled
+ * `.map()`/`.filter()` here.
+ */
+function siblingTouch(storefront: { slug: string; stores: { slug: string | null }[] }) {
+  return storefront.stores.length > 1
+    ? expandBrandTouch(storefront.slug, storefront.stores)
+    : undefined;
 }

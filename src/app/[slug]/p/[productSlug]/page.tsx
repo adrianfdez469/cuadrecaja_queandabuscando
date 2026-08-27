@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Container } from "@/components/ui/Container";
 import { AddToCartButton } from "@/features/cart/components/AddToCartButton";
 import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
+import { BranchBar } from "@/components/store/BranchBar";
 
 /**
  * Pre-render the catalogue of every published store. Like the store page, this
@@ -44,7 +45,10 @@ export async function generateMetadata({
 }: PageProps<"/[slug]/p/[productSlug]">): Promise<Metadata> {
   const { slug, productSlug } = await params;
   const resolution = await requireResolution(slug);
-  if (resolution.kind === "selector") notFound(); // etapa 2, unreachable in this stage
+  // A brand's OWN slug never has a catalogue to iterate under `/p/*` once it
+  // groups 2+ branches (criterio 2) — that URL now serves the selector, not
+  // a product page.
+  if (resolution.kind === "selector") notFound();
   const store = await requireStore(resolution);
   // HD11: never read the product for a closed store — not even to build
   // metadata. A closed store's product pages all share the store's own
@@ -69,7 +73,9 @@ export async function generateMetadata({
 export default async function ProductPage({ params }: PageProps<"/[slug]/p/[productSlug]">) {
   const { slug, productSlug } = await params;
   const resolution = await requireResolution(slug);
-  if (resolution.kind === "selector") notFound(); // etapa 2, unreachable in this stage
+  // A brand's OWN slug never has a catalogue to iterate under `/p/*` once it
+  // groups 2+ branches (criterio 2) — that URL now serves the selector.
+  if (resolution.kind === "selector") notFound();
   const store = await requireStore(resolution);
 
   // HD11: the closed notice, WITHOUT reading the product — not even to
@@ -77,17 +83,25 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
   // productSlug exists in a store nobody can browse right now.
   if (store.status !== "PUBLISHED") {
     return (
-      <Container className="py-8">
-        <StoreClosedNotice
-          storeName={store.name}
-          disabledReasonCode={store.disabledReasonCode}
-          disabledMessage={store.disabledMessage}
-          disabledAt={store.disabledAt}
-          whatsapp={store.whatsapp}
-          phone={store.phone}
-          address={store.address}
+      <>
+        <Container className="py-8">
+          <StoreClosedNotice
+            storeName={store.name}
+            disabledReasonCode={store.disabledReasonCode}
+            disabledMessage={store.disabledMessage}
+            disabledAt={store.disabledAt}
+            whatsapp={store.whatsapp}
+            phone={store.phone}
+            address={store.address}
+          />
+        </Container>
+        <BranchBar
+          branchName={store.name}
+          canonicalSlug={store.canonicalSlug}
+          branchCount={resolution.branchCount}
+          isOpen={false}
         />
-      </Container>
+      </>
     );
   }
 
@@ -120,66 +134,74 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
   const image = product.imageUrls[0];
 
   return (
-    <Container className="grid gap-8 py-8 md:grid-cols-2">
-      <div className="bg-surface-muted relative aspect-square overflow-hidden rounded-lg">
-        {image ? (
-          <Image
-            src={image}
-            alt={product.name}
-            fill
-            sizes="(max-width: 768px) 100vw, 50vw"
-            className="object-cover"
-            priority
-          />
-        ) : (
-          <div className="text-fg-muted flex h-full items-center justify-center">Sin imagen</div>
-        )}
-      </div>
-
-      <div>
-        {product.categoryName && <p className="text-fg-muted text-sm">{product.categoryName}</p>}
-        <h1 className="mt-1 text-2xl font-semibold">{product.name}</h1>
-
-        <p className="text-brand mt-4 text-3xl font-semibold">
-          {price ?? <span className="text-fg-muted">Consultar precio</span>}
-        </p>
-        {resolved?.listPrice && (
-          <p className="text-fg-muted text-sm">
-            Antes <span className="line-through">{formatMoney(resolved.listPrice)}</span>
-          </p>
-        )}
-        {winningPromotion && (
-          <p className="text-fg-muted text-sm">
-            Promoción:{" "}
-            {winningPromotion.type === "PERCENTAGE"
-              ? `${winningPromotion.value}% de descuento.`
-              : `${winningPromotion.value} de descuento.`}
-          </p>
-        )}
-
-        <div className="mt-3">
-          <Badge tone={AVAILABILITY_TONE[product.availability]}>
-            {AVAILABILITY_LABEL[product.availability]}
-          </Badge>
+    <>
+      <BranchBar
+        branchName={store.name}
+        canonicalSlug={store.canonicalSlug}
+        branchCount={resolution.branchCount}
+        isOpen
+      />
+      <Container className="grid gap-8 py-8 md:grid-cols-2">
+        <div className="bg-surface-muted relative aspect-square overflow-hidden rounded-lg">
+          {image ? (
+            <Image
+              src={image}
+              alt={product.name}
+              fill
+              sizes="(max-width: 768px) 100vw, 50vw"
+              className="object-cover"
+              priority
+            />
+          ) : (
+            <div className="text-fg-muted flex h-full items-center justify-center">Sin imagen</div>
+          )}
         </div>
 
-        {product.description && (
-          <p className="text-fg-muted mt-6 whitespace-pre-line">{product.description}</p>
-        )}
+        <div>
+          {product.categoryName && <p className="text-fg-muted text-sm">{product.categoryName}</p>}
+          <h1 className="mt-1 text-2xl font-semibold">{product.name}</h1>
 
-        <div className="mt-8">
-          <AddToCartButton
-            storeId={store.id}
-            storeSlug={store.canonicalSlug}
-            storeProductId={product.id}
-            slug={product.slug}
-            name={product.name}
-            unitPrice={resolved?.price.amount ?? "0.00"}
-            currencyCode={resolved?.price.currency ?? store.baseCurrencyCode}
-            disabled={!canOrder}
-          />
+          <p className="text-brand mt-4 text-3xl font-semibold">
+            {price ?? <span className="text-fg-muted">Consultar precio</span>}
+          </p>
+          {resolved?.listPrice && (
+            <p className="text-fg-muted text-sm">
+              Antes <span className="line-through">{formatMoney(resolved.listPrice)}</span>
+            </p>
+          )}
+          {winningPromotion && (
+            <p className="text-fg-muted text-sm">
+              Promoción:{" "}
+              {winningPromotion.type === "PERCENTAGE"
+                ? `${winningPromotion.value}% de descuento.`
+                : `${winningPromotion.value} de descuento.`}
+            </p>
+          )}
+
+          <div className="mt-3">
+            <Badge tone={AVAILABILITY_TONE[product.availability]}>
+              {AVAILABILITY_LABEL[product.availability]}
+            </Badge>
+          </div>
+
+          {product.description && (
+            <p className="text-fg-muted mt-6 whitespace-pre-line">{product.description}</p>
+          )}
+
+          <div className="mt-8">
+            <AddToCartButton
+              storeId={store.id}
+              storeSlug={store.canonicalSlug}
+              storeProductId={product.id}
+              slug={product.slug}
+              name={product.name}
+              unitPrice={resolved?.price.amount ?? "0.00"}
+              currencyCode={resolved?.price.currency ?? store.baseCurrencyCode}
+              disabled={!canOrder}
+            />
+          </div>
         </div>
-      </div>
-    </Container>
+      </Container>
+    </>
   );
 }
