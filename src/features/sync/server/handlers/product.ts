@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { buildSearchDocument, resolveCanonicalIdentity } from "@/lib/canonical";
 import { uniqueSlug } from "@/lib/slug";
 import { canonicalSlug } from "@/lib/publicSlug";
+import { writeSearchDocument } from "@/features/marketplace/server/searchVector";
 import type { ProductPayload } from "../../schemas";
 import { SKIPPED, STALE, type HandlerOutcome } from "./types";
 
@@ -16,6 +17,11 @@ import { SKIPPED, STALE, type HandlerOutcome } from "./types";
  *
  * Step 5 is the one that is easy to forget and degrades search silently, so it
  * lives here as an explicit effect rather than as the caller's responsibility.
+ * F-015: every write of `searchDocument` (the three canonical creates below,
+ * and the alias-recompute at the end of `recordAlias`) goes through
+ * `writeSearchDocument` (`@/features/marketplace/server/searchVector`), which
+ * writes `searchDocument` AND `searchVector` in the same UPDATE — there is no
+ * separate reindex pass, and no other place in the repo writes either column.
  *
  * Note the absence of a $transaction: the Supavisor pooler runs in transaction
  * mode, where a query on the global client inside $transaction deadlocks. Each
@@ -156,10 +162,10 @@ async function resolveCanonical(payload: ProductPayload): Promise<string> {
         id: resolution.canonicalProductId,
         name: payload.localName,
         imageUrl: payload.imageUrl ?? null,
-        searchDocument: buildSearchDocument(payload.localName, []),
       },
       select: { id: true },
     });
+    await writeSearchDocument(prisma, created.id, buildSearchDocument(payload.localName, []));
     return created.id;
   }
 
@@ -175,10 +181,10 @@ async function resolveCanonical(payload: ProductPayload): Promise<string> {
         ean: resolution.ean,
         name: payload.localName,
         imageUrl: payload.imageUrl ?? null,
-        searchDocument: buildSearchDocument(payload.localName, []),
       },
       select: { id: true },
     });
+    await writeSearchDocument(prisma, created.id, buildSearchDocument(payload.localName, []));
     return created.id;
   }
 
@@ -195,10 +201,10 @@ async function resolveCanonical(payload: ProductPayload): Promise<string> {
       name: payload.localName,
       imageUrl: payload.imageUrl ?? null,
       isExclusive: true,
-      searchDocument: buildSearchDocument(payload.localName, []),
     },
     select: { id: true },
   });
+  await writeSearchDocument(prisma, created.id, buildSearchDocument(payload.localName, []));
   return created.id;
 }
 
@@ -248,20 +254,21 @@ async function recordAlias(
     data: { canonicalProductId, text: trimmed, businessId },
   });
 
-  // New alias => the search document is now out of date.
+  // New alias => the search document is now out of date. Recomputed and
+  // written — with the vector, in the same UPDATE — right here, not in a
+  // separate reindexing pass (E2).
   const canonical = await prisma.canonicalProduct.findUnique({
     where: { id: canonicalProductId },
     select: { name: true, aliases: { select: { text: true } } },
   });
   if (!canonical) return;
 
-  await prisma.canonicalProduct.update({
-    where: { id: canonicalProductId },
-    data: {
-      searchDocument: buildSearchDocument(
-        canonical.name,
-        canonical.aliases.map((alias) => alias.text),
-      ),
-    },
-  });
+  await writeSearchDocument(
+    prisma,
+    canonicalProductId,
+    buildSearchDocument(
+      canonical.name,
+      canonical.aliases.map((alias) => alias.text),
+    ),
+  );
 }

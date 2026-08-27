@@ -4,6 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { buildSearchDocument } from "../src/lib/canonical";
 import { RESERVED_SLUGS, slugify } from "../src/lib/slug";
+import { writeSearchDocument } from "../src/features/marketplace/server/searchVector";
 
 /**
  * Development seed.
@@ -642,7 +643,6 @@ async function upsertCanonical(product: SeedProduct, businessId: string): Promis
         name: product.name,
         // No barcode means no shared identity: exclusive to its own store.
         isExclusive: !product.ean,
-        searchDocument: buildSearchDocument(product.name, []),
       },
     }));
 
@@ -663,15 +663,17 @@ async function upsertCanonical(product: SeedProduct, businessId: string): Promis
     select: { text: true },
   });
 
-  await prisma.canonicalProduct.update({
-    where: { id: canonical.id },
-    data: {
-      searchDocument: buildSearchDocument(
-        canonical.name,
-        aliases.map((alias) => alias.text),
-      ),
-    },
-  });
+  // F-015 (R14): the same writer the sync uses, so the seed never leaves a
+  // canonical with an out-of-date searchDocument or a null searchVector — a
+  // freshly-seeded database is buscable, and the CI seeds twice.
+  await writeSearchDocument(
+    prisma,
+    canonical.id,
+    buildSearchDocument(
+      canonical.name,
+      aliases.map((alias) => alias.text),
+    ),
+  );
 
   return canonical.id;
 }

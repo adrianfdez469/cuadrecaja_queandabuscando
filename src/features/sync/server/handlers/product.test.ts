@@ -1,19 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { buildSearchDocument } from "@/lib/canonical";
 
 /**
  * Criterio 3, escrito por primera vez: `handleProduct` de `UPDATE` no toca
  * los seis campos del panel. Hasta este cambio la invariante solo vivía en
  * un comentario (`product.ts:83-86`) y no tenía ninguna prueba
  * (`find src/features/sync -name "*.test.ts"` solo listaba `inbox.test.ts`).
+ *
+ * F-015 (etapa 2, E1-E4): `writeSearchDocument` is mocked as a unit here —
+ * the SQL it runs (W1, a real UPDATE against a real `tsvector`) is only
+ * verifiable against Postgres, and that suite belongs to etapa 5
+ * (`src/features/sync/server/handlers/product.db.test.ts`, not written by
+ * this cycle). What IS a unit fact, and what these tests hold the line on:
+ * whether `handleProduct` calls the writer at all, how many times, and with
+ * which document.
  */
 
 const storeFindUnique = vi.fn();
 const storeProductFindUnique = vi.fn();
 const storeProductUpdate = vi.fn();
 const canonicalProductFindUnique = vi.fn();
+const canonicalProductCreate = vi.fn();
 const localCategoryFindUnique = vi.fn();
 const productAliasFindUnique = vi.fn();
 const productAliasUpdate = vi.fn();
+const productAliasCreate = vi.fn();
+const writeSearchDocumentMock = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -22,13 +34,21 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: (...a: unknown[]) => storeProductFindUnique(...a),
       update: (...a: unknown[]) => storeProductUpdate(...a),
     },
-    canonicalProduct: { findUnique: (...a: unknown[]) => canonicalProductFindUnique(...a) },
+    canonicalProduct: {
+      findUnique: (...a: unknown[]) => canonicalProductFindUnique(...a),
+      create: (...a: unknown[]) => canonicalProductCreate(...a),
+    },
     localCategory: { findUnique: (...a: unknown[]) => localCategoryFindUnique(...a) },
     productAlias: {
       findUnique: (...a: unknown[]) => productAliasFindUnique(...a),
       update: (...a: unknown[]) => productAliasUpdate(...a),
+      create: (...a: unknown[]) => productAliasCreate(...a),
     },
   },
+}));
+
+vi.mock("@/features/marketplace/server/searchVector", () => ({
+  writeSearchDocument: (...a: unknown[]) => writeSearchDocumentMock(...a),
 }));
 
 const { handleProduct } = await import("./product");
@@ -65,10 +85,17 @@ beforeEach(() => {
     canonicalProductId: "canon-1",
   });
   storeProductUpdate.mockReset().mockResolvedValue({ id: "product-1" });
+  // Default: the explicit canonical id already exists, so resolveCanonical
+  // never creates and never has to write a search document itself.
   canonicalProductFindUnique.mockReset().mockResolvedValue({ id: "canon-1" });
+  canonicalProductCreate.mockReset();
   localCategoryFindUnique.mockReset().mockResolvedValue(null);
+  // Default: the business already used this exact name for this canonical,
+  // so recordAlias only increments useCount and never writes either.
   productAliasFindUnique.mockReset().mockResolvedValue({ id: "alias-1" });
   productAliasUpdate.mockReset().mockResolvedValue({ id: "alias-1" });
+  productAliasCreate.mockReset();
+  writeSearchDocumentMock.mockReset().mockResolvedValue(1);
 });
 
 const PANEL_COLUMNS = [
@@ -108,5 +135,68 @@ describe("handleProduct() UPDATE", () => {
 
     expect(outcome.status).toBe("stale");
     expect(storeProductUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleProduct() search indexing (F-015, E1-E4)", () => {
+  it("a stale event never calls the search-index writer (E4)", async () => {
+    // Same setup as the STALE test above: the guard that protects the index
+    // is the existing `return STALE`, not a second copy inside the writer.
+    storeProductFindUnique.mockResolvedValue({
+      id: "product-1",
+      sourceUpdatedAt: new Date("2026-08-26T12:00:00.000Z"),
+      canonicalProductId: "canon-1",
+    });
+
+    const outcome = await handleProduct(payload(), "UPDATE");
+
+    expect(outcome.status).toBe("stale");
+    expect(writeSearchDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it("a repeated alias does not call the writer", async () => {
+    // Default mocks: the explicit canonical already exists and the alias
+    // already exists for this business — nothing is new.
+    const outcome = await handleProduct(payload(), "UPDATE");
+
+    expect(outcome.status).toBe("processed");
+    expect(writeSearchDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it("creating a new canonical calls the writer once with its search document (E1)", async () => {
+    // The explicit canonical id is not found -> resolveCanonical creates it.
+    canonicalProductFindUnique.mockResolvedValueOnce(null);
+    canonicalProductCreate.mockResolvedValueOnce({ id: "canon-new" });
+
+    const outcome = await handleProduct(payload(), "UPDATE");
+
+    expect(outcome.status).toBe("processed");
+    expect(writeSearchDocumentMock).toHaveBeenCalledOnce();
+    expect(writeSearchDocumentMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "canon-new",
+      buildSearchDocument("Refresco de cola 1.5 L", []),
+    );
+  });
+
+  it("a new alias recomputes the search document in the same write, once (E2)", async () => {
+    // The canonical already exists (default), but this business has never
+    // used this exact name for it before.
+    productAliasFindUnique.mockResolvedValueOnce(null);
+    productAliasCreate.mockResolvedValueOnce({ id: "alias-2" });
+    canonicalProductFindUnique.mockResolvedValueOnce({ id: "canon-1" }).mockResolvedValueOnce({
+      name: "Refresco de cola 1.5 L",
+      aliases: [{ text: "Coca-Cola 1.5L" }],
+    });
+
+    const outcome = await handleProduct(payload({ localName: "Coca-Cola 1.5L" }), "UPDATE");
+
+    expect(outcome.status).toBe("processed");
+    expect(writeSearchDocumentMock).toHaveBeenCalledOnce();
+    expect(writeSearchDocumentMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "canon-1",
+      buildSearchDocument("Refresco de cola 1.5 L", ["Coca-Cola 1.5L"]),
+    );
   });
 });
