@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import type { AdminSession } from "@/lib/auth/adminSession";
+import { canonicalSlug } from "@/lib/publicSlug";
 import type { AuthorizedStoreId } from "../authorization";
 import type { AdminStoreListItem } from "../types";
 
@@ -9,7 +10,17 @@ import type { AdminStoreListItem } from "../types";
  *
  * `listManagedStores` filters strictly by `session.storeIds` (never
  * `businessId` — criterio 1) and does zero queries for an empty session.
+ *
+ * F-017: the public URL a store exposes is now the CANONICAL slug, resolved
+ * from its brand — `Store.slug` alone is nullable and, for a brand-new
+ * store, always empty.
  */
+
+const STOREFRONT_SELECT = {
+  slug: true,
+  stores: { where: { status: { not: "DRAFT" as const } }, select: { id: true } },
+} as const;
+
 export async function listManagedStores(session: AdminSession): Promise<AdminStoreListItem[]> {
   if (session.storeIds.length === 0) return [];
 
@@ -25,13 +36,19 @@ export async function listManagedStores(session: AdminSession): Promise<AdminSto
       disabledReasonCode: true,
       disabledMessage: true,
       disabledAt: true,
+      storefront: { select: STOREFRONT_SELECT },
     },
     orderBy: { name: "asc" },
   });
 
-  return stores.map((store) => ({
-    ...store,
-    disabledAt: store.disabledAt ? store.disabledAt.toISOString() : null,
+  return stores.map(({ slug, storefront, ...rest }) => ({
+    ...rest,
+    canonicalSlug: canonicalSlug({
+      storeSlug: slug,
+      brandSlug: storefront.slug,
+      brandBranchCount: storefront.stores.length,
+    }),
+    disabledAt: rest.disabledAt ? rest.disabledAt.toISOString() : null,
   }));
 }
 
@@ -62,12 +79,18 @@ async function findManagedStore(storeId: AuthorizedStoreId): Promise<ManagedStor
       disabledMessage: true,
       disabledAt: true,
       business: { select: { baseCurrencyCode: true } },
+      storefront: { select: STOREFRONT_SELECT },
     },
   });
   if (!store) return null;
-  const { business, ...rest } = store;
+  const { business, slug, storefront, ...rest } = store;
   return {
     ...rest,
+    canonicalSlug: canonicalSlug({
+      storeSlug: slug,
+      brandSlug: storefront.slug,
+      brandBranchCount: storefront.stores.length,
+    }),
     disabledAt: store.disabledAt ? store.disabledAt.toISOString() : null,
     baseCurrencyCode: business.baseCurrencyCode,
   };

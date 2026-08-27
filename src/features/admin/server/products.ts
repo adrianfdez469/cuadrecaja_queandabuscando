@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { ADMIN_PRODUCTS_PAGE_SIZE } from "@/constants/admin";
+import { canonicalSlug, type PublicSlug } from "@/lib/publicSlug";
 import type { AuthorizedStoreId } from "../authorization";
 import type { AdminProductRow } from "../types";
 
@@ -101,7 +102,8 @@ export async function summarizeStoreProducts(storeId: AuthorizedStoreId): Promis
   return { total, hidden, withoutImage };
 }
 
-export type ProductLookup = { ok: true; row: AdminProductRow; storeSlug: string } | { ok: false };
+export type ProductLookup =
+  { ok: true; row: AdminProductRow; storeSlug: PublicSlug } | { ok: false };
 
 /**
  * The single read that decides E19/E24's 403: a `storeProductId` that does
@@ -113,11 +115,29 @@ export async function getProductForEdit(
 ): Promise<ProductLookup> {
   const row = await prisma.storeProduct.findFirst({
     where: { id: storeProductId, storeId },
-    select: { ...PRODUCT_ROW_SELECT, store: { select: { slug: true } } },
+    select: {
+      ...PRODUCT_ROW_SELECT,
+      store: {
+        select: {
+          slug: true,
+          storefront: {
+            select: {
+              slug: true,
+              stores: { where: { status: { not: "DRAFT" } }, select: { id: true } },
+            },
+          },
+        },
+      },
+    },
   });
   if (!row) return { ok: false };
   const { store, ...rest } = row;
-  return { ok: true, row: toAdminProductRow(rest), storeSlug: store.slug };
+  const storeSlug = canonicalSlug({
+    storeSlug: store.slug,
+    brandSlug: store.storefront.slug,
+    brandBranchCount: store.storefront.stores.length,
+  });
+  return { ok: true, row: toAdminProductRow(rest), storeSlug };
 }
 
 export type AdminCategoryOption = { id: string; name: string };

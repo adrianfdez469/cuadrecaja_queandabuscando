@@ -3,7 +3,7 @@ import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { buildSearchDocument } from "../src/lib/canonical";
-import { slugify } from "../src/lib/slug";
+import { RESERVED_SLUGS, slugify } from "../src/lib/slug";
 
 /**
  * Development seed.
@@ -228,12 +228,20 @@ async function main() {
     });
   }
 
+  // F-017/R12: every reserved word gets its own row before anything else,
+  // so a slug that would collide fails at the same primary key a live
+  // collision would. `skipDuplicates` keeps this idempotent without a
+  // read-then-write race.
+  await prisma.slug.createMany({
+    data: RESERVED_SLUGS.map((value) => ({ value, kind: "RESERVED" as const })),
+    skipDuplicates: true,
+  });
+
   const business = await prisma.business.upsert({
     where: { externalId: "seed-negocio-1" },
     create: {
       externalId: "seed-negocio-1",
       name: "Distribuidora La Rampa",
-      slug: "la-rampa",
       baseCurrencyCode: "CUP",
     },
     update: {},
@@ -319,13 +327,120 @@ async function main() {
     address: "Calle 100, Marianao",
   });
 
+  // F-017 (criterio 3, E2, E21): the ONLY fixture whose branch keeps a live
+  // `Store.slug` of its own (kind `STORE` in the registry) — without it,
+  // the "resolve by branch alias, canonical = brand slug" path is a branch
+  // nobody's data ever exercises. `ownSlug` here is what a `Store.slug`
+  // looked like before this feature moved it to the brand.
+  await seedStore({
+    businessId: business.id,
+    externalId: "seed-tienda-4",
+    slug: "bodega-central",
+    ownSlug: "bodega-central-vedado",
+    name: "Bodega Central · Vedado",
+    description: "La bodega de siempre, ahora con marca propia.",
+    city: "La Habana",
+    address: "Calle 21, Vedado",
+    whatsapp: "+5350000004",
+    themeTokens: null,
+    checkoutMode: "WHATSAPP",
+    deliveryEnabled: false,
+    deliveryFee: null,
+    products: [DEMO_PRODUCTS[0], DEMO_PRODUCTS[1]],
+    categories,
+  });
+
+  // F-017 (criterios 2 y 6, etapa 2): dos tiendas de un solo uso, del mismo
+  // negocio, dedicadas a agrupar. NO se leen desde ningún otro feature —
+  // agrupar `tienda-demo` con `tienda-dos` rompería el criterio 3 de F-004,
+  // el smoke.sh de F-010 y `check:bundle` (architecture.md § prisma/seed.ts).
+  // La etapa 1 solo las siembra como marcas de una sucursal cada una; la
+  // acción de agrupar (etapa 2, sin construir aquí) es lo que las junta.
+  await seedStore({
+    businessId: business.id,
+    externalId: "seed-tienda-5",
+    slug: "bodega-uno",
+    name: "Bodega Uno",
+    description: "Fixture de un solo uso para agrupar (etapa 2).",
+    city: "La Habana",
+    address: "Calle 5, Vedado",
+    whatsapp: "+5350000005",
+    themeTokens: null,
+    checkoutMode: "WHATSAPP",
+    deliveryEnabled: false,
+    deliveryFee: null,
+    products: [DEMO_PRODUCTS[0], DEMO_PRODUCTS[4]],
+    categories,
+  });
+
+  await seedStore({
+    businessId: business.id,
+    externalId: "seed-tienda-6",
+    slug: "bodega-dos",
+    name: "Bodega Dos",
+    description: "Fixture de un solo uso para agrupar (etapa 2).",
+    city: "La Habana",
+    address: "Calle 7, Vedado",
+    whatsapp: "+5350000006",
+    themeTokens: null,
+    checkoutMode: "WHATSAPP",
+    deliveryEnabled: false,
+    deliveryFee: null,
+    products: [DEMO_PRODUCTS[2], DEMO_PRODUCTS[5]],
+    categories,
+  });
+
   const counts = {
     stores: await prisma.store.count(),
+    storefronts: await prisma.storefront.count(),
     canonical: await prisma.canonicalProduct.count(),
     aliases: await prisma.productAlias.count(),
     products: await prisma.storeProduct.count(),
   };
   console.log("Done:", counts);
+}
+
+/**
+ * F-017: the SINGLE place the seed creates a brand. Idempotent by
+ * `Storefront.slug` (unique). The branding that used to live on `Store`
+ * (`themeTokens`, `logoUrl`, `coverUrl`) now lives here.
+ *
+ * On `update` this only ever touches `name`/branding — never `slug` — so
+ * re-running the seed cannot move a brand's URL out from under a QR that
+ * might already be printed against it.
+ */
+async function seedStorefront(input: {
+  businessId: string;
+  slug: string;
+  name: string;
+  themeTokens?: unknown;
+}): Promise<string> {
+  const existing = await prisma.storefront.findUnique({
+    where: { slug: input.slug },
+    select: { id: true },
+  });
+  if (existing) {
+    await prisma.storefront.update({
+      where: { id: existing.id },
+      data: {
+        name: input.name,
+        ...(input.themeTokens ? { themeTokens: input.themeTokens as object } : {}),
+      },
+    });
+    return existing.id;
+  }
+
+  const created = await prisma.storefront.create({
+    data: {
+      businessId: input.businessId,
+      name: input.name,
+      slug: input.slug,
+      ...(input.themeTokens ? { themeTokens: input.themeTokens as object } : {}),
+      slugEntry: { create: { value: input.slug, kind: "STOREFRONT" } },
+    },
+    select: { id: true },
+  });
+  return created.id;
 }
 
 /**
@@ -341,10 +456,21 @@ async function seedClosedStore(input: {
   city: string;
   address: string;
 }) {
+  const storefrontId = await seedStorefront({
+    businessId: input.businessId,
+    slug: input.slug,
+    name: input.name,
+  });
+
+  // Regla del seed (architecture.md § prisma/seed.ts): la rama `update` NUNCA
+  // escribe `slug` ni `storefrontId`, o `npm run seed` desharía una
+  // agrupación de la etapa 2. `slug` sale del objeto `input` a propósito.
+  const { slug: _brandSlug, ...storeFields } = input;
   await prisma.store.upsert({
     where: { externalId: input.externalId },
     create: {
-      ...input,
+      ...storeFields,
+      storefrontId,
       status: "SUSPENDED",
       disabledReasonCode: "VACACIONES",
       disabledMessage: "Volvemos pronto — gracias por tu paciencia.",
@@ -353,7 +479,7 @@ async function seedClosedStore(input: {
       sourceUpdatedAt: now,
     },
     update: {
-      ...input,
+      ...storeFields,
       status: "SUSPENDED",
       disabledReasonCode: "VACACIONES",
       disabledMessage: "Volvemos pronto — gracias por tu paciencia.",
@@ -365,8 +491,13 @@ async function seedClosedStore(input: {
 
 async function seedStore(input: {
   businessId: string;
-  externalId: string;
+  /** The BRAND's slug (F-017: the marca owns the slug, not the branch). */
   slug: string;
+  /** Only the fixture that proves the "alias" resolution path (E2/E21) sets
+   *  this — a branch keeping its own first-level slug after the brand owns
+   *  the canonical one. Every other fixture leaves it `undefined` (null). */
+  ownSlug?: string;
+  externalId: string;
   name: string;
   description: string;
   city: string;
@@ -380,7 +511,14 @@ async function seedStore(input: {
   products: SeedProduct[];
   categories: Map<string, string>;
 }) {
-  const { products, categories, themeTokens, ...storeFields } = input;
+  const { products, categories, themeTokens, slug, ownSlug, ...storeFields } = input;
+
+  const storefrontId = await seedStorefront({
+    businessId: input.businessId,
+    slug,
+    name: input.name,
+    themeTokens,
+  });
 
   // Deliberately fights HD12's migration (`_store_public_switch`), which
   // closes every PUBLISHED store retroactively: F-010's checkout fixtures
@@ -390,15 +528,20 @@ async function seedStore(input: {
   // opt-in "change" and second-guess this (AP5(b), `handlers/store.ts`).
   // If this ever gets "fixed" to respect HD12, F-004/F-007/F-010's fixtures
   // break along with `check:bundle` (architecture.md § Qué se rompe).
+  //
+  // F-017 § prisma/seed.ts, la trampa: `update` NUNCA escribe `slug` ni
+  // `storefrontId`. Sin esta regla, re-sembrar desharía una agrupación de la
+  // etapa 2 y el criterio 2 se pondría rojo sin que nadie tocara código.
   const store = await prisma.store.upsert({
     where: { externalId: storeFields.externalId },
     create: {
       ...storeFields,
+      storefrontId,
+      slug: ownSlug ?? null,
       status: "PUBLISHED",
       publishedAt: now,
       sourceOptIn: true,
       sourceUpdatedAt: now,
-      ...(themeTokens ? { themeTokens: themeTokens as object } : {}),
     },
     update: {
       ...storeFields,
@@ -408,9 +551,21 @@ async function seedStore(input: {
       disabledAt: null,
       sourceOptIn: true,
       sourceUpdatedAt: now,
-      ...(themeTokens ? { themeTokens: themeTokens as object } : {}),
     },
   });
+
+  // F-017: `Store.slug` alone resolves NOTHING — the registry (`Slug`) is
+  // the only table the resolver reads (I6). Without this row,
+  // `bodega-central-vedado` 404s even though the branch's own column is
+  // set, which is exactly the "fifth writer" bug the registry exists to
+  // prevent. Only the fixture that sets `ownSlug` needs this.
+  if (ownSlug) {
+    await prisma.slug.upsert({
+      where: { value: ownSlug },
+      create: { value: ownSlug, kind: "STORE", storeId: store.id },
+      update: {},
+    });
+  }
 
   for (const [index, product] of products.entries()) {
     const canonical = await upsertCanonical(product, input.businessId);

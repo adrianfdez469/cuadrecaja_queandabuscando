@@ -107,7 +107,7 @@ describe("saveProduct()", () => {
       id: "product-1",
       deletedAt: new Date(),
       syncedPriceCurrency: "USD",
-      store: { slug: "tienda-demo" },
+      store: { slug: null, storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] } },
     });
     const result = await saveProduct("store-1" as never, "product-1", WRITE_BODY);
     expect(result).toEqual({ kind: "product_deleted" });
@@ -119,7 +119,7 @@ describe("saveProduct()", () => {
       id: "product-1",
       deletedAt: null,
       syncedPriceCurrency: "USD",
-      store: { slug: "tienda-demo" },
+      store: { slug: null, storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] } },
     });
     update.mockResolvedValue(
       row({ description: "Una descripción", priceOverride: "8.00", priceOverrideCurrency: "USD" }),
@@ -140,7 +140,7 @@ describe("saveProduct()", () => {
       id: "product-1",
       deletedAt: null,
       syncedPriceCurrency: "USD",
-      store: { slug: "tienda-demo" },
+      store: { slug: null, storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] } },
     });
     update.mockResolvedValue(row());
 
@@ -159,7 +159,12 @@ describe("appendProductImage()", () => {
     uploadStoreObject.mockResolvedValue({ ok: true, url: "https://bucket/obj.jpg" });
     update.mockResolvedValue({ imageUrls: ["https://bucket/obj.jpg"] });
 
-    const result = await appendProductImage("store-1" as never, "product-1", "tienda-demo", file);
+    const result = await appendProductImage(
+      "store-1" as never,
+      "product-1",
+      "tienda-demo" as never,
+      file,
+    );
 
     expect(result).toEqual({
       kind: "created",
@@ -171,7 +176,12 @@ describe("appendProductImage()", () => {
   it("never writes or revalidates when Storage rejects the upload", async () => {
     uploadStoreObject.mockResolvedValue({ ok: false, reason: "unreachable" });
 
-    const result = await appendProductImage("store-1" as never, "product-1", "tienda-demo", file);
+    const result = await appendProductImage(
+      "store-1" as never,
+      "product-1",
+      "tienda-demo" as never,
+      file,
+    );
 
     expect(result).toEqual({ kind: "storage_unavailable", reason: "unreachable" });
     expect(update).not.toHaveBeenCalled();
@@ -183,7 +193,8 @@ describe("setStoreEnabled()", () => {
   it("publishes and clears the disabled columns, then revalidates (HD10)", async () => {
     storeUpdate.mockResolvedValue({
       id: "store-1",
-      slug: "tienda-demo",
+      slug: null,
+      storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] },
       status: "PUBLISHED",
       disabledReasonCode: null,
       disabledMessage: null,
@@ -206,7 +217,8 @@ describe("setStoreEnabled()", () => {
   it("suspends with the chosen reason code and message, then revalidates", async () => {
     storeUpdate.mockResolvedValue({
       id: "store-1",
-      slug: "tienda-demo",
+      slug: null,
+      storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] },
       status: "SUSPENDED",
       disabledReasonCode: "VACACIONES",
       disabledMessage: "Volvemos el 5",
@@ -250,7 +262,11 @@ const PROMOTION_BODY_PRODUCT = {
 
 describe("createPromotion()", () => {
   it("creates and revalidates when every product id belongs to the store", async () => {
-    storeFindUnique.mockResolvedValue({ slug: "tienda-demo", businessId: "biz-1" });
+    storeFindUnique.mockResolvedValue({
+      businessId: "biz-1",
+      slug: null,
+      storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] },
+    });
     storeProductCount.mockResolvedValue(2);
     promotionCreate.mockResolvedValue({
       id: "promo-1",
@@ -271,7 +287,11 @@ describe("createPromotion()", () => {
   });
 
   it("R30: rejects (400-shaped) when a product id belongs to another store, and never writes", async () => {
-    storeFindUnique.mockResolvedValue({ slug: "tienda-demo", businessId: "biz-1" });
+    storeFindUnique.mockResolvedValue({
+      businessId: "biz-1",
+      slug: null,
+      storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] },
+    });
     storeProductCount.mockResolvedValue(1); // only one of the two ids matched
 
     const result = await createPromotion("store-1" as never, PROMOTION_BODY_PRODUCT);
@@ -299,7 +319,11 @@ describe("updatePromotion()", () => {
   it("updates and revalidates when conditions are valid", async () => {
     promotionFindFirst.mockResolvedValue({
       id: "promo-1",
-      store: { slug: "tienda-demo", businessId: "biz-1" },
+      store: {
+        businessId: "biz-1",
+        slug: null,
+        storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] },
+      },
     });
     storeProductCount.mockResolvedValue(2);
     promotionUpdate.mockResolvedValue({
@@ -330,7 +354,10 @@ describe("deletePromotion()", () => {
   });
 
   it("deletes and revalidates when the promotion belongs to the store", async () => {
-    promotionFindFirst.mockResolvedValue({ id: "promo-1", store: { slug: "tienda-demo" } });
+    promotionFindFirst.mockResolvedValue({
+      id: "promo-1",
+      store: { slug: null, storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] } },
+    });
     promotionDelete.mockResolvedValue({});
 
     const result = await deletePromotion("store-1" as never, "promo-1");

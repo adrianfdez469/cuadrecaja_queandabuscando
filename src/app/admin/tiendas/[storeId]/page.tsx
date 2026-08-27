@@ -49,12 +49,12 @@ export default async function StoreHubPage({ params }: PageProps<"/admin/tiendas
       <h1 className="mt-1 text-2xl font-semibold">{store.name}</h1>
       {store.status === "PUBLISHED" && (
         <a
-          href={`/${store.slug}`}
+          href={`/${store.canonicalSlug}`}
           target="_blank"
           rel="noreferrer"
           className="text-fg-muted mt-1 block text-sm hover:underline"
         >
-          queandabuscando.com/{store.slug}
+          queandabuscando.com/{store.canonicalSlug}
         </a>
       )}
 

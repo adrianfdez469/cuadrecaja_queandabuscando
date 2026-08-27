@@ -64,13 +64,14 @@ que el cambio no toca ninguna ruta.
 
 ## Endpoints
 
-| Método | Ruta                                    | Cuerpo / query                    | Devuelve                      |
-| ------ | --------------------------------------- | --------------------------------- | ----------------------------- |
-| `POST` | `/api/internal/sync/catalog`            | `{ businessId, events[] }` (≤500) | 207 `{ ok, failed, results }` |
-| `POST` | `/api/internal/sync/availability`       | `{ businessId, items[] }` (≤2000) | 200 `{ applied, confirmed }`  |
-| `GET`  | `/api/internal/orders?since=&limit=`    | —                                 | 200 `{ orders, nextCursor }`  |
-| `POST` | `/api/internal/orders/status`           | `{ orderId, status, reason? }`    | 200 `{ ok: true }`            |
-| `GET`  | `/api/internal/reconciliation?storeId=` | —                                 | 200 `{ products, hash }`      |
+| Método | Ruta                                                   | Cuerpo / query                    | Devuelve                                                                         |
+| ------ | ------------------------------------------------------ | --------------------------------- | -------------------------------------------------------------------------------- |
+| `POST` | `/api/internal/sync/catalog`                           | `{ businessId, events[] }` (≤500) | 207 `{ ok, failed, results }`                                                    |
+| `POST` | `/api/internal/sync/availability`                      | `{ businessId, items[] }` (≤2000) | 200 `{ applied, confirmed }`                                                     |
+| `GET`  | `/api/internal/orders?since=&limit=`                   | —                                 | 200 `{ orders, nextCursor }`                                                     |
+| `POST` | `/api/internal/orders/status`                          | `{ orderId, status, reason? }`    | 200 `{ ok: true }`                                                               |
+| `GET`  | `/api/internal/reconciliation?storeId=`                | —                                 | 200 `{ products, hash }`                                                         |
+| `GET`  | `/api/internal/slug-availability?slug=&name=&storeId=` | —                                 | 200 `{ candidate, available, reason, resolvedSlug, url, storeKnown, reserving }` |
 
 ---
 
@@ -233,6 +234,57 @@ puede observar (HD10-HD15, el interruptor del panel de administración):
 de esta propuesta: la sección `payload de STORE` de arriba documenta también
 lo que la v2 ya envía y nunca se comunicó — conviene que este anuncio lleve
 los dos avisos juntos, no solo el campo nuevo.
+
+**F-017 (Storefront), sumado al mismo anuncio y también sin enviar todavía.**
+`slug` en el `payload` de `STORE` sigue siendo «solo se usa al CREAR» —ahora
+para el slug de la **marca**, no de la sucursal— y sigue sin poder fallar el
+evento nunca: si el valor está tomado o es una palabra reservada,
+queandabuscando lo convierte en el siguiente libre en silencio. El endpoint
+⑥ de abajo es la forma de saber, antes de publicar, en qué se va a convertir.
+
+##### ⑥ Disponibilidad de slug (v3, aditiva)
+
+```
+GET /api/internal/slug-availability?slug=<candidato>&name=<nombre>&storeId=<Tienda.id>
+Authorization: Bearer <token del negocio>
+```
+
+Un pronóstico de qué slug quedaría **si se publicara ahora**, nunca una
+reserva: **no reserva** nada (no aparta el valor) y **no garantiza** nada
+(entre la consulta y la publicación otro puede quedarse el valor). Al menos
+uno de `slug`/`name`; `storeId` es opcional (el `Tienda.id` de esta tienda,
+si ya se conoce) y solo decide `own` frente a `taken`.
+
+```jsonc
+{
+  "candidate": "la-rampa", // lo evaluado, ya normalizado
+  "available": false, // ¿queda tal cual?
+  "reason": "taken", // free | own | taken | reserved | retired | invalid
+  "resolvedSlug": "la-rampa-2", // el slug que quedaría si se publicara AHORA
+  "url": "https://queandabuscando.com/la-rampa-2",
+  "storeKnown": true, // ¿existe ya la tienda de storeId en esta base?
+  "reserving": false, // SIEMPRE false
+}
+```
+
+| `reason`   | Cuándo                                                         |
+| ---------- | -------------------------------------------------------------- |
+| `free`     | Nadie lo tiene                                                 |
+| `own`      | Lo tiene la marca de `storeId`: publicar no lo cambia          |
+| `taken`    | Lo tiene otra marca u otra sucursal                            |
+| `reserved` | Es una palabra reservada (`admin`, `api`, `sesion-cerrada`, …) |
+| `retired`  | Existió y su dueño desapareció: **no vuelve al pool**          |
+| `invalid`  | Nada convertible en slug, o pasa de 80 caracteres              |
+
+Errores: `400 { "error": "MISSING_QUERY" }` sin `slug` ni `name`; `401`/`503`
+del mismo guard que el resto de `/api/internal/*`. Un `storeId` desconocido
+**no** es error: es el caso normal antes de publicar (`"storeKnown": false`).
+
+**Qué tiene que hacer el otro equipo: nada obligatorio.** `Tienda.slug` ya
+está en la lista de cambios de abajo desde la v1. Lo único opcional es
+llamar a este endpoint desde la pantalla donde el POS edita el slug de una
+tienda, para mostrarle al comerciante qué dirección va a quedar antes de que
+la publique.
 
 ### Transformación en queandabuscando
 

@@ -9,6 +9,7 @@ import { Container } from "@/components/ui/Container";
 import { Card } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
 import { requireStore } from "@/features/catalog/server/queries";
+import { requireResolution } from "@/features/storefront/server/resolve";
 
 /**
  * The order confirmation / status page — 100% server, zero client modules of
@@ -22,7 +23,12 @@ export const metadata: Metadata = { robots: { index: false } };
 
 export default async function OrderPage({ params }: PageProps<"/[slug]/pedido/[code]">) {
   const { slug, code } = await params;
-  const [store, order] = await Promise.all([requireStore(slug), getOrderByCode(slug, code)]);
+  const resolution = await requireResolution(slug);
+  if (resolution.kind === "selector") notFound(); // etapa 2, unreachable in this stage
+  const [store, order] = await Promise.all([
+    requireStore(resolution),
+    getOrderByCode(resolution.storeId, code),
+  ]);
   if (!order) notFound();
 
   const whatsappUrl = orderWhatsappUrl(order);
@@ -117,7 +123,7 @@ export default async function OrderPage({ params }: PageProps<"/[slug]/pedido/[c
         Actualiza la página para ver el estado más reciente.
       </p>
 
-      <a href={`/${slug}`} className="text-brand mt-8 inline-block underline">
+      <a href={`/${store.canonicalSlug}`} className="text-brand mt-8 inline-block underline">
         Seguir comprando
       </a>
     </Container>

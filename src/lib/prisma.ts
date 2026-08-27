@@ -17,6 +17,16 @@ import { PrismaClient } from "@/generated/prisma/client";
  * Transaction mode has a consequence that bites: no query may run on this
  * global client from inside a `$transaction` callback — it deadlocks against
  * the pooled connection. Batch writes into a single round-trip instead.
+ *
+ * `max: 5` on the underlying `pg.Pool`: `next build`'s static generation
+ * spawns several worker processes in parallel, each with its OWN client
+ * (and so its own pool) — with no cap, enough concurrent product pages
+ * (F-017's `generateStaticParams` resolves a branch, then loads it, per
+ * page) exhaust the LOCAL dev Postgres's `max_connections` (100, no
+ * pooler in front of it) with `P2037 TooManyConnections` (ficha
+ * `prisma-p2037-too-many-connections-build-static-params`). Production
+ * runs behind Supavisor's own pooler, so this cap is a floor either way,
+ * never a bottleneck a single request would notice.
  */
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -29,7 +39,7 @@ function createClient(): PrismaClient {
   }
 
   return new PrismaClient({
-    adapter: new PrismaPg({ connectionString }),
+    adapter: new PrismaPg({ connectionString, max: 5 }),
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 }

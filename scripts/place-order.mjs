@@ -38,12 +38,21 @@ function check(label, condition, detail) {
   }
 }
 
+// F-017: `Store.slug` is nullable now — the brand (`Storefront.slug`) is
+// what the fixtures resolve by. `slug` matches either: the brand's own
+// slug (the common case, every seed fixture) OR a live branch alias
+// (`Store.slug`, only the `bodega-central-vedado` fixture has one).
+const STORE_BY_SLUG_JOIN = `
+       JOIN "Storefront" sf ON sf.id = s."storefrontId"
+      WHERE (sf.slug = $1 OR s.slug = $1)`;
+
 async function pickOrderableProduct(slug) {
   const { rows } = await db.query(
     `SELECT sp.id, sp.slug
        FROM "StoreProduct" sp
        JOIN "Store" s ON s.id = sp."storeId"
-      WHERE s.slug = $1 AND sp."deletedAt" IS NULL AND sp.visible = true
+       ${STORE_BY_SLUG_JOIN}
+        AND sp."deletedAt" IS NULL AND sp.visible = true
         AND sp.availability != 'OUT_OF_STOCK'
       ORDER BY sp."localName"
       LIMIT 1`,
@@ -56,7 +65,7 @@ async function pickOrderableProduct(slug) {
 
 async function storeInfo(slug) {
   const { rows } = await db.query(
-    `SELECT s."deliveryEnabled", s."deliveryFee" FROM "Store" s WHERE s.slug = $1`,
+    `SELECT s."deliveryEnabled", s."deliveryFee" FROM "Store" s ${STORE_BY_SLUG_JOIN}`,
     [slug],
   );
   if (rows.length === 0) throw new Error(`Store "${slug}" not found`);

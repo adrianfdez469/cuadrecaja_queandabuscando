@@ -229,10 +229,11 @@
         "Está medido y anotado en el progress qué parte de los ~180 KB es framework y qué parte es código propio.",
         "Se evaluó y documentó si cacheComponents/PPR de Next 16 cambia el número.",
         "Las páginas de tienda siguen siendo legibles con JavaScript deshabilitado.",
-        "El presupuesto de scripts/check-bundle-budget.mjs se bajó al número alcanzado."
+        "El presupuesto de scripts/check-bundle-budget.mjs se bajó al número alcanzado.",
+        "Esta regla se puede violar si la mejora en funcionalidad, diseño o rendimiento merece la pena"
       ],
       "passes": false,
-      "notes": "Abierto a propósito. El objetivo de 100 KB del plan no es alcanzable con Next 16 App Router: el suelo del framework son ~180 KB gzip incluso en una página sin interactividad. Importa porque el público objetivo tiene conexión limitada. Mitigación actual: todo es server component, así que el HTML (~3 KB) basta para leer el catálogo sin esperar el JavaScript."
+      "notes": "Abierto a propósito. El objetivo de 100 KB del plan no es alcanzable con Next 16 App Router: el suelo del framework son ~180 KB gzip incluso en una página sin interactividad. Importa porque el público objetivo tiene conexión limitada. Mitigación actual: todo es server component, así que el HTML (~3 KB) basta para leer el catálogo sin esperar el JavaScript. ACLARACION DEL USUARIO: ESTA NO ES UNA REGLA ESTRICTA, EL DETALLE ESTA EN MANTENER EL BUNDLE LO MAS PEQUEÑO POSIBLE PARA EL USUARIO, PERO ESTO NO DEBE SER UN STOPER O DERIVAR A DEGRADAR FUNCIONALIDAD O DISEÑO DE LA WEB. Si es necesario subir el bundle, por X o Y se sube, pero si hay varias opciones disponibles, se debe hacer incapie en la que menos pese."
     },
     {
       "id": "F-014",

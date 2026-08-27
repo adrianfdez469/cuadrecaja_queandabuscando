@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { revalidateStores } from "@/lib/cache";
+import { revalidateSlugs, revalidateStores } from "@/lib/cache";
+import { canonicalSlug, type PublicSlug } from "@/lib/publicSlug";
 import type { Availability } from "@/generated/prisma/enums";
 
 export type AvailabilityItem = {
@@ -26,12 +27,22 @@ export async function applyAvailability(items: AvailabilityItem[]): Promise<Avai
   const storeExternalIds = [...new Set(items.map((item) => item.storeId))];
   const stores = await prisma.store.findMany({
     where: { externalId: { in: storeExternalIds } },
-    select: { id: true, externalId: true, slug: true },
+    select: {
+      id: true,
+      externalId: true,
+      slug: true,
+      storefront: {
+        select: {
+          slug: true,
+          stores: { where: { status: { not: "DRAFT" } }, select: { id: true } },
+        },
+      },
+    },
   });
   const byExternalId = new Map(stores.map((store) => [store.externalId, store]));
 
   const confirmed: [string, string][] = [];
-  const touchedStores = new Set<string>();
+  const touchedStores = new Set<PublicSlug>();
   let applied = 0;
 
   // Grouped by target value so the whole batch is at most three round trips
@@ -47,7 +58,13 @@ export async function applyAvailability(items: AvailabilityItem[]): Promise<Avai
     groups.set(item.availability, group);
 
     confirmed.push([item.storeProductId, item.storeId]);
-    touchedStores.add(store.slug);
+    touchedStores.add(
+      canonicalSlug({
+        storeSlug: store.slug,
+        brandSlug: store.storefront.slug,
+        brandBranchCount: store.storefront.stores.length,
+      }),
+    );
   }
 
   for (const [availability, rows] of groups) {
@@ -62,7 +79,10 @@ export async function applyAvailability(items: AvailabilityItem[]): Promise<Avai
   }
 
   // Only bust caches when something actually changed.
-  if (applied > 0) revalidateStores(touchedStores);
+  if (applied > 0) {
+    revalidateStores(touchedStores);
+    revalidateSlugs(touchedStores);
+  }
 
   return { applied, confirmed };
 }

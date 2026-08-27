@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { requireStore } from "@/features/catalog/server/queries";
+import { requireResolution } from "@/features/storefront/server/resolve";
 import { renderStoreTheme } from "@/features/theming/storeTheme";
 import { Container } from "@/components/ui/Container";
 import { CartBadge } from "@/features/cart/components/CartBadge";
@@ -17,11 +19,18 @@ export const revalidate = 3600;
 
 export default async function StoreLayout({ children, params }: LayoutProps<"/[slug]">) {
   const { slug } = await params;
-  const store = await requireStore(slug);
+  const resolution = await requireResolution(slug);
+  // Etapa 2 (the selector) is not built in this stage: nothing in the
+  // registry can produce a brand with more than one renderable branch yet
+  // (grouping is `groupStoreIntoBrand`, not shipped here), so this branch
+  // is unreachable today — it exists only so a future selector page does
+  // not have to touch this file's control flow.
+  if (resolution.kind === "selector") notFound();
+  const store = await requireStore(resolution);
 
   // Branding is plain CSS in the HTML: no JavaScript, no flash of the wrong
   // palette, and it is cached by the CDN along with the rest of the page.
-  const themeCss = renderStoreTheme(store.slug, store.themeTokens);
+  const themeCss = renderStoreTheme(store.canonicalSlug, store.themeTokens);
 
   // HD11: a closed store's header carries its name and city, same as always,
   // but never the cart — there is nothing to buy here right now — and the
@@ -29,7 +38,7 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[s
   const closed = store.status !== "PUBLISHED";
 
   return (
-    <div data-store={store.slug} className="flex min-h-full flex-col">
+    <div data-store={store.canonicalSlug} className="flex min-h-full flex-col">
       {themeCss && <style dangerouslySetInnerHTML={{ __html: themeCss }} />}
 
       {/* The brand colour has to land somewhere the shopper actually looks, or
@@ -42,7 +51,7 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[s
             </span>
           ) : (
             <Link
-              href={`/${store.slug}`}
+              href={`/${store.canonicalSlug}`}
               className="min-w-0 flex-1 truncate text-xl font-semibold tracking-tight"
             >
               {store.name}
@@ -51,7 +60,7 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[s
           {store.city && (
             <span className="hidden text-sm opacity-80 sm:inline">· {store.city}</span>
           )}
-          {!closed && <CartBadge storeId={store.id} storeSlug={store.slug} />}
+          {!closed && <CartBadge storeId={store.id} storeSlug={store.canonicalSlug} />}
         </Container>
       </header>
 

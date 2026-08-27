@@ -5,14 +5,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * handler back into the bug it was written to avoid — a routine STORE event
  * (a phone number edit, say) silently reopening a store the admin closed
  * from the panel.
+ *
+ * F-017: `existing` now carries its brand (`storefront: { slug, stores }`),
+ * because `touchedStoreSlug`/`touchedBrandSlug` are computed from it, and a
+ * brand-new store (`!existing`) is created through the registry
+ * (`createStorefrontWithStore`), which is why `prisma.storefront.create` and
+ * `prisma.slug.findUnique` are mocked here too — the SAME `@/lib/prisma`
+ * module `registry.ts` imports.
  */
 
 const businessUpsert = vi.fn();
 const storeFindUnique = vi.fn();
 const storeUpdate = vi.fn();
-const storeCreate = vi.fn();
+const storefrontCreate = vi.fn();
+const slugFindUnique = vi.fn();
 const businessCount = vi.fn();
-const storeCount = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -23,13 +30,30 @@ vi.mock("@/lib/prisma", () => ({
     store: {
       findUnique: (...a: unknown[]) => storeFindUnique(...a),
       update: (...a: unknown[]) => storeUpdate(...a),
-      create: (...a: unknown[]) => storeCreate(...a),
-      count: (...a: unknown[]) => storeCount(...a),
+    },
+    storefront: {
+      create: (...a: unknown[]) => storefrontCreate(...a),
+    },
+    slug: {
+      findUnique: (...a: unknown[]) => slugFindUnique(...a),
     },
   },
 }));
 
 const { handleStore } = await import("./store");
+
+/** An `existing` row the way the handler's own select shapes it — a single
+ *  branch of a single-branch brand, unless the test says otherwise. */
+function existingStore(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "store-1",
+    slug: null,
+    sourceUpdatedAt: null,
+    sourceOptIn: true,
+    storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] },
+    ...overrides,
+  };
+}
 
 function payload(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -49,19 +73,16 @@ beforeEach(() => {
   businessUpsert.mockReset().mockResolvedValue({ id: "business-1" });
   storeFindUnique.mockReset();
   storeUpdate.mockReset().mockResolvedValue({ slug: "tienda-demo" });
-  storeCreate.mockReset().mockResolvedValue({ slug: "tienda-demo" });
+  storefrontCreate.mockReset();
+  slugFindUnique.mockReset().mockResolvedValue(null);
   businessCount.mockReset().mockResolvedValue(0);
-  storeCount.mockReset().mockResolvedValue(0);
 });
 
 describe("handleStore() — stale-write guard (AP6)", () => {
   it("discards an event older than what is already stored", async () => {
-    storeFindUnique.mockResolvedValue({
-      id: "store-1",
-      slug: "tienda-demo",
-      sourceUpdatedAt: new Date("2026-08-27T12:00:00.000Z"),
-      sourceOptIn: true,
-    });
+    storeFindUnique.mockResolvedValue(
+      existingStore({ sourceUpdatedAt: new Date("2026-08-27T12:00:00.000Z") }),
+    );
 
     const outcome = await handleStore(payload({ updatedAt: "2026-08-27T00:00:00.000Z" }), "UPDATE");
 
@@ -70,28 +91,22 @@ describe("handleStore() — stale-write guard (AP6)", () => {
   });
 
   it("applies an event newer than what is stored", async () => {
-    storeFindUnique.mockResolvedValue({
-      id: "store-1",
-      slug: "tienda-demo",
-      sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"),
-      sourceOptIn: true,
-    });
+    storeFindUnique.mockResolvedValue(
+      existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z") }),
+    );
 
     const outcome = await handleStore(payload({ updatedAt: "2026-08-27T00:00:00.000Z" }), "UPDATE");
 
     expect(outcome.status).toBe("processed");
+    expect(outcome.touchedStoreSlug).toBe("tienda-demo");
+    expect(outcome.touchedBrandSlug).toBe("tienda-demo");
     expect(storeUpdate).toHaveBeenCalledOnce();
   });
 });
 
 describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
   it("a real opt-in flip to unpublish suspends and records the reason", async () => {
-    storeFindUnique.mockResolvedValue({
-      id: "store-1",
-      slug: "tienda-demo",
-      sourceUpdatedAt: null,
-      sourceOptIn: true,
-    });
+    storeFindUnique.mockResolvedValue(existingStore({ sourceUpdatedAt: null, sourceOptIn: true }));
 
     await handleStore(
       payload({ publishToStore: false, unpublishReason: "Cerrado por reformas" }),
@@ -109,12 +124,9 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
     // Exactly the scenario AP5 exists for: the admin closed this store from
     // the panel (VACATION), sourceOptIn never changed because the panel
     // does not own that column, and now the POS sends an unrelated edit.
-    storeFindUnique.mockResolvedValue({
-      id: "store-1",
-      slug: "tienda-demo",
-      sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"),
-      sourceOptIn: true,
-    });
+    storeFindUnique.mockResolvedValue(
+      existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"), sourceOptIn: true }),
+    );
 
     await handleStore(payload({ publishToStore: true, phone: "+5350000099" }), "UPDATE");
 
@@ -130,12 +142,9 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
   });
 
   it("a real opt-in flip to publish clears the disabled columns", async () => {
-    storeFindUnique.mockResolvedValue({
-      id: "store-1",
-      slug: "tienda-demo",
-      sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"),
-      sourceOptIn: false,
-    });
+    storeFindUnique.mockResolvedValue(
+      existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"), sourceOptIn: false }),
+    );
 
     await handleStore(payload({ publishToStore: true }), "UPDATE");
 
@@ -148,12 +157,9 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
   });
 
   it("a repeated unpublish (opt-in already false) does not rewrite the reason", async () => {
-    storeFindUnique.mockResolvedValue({
-      id: "store-1",
-      slug: "tienda-demo",
-      sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"),
-      sourceOptIn: false,
-    });
+    storeFindUnique.mockResolvedValue(
+      existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"), sourceOptIn: false }),
+    );
 
     await handleStore(payload({ publishToStore: false }), "UPDATE");
 
@@ -163,12 +169,7 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
   });
 
   it("DELETE is treated as an unpublish regardless of publishToStore", async () => {
-    storeFindUnique.mockResolvedValue({
-      id: "store-1",
-      slug: "tienda-demo",
-      sourceUpdatedAt: null,
-      sourceOptIn: true,
-    });
+    storeFindUnique.mockResolvedValue(existingStore({ sourceUpdatedAt: null, sourceOptIn: true }));
 
     await handleStore(payload({ publishToStore: true }), "DELETE");
 
@@ -177,15 +178,23 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
     expect(data.sourceOptIn).toBe(false);
   });
 
-  it("a brand-new store is created PUBLISHED with sourceOptIn true", async () => {
+  it("a brand-new store creates its brand in the SAME event (E9), PUBLISHED, sourceOptIn true", async () => {
     storeFindUnique.mockResolvedValue(null);
+    storefrontCreate.mockResolvedValue({
+      id: "storefront-1",
+      slug: "tienda-demo",
+      stores: [{ id: "store-1" }],
+    });
 
     const outcome = await handleStore(payload(), "CREATE");
 
     expect(outcome.status).toBe("processed");
-    const data = storeCreate.mock.calls[0][0].data;
-    expect(data.status).toBe("PUBLISHED");
-    expect(data.sourceOptIn).toBe(true);
+    expect(outcome.touchedStoreSlug).toBe("tienda-demo");
+    expect(outcome.touchedBrandSlug).toBe("tienda-demo");
+    const call = storefrontCreate.mock.calls[0][0];
+    expect(call.data.slug).toBe("tienda-demo");
+    expect(call.data.stores.create.status).toBe("PUBLISHED");
+    expect(call.data.stores.create.sourceOptIn).toBe(true);
   });
 
   it("DELETE with no existing row is skipped, not an error", async () => {

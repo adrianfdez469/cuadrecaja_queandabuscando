@@ -79,6 +79,17 @@ enum SyncEventStatus {
   SKIPPED
 }
 
+/// F-017: what a row of `Slug` names. `RESERVED` has no owner at all — it
+/// exists purely so a proposed slug that slips past validation still hits
+/// the primary key. A row with `kind = STOREFRONT` and no `storefrontId`
+/// is a RETIRED value (R13): its owner disappeared, and the value never
+/// goes back into the pool.
+enum SlugKind {
+  STOREFRONT
+  STORE
+  RESERVED
+}
+
 // ---------------------------------------------------------------------------
 // Tenant
 // ---------------------------------------------------------------------------
@@ -88,7 +99,11 @@ model Business {
   id               String   @id @default(uuid())
   externalId       String   @unique
   name             String
-  slug             String   @unique
+  /// F-017 (I1): retired. `handlers/store.ts` no longer generates it, and it
+  /// never enters the `Slug` registry — a business named "La Rampa" would
+  /// otherwise reserve `la-rampa` for a row that resolves no URL at all,
+  /// taking it away from the brand that does.
+  slug             String?  @unique
   logoUrl          String?
   baseCurrencyCode String   @default("CUP")
   /// SHA-256 of the bearer token this business uses on /api/internal/*.
@@ -98,6 +113,7 @@ model Business {
   updatedAt        DateTime @updatedAt
 
   stores        Store[]
+  storefronts   Storefront[]
   categories    LocalCategory[]
   aliases       ProductAlias[]
   exchangeRates ExchangeRate[]
@@ -106,21 +122,74 @@ model Business {
   @@index([active])
 }
 
+/// F-017 — the brand a shopper's QR points at. Owns the public slug, the
+/// branding and the panel's own contact columns. Lives only in
+/// queandabuscando: the POS knows nothing about it, so no column here is
+/// ever written by the sync except at creation (R5). No `status` (R6):
+/// opening and closing to the public stays a `Store` concern, because the
+/// POS's opt-in (`sourceOptIn`) is per `Tienda` — lifting the switch to the
+/// brand would make one location's flip open or close every sibling. No
+/// description either (R8): `Store.description` stays sync-owned.
+model Storefront {
+  id         String @id @default(uuid())
+  businessId String
+  name       String
+  slug       String @unique
+
+  // --- owned by the admin panel; the sync NEVER touches these except to
+  // create the row the first time a branch of this brand publishes (R5) ---
+  themeTokens     Json?
+  logoUrl         String?
+  coverUrl        String?
+  contactPhone    String?
+  contactWhatsapp String?
+  contactEmail    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  business  Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  stores    Store[]
+  slugEntry Slug?
+
+  @@index([businessId])
+}
+
+/// F-017 — the single namespace of public first-level slugs. A value has AT
+/// MOST one owner, enforced by the primary key plus the
+/// `Slug_owner_matches_kind` CHECK written by hand in the migration (Prisma
+/// has no `@@check`) — never by a `SELECT` in application code (criterio 4).
+///
+/// A value is never reassigned (R13): when its owner disappears the FK sets
+/// the pointer to NULL and the row survives with `retiredAt`, so a printed
+/// QR can never end up pointing at somebody else's business.
+model Slug {
+  value        String    @id
+  kind         SlugKind
+  storefrontId String?   @unique
+  storeId      String?   @unique
+  retiredAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  storefront Storefront? @relation(fields: [storefrontId], references: [id], onDelete: SetNull)
+  store      Store?      @relation(fields: [storeId], references: [id], onDelete: SetNull)
+}
+
 /// Mirror of a cuadrecaja `Tienda` the business opted into publishing.
 /// The row existing IS the opt-in; `status` controls publication.
 model Store {
-  id          String      @id @default(uuid())
-  businessId  String
-  externalId  String      @unique
-  slug        String      @unique
-  name        String
-  description String?
-  status      StoreStatus @default(DRAFT)
-
-  logoUrl     String?
-  coverUrl    String?
-  /// CSS custom property overrides, rendered inline in the store layout.
-  themeTokens Json?
+  id           String      @id @default(uuid())
+  businessId   String
+  storefrontId String
+  externalId   String      @unique
+  /// F-017: nullable. Only a branch reached by its OWN first-level URL keeps
+  /// a value here (a live alias from before the brand existed, or — etapa 2
+  /// — one of several branches of the same brand). A brand's only branch has
+  /// none: the brand's own slug is what resolves it.
+  slug         String?     @unique
+  name         String
+  description  String?
+  status       StoreStatus @default(DRAFT)
 
   phone    String?
   whatsapp String?
@@ -172,12 +241,15 @@ model Store {
   updatedAt DateTime @updatedAt
 
   business    Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  storefront  Storefront         @relation(fields: [storefrontId], references: [id], onDelete: Cascade)
+  slugEntry   Slug?
   products    StoreProduct[]
   promotions  Promotion[]
   orders      Order[]
   adminAccess AdminStoreAccess[]
 
   @@index([businessId])
+  @@index([storefrontId])
   @@index([status])
 }
 

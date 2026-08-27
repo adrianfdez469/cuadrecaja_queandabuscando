@@ -1,32 +1,53 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { asPublicSlug } from "@/lib/publicSlug";
 
-const storeFindFirst = vi.fn();
+const storeFindUnique = vi.fn();
 const storeProductFindMany = vi.fn();
 const exchangeRateFindMany = vi.fn();
 const promotionFindMany = vi.fn();
+const resolvePublicSlug = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    store: { findFirst: (...args: unknown[]) => storeFindFirst(...args) },
+    store: { findUnique: (...args: unknown[]) => storeFindUnique(...args) },
     storeProduct: { findMany: (...args: unknown[]) => storeProductFindMany(...args) },
     exchangeRate: { findMany: (...args: unknown[]) => exchangeRateFindMany(...args) },
     promotion: { findMany: (...args: unknown[]) => promotionFindMany(...args) },
   },
 }));
+vi.mock("@/features/storefront/server/resolve", () => ({
+  resolvePublicSlug: (...args: unknown[]) => resolvePublicSlug(...args),
+}));
 
 const { loadStoreForOrder, quoteCart, quoteBySlug, toQuoteResponse } = await import("./quote");
 
+/** A resolved "branch" the way `resolve.ts` would produce it for `tienda-demo`. */
+function branchResolution(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    kind: "branch" as const,
+    storeId: "store-1",
+    canonicalSlug: asPublicSlug("tienda-demo"),
+    storefrontId: "storefront-1",
+    brandSlug: asPublicSlug("tienda-demo"),
+    brandName: "La Rampa",
+    branchCount: 1,
+    isAlias: false,
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
-  storeFindFirst.mockReset();
+  storeFindUnique.mockReset();
   storeProductFindMany.mockReset();
   exchangeRateFindMany.mockReset().mockResolvedValue([]);
   promotionFindMany.mockReset().mockResolvedValue([]);
+  resolvePublicSlug.mockReset().mockResolvedValue(branchResolution());
 });
 
 const store = {
   id: "store-1",
   businessId: "biz-1",
-  slug: "tienda-demo",
+  slug: asPublicSlug("tienda-demo"),
   name: "La Rampa",
   currencyCode: "CUP",
   checkoutMode: "WHATSAPP" as const,
@@ -56,26 +77,46 @@ function product(overrides: Record<string, unknown> = {}) {
 }
 
 describe("loadStoreForOrder()", () => {
-  it("returns null when the store does not exist", async () => {
-    storeFindFirst.mockResolvedValue(null);
+  it("returns null when the slug is not in the registry", async () => {
+    resolvePublicSlug.mockResolvedValue(null);
     expect(await loadStoreForOrder("no-existe")).toBeNull();
+    expect(storeFindUnique).not.toHaveBeenCalled();
   });
 
-  it("maps whatsapp ?? phone into whatsappNumber", async () => {
-    storeFindFirst.mockResolvedValue({
+  it("returns null for a brand slug that resolves to a selector (etapa 2, no single branch to charge)", async () => {
+    resolvePublicSlug.mockResolvedValue({ kind: "selector", branches: [] });
+    expect(await loadStoreForOrder("la-rampa")).toBeNull();
+    expect(storeFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("resolves the requested slug and queries by storeId, never by slug", async () => {
+    storeFindUnique.mockResolvedValue({
       id: "store-1",
-      slug: "tienda-demo",
       name: "La Rampa",
       checkoutMode: "ONSITE",
       deliveryEnabled: true,
       deliveryFee: { toString: () => "500.00" },
       whatsapp: null,
       phone: "+5350000009",
+      status: "PUBLISHED",
+      disabledReasonCode: null,
+      disabledMessage: null,
+      disabledAt: null,
       business: { id: "biz-1", baseCurrencyCode: "CUP" },
     });
-    const result = await loadStoreForOrder("tienda-demo");
+    const result = await loadStoreForOrder("bodega-central-vedado");
+    expect(resolvePublicSlug).toHaveBeenCalledWith("bodega-central-vedado");
+    expect(storeFindUnique.mock.calls[0][0]).toMatchObject({ where: { id: "store-1" } });
+    // R15/routingWhatsappNumber: falls back to phone when whatsapp is null.
     expect(result?.whatsappNumber).toBe("+5350000009");
+    // The response slug is always the CANONICAL one, not the requested URL.
+    expect(result?.slug).toBe("tienda-demo");
     expect(result?.deliveryFee).toBe("500.00");
+  });
+
+  it("returns null when the resolved store does not exist or is DRAFT", async () => {
+    storeFindUnique.mockResolvedValue(null);
+    expect(await loadStoreForOrder("tienda-demo")).toBeNull();
   });
 });
 
@@ -158,14 +199,13 @@ describe("quoteCart()", () => {
 
 describe("quoteBySlug()", () => {
   it("returns not_found when the store does not exist", async () => {
-    storeFindFirst.mockResolvedValue(null);
+    resolvePublicSlug.mockResolvedValue(null);
     expect(await quoteBySlug("no-existe", [])).toEqual({ kind: "not_found" });
   });
 
   it("returns closed, not not_found, for a SUSPENDED store (HD11)", async () => {
-    storeFindFirst.mockResolvedValue({
+    storeFindUnique.mockResolvedValue({
       id: "store-1",
-      slug: "tienda-demo",
       name: "La Rampa",
       checkoutMode: "WHATSAPP",
       deliveryEnabled: false,
@@ -188,9 +228,8 @@ describe("quoteBySlug()", () => {
   });
 
   it("returns ok with a real quote for a PUBLISHED store", async () => {
-    storeFindFirst.mockResolvedValue({
+    storeFindUnique.mockResolvedValue({
       id: "store-1",
-      slug: "tienda-demo",
       name: "La Rampa",
       checkoutMode: "WHATSAPP",
       deliveryEnabled: false,

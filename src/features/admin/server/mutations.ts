@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { revalidateStores } from "@/lib/cache";
+import { canonicalSlug, type PublicSlug } from "@/lib/publicSlug";
 import type { Prisma } from "@/generated/prisma/client";
 import { extensionForMime } from "@/lib/imageType";
 import type { AllowedImageMime } from "@/constants/media";
@@ -61,10 +62,40 @@ function isRecordNotFound(error: unknown): error is PrismaErrorLike {
 }
 
 /** Writes, then revalidates the affected store. No export below bypasses this. */
-async function commit<T>(slug: string, write: () => Promise<T>): Promise<T> {
+async function commit<T>(slug: PublicSlug, write: () => Promise<T>): Promise<T> {
   const value = await write();
   revalidateStores([slug]);
   return value;
+}
+
+/**
+ * F-017: every write here still ends up revalidating by slug, but the
+ * slug now has to be the CANONICAL one — `Store.slug` alone is nullable
+ * and, for a brand-new store, always empty. Every `select` in this file
+ * that used to read `store: { select: { slug: true } }` now reads this
+ * shape instead.
+ */
+const STORE_CANONICAL_SELECT = {
+  slug: true,
+  storefront: {
+    select: {
+      slug: true,
+      stores: { where: { status: { not: "DRAFT" } }, select: { id: true } },
+    },
+  },
+} satisfies Prisma.StoreSelect;
+
+type StoreCanonicalRef = {
+  slug: string | null;
+  storefront: { stores: { id: string }[]; slug: string };
+};
+
+function canonicalOfStore(store: StoreCanonicalRef): PublicSlug {
+  return canonicalSlug({
+    storeSlug: store.slug,
+    brandSlug: store.storefront.slug,
+    brandBranchCount: store.storefront.stores.length,
+  });
 }
 
 /**
@@ -83,7 +114,7 @@ export async function saveProduct(
       id: true,
       deletedAt: true,
       syncedPriceCurrency: true,
-      store: { select: { slug: true } },
+      store: { select: STORE_CANONICAL_SELECT },
     },
   });
   if (!existing) return { kind: "product_not_in_store" };
@@ -94,7 +125,7 @@ export async function saveProduct(
   // Inlined, not a separately typed `const data`, so the literal object
   // `boundaries.test.ts` greps for (a `data` property with an inline object)
   // is exactly what runs, not a variable reference to one built elsewhere.
-  const updated = await commit(existing.store.slug, () =>
+  const updated = await commit(canonicalOfStore(existing.store), () =>
     prisma.storeProduct.update({
       where: { id: existing.id },
       data: {
@@ -130,7 +161,7 @@ export type UploadedImage = { bytes: Buffer; mime: AllowedImageMime };
 export async function appendProductImage(
   storeId: AuthorizedStoreId,
   storeProductId: string,
-  storeSlug: string,
+  storeSlug: PublicSlug,
   file: UploadedImage,
 ): Promise<AdminWriteResult<{ url: string; imageUrls: string[] }>> {
   const path = objectPathFor({ storeId, storeProductId, ext: extensionForMime(file.mime) });
@@ -157,11 +188,11 @@ export async function appendProductImage(
  */
 const STORE_ROW_SELECT = {
   id: true,
-  slug: true,
   status: true,
   disabledReasonCode: true,
   disabledMessage: true,
   disabledAt: true,
+  ...STORE_CANONICAL_SELECT,
 } satisfies Prisma.StoreSelect;
 
 export async function setStoreEnabled(
@@ -195,10 +226,18 @@ export async function setStoreEnabled(
           select: STORE_ROW_SELECT,
         });
 
-    revalidateStores([updated.slug]);
+    const canonical = canonicalOfStore(updated);
+    revalidateStores([canonical]);
     return {
       kind: "saved",
-      value: { ...updated, disabledAt: updated.disabledAt?.toISOString() ?? null },
+      value: {
+        id: updated.id,
+        canonicalSlug: canonical,
+        status: updated.status,
+        disabledReasonCode: updated.disabledReasonCode,
+        disabledMessage: updated.disabledMessage,
+        disabledAt: updated.disabledAt?.toISOString() ?? null,
+      },
     };
   } catch (error) {
     if (isRecordNotFound(error)) return { kind: "not_found" };
@@ -262,14 +301,14 @@ export async function createPromotion(
 ): Promise<AdminWriteResult<AdminPromotionRow>> {
   const store = await prisma.store.findUnique({
     where: { id: storeId },
-    select: { slug: true, businessId: true },
+    select: { businessId: true, ...STORE_CANONICAL_SELECT },
   });
   if (!store) return { kind: "not_found" };
 
   const issues = await conditionsIssues(storeId, store.businessId, body);
   if (issues.length > 0) return { kind: "invalid_conditions", issues };
 
-  const created = await commit(store.slug, () =>
+  const created = await commit(canonicalOfStore(store), () =>
     prisma.promotion.create({
       data: { storeId, ...promotionWriteData(body) },
       select: PROMOTION_ROW_SELECT,
@@ -286,14 +325,14 @@ export async function updatePromotion(
 ): Promise<AdminWriteResult<AdminPromotionRow>> {
   const existing = await prisma.promotion.findFirst({
     where: { id: promotionId, storeId },
-    select: { id: true, store: { select: { slug: true, businessId: true } } },
+    select: { id: true, store: { select: { businessId: true, ...STORE_CANONICAL_SELECT } } },
   });
   if (!existing) return { kind: "promotion_not_in_store" };
 
   const issues = await conditionsIssues(storeId, existing.store.businessId, body);
   if (issues.length > 0) return { kind: "invalid_conditions", issues };
 
-  const updated = await commit(existing.store.slug, () =>
+  const updated = await commit(canonicalOfStore(existing.store), () =>
     prisma.promotion.update({
       where: { id: existing.id },
       data: promotionWriteData(body),
@@ -310,11 +349,13 @@ export async function deletePromotion(
 ): Promise<AdminWriteResult<{ id: string }>> {
   const existing = await prisma.promotion.findFirst({
     where: { id: promotionId, storeId },
-    select: { id: true, store: { select: { slug: true } } },
+    select: { id: true, store: { select: STORE_CANONICAL_SELECT } },
   });
   if (!existing) return { kind: "promotion_not_in_store" };
 
-  await commit(existing.store.slug, () => prisma.promotion.delete({ where: { id: existing.id } }));
+  await commit(canonicalOfStore(existing.store), () =>
+    prisma.promotion.delete({ where: { id: existing.id } }),
+  );
 
   return { kind: "saved", value: { id: existing.id } };
 }

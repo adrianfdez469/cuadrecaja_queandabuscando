@@ -8,8 +8,22 @@
 
 const MAX_LENGTH = 80;
 
-/** Words a slug may not consist of, because they collide with real routes. */
-const RESERVED = new Set([
+/**
+ * Words a slug may not consist of, because they collide with real routes.
+ *
+ * Exported (F-017, R11): the storefront registry, the seed and the
+ * migration's `RESERVED` rows all need the exact same list — duplicating it
+ * anywhere is how a route ships without ever being reserved (I3 happened
+ * exactly this way: F-011 added `sesion-cerrada` to `src/app/` and nobody
+ * remembered this file).
+ *
+ * `sesion-cerrada` (F-011's top-level "session expired" page) and
+ * `sucursales` (F-017 etapa 2's `/[slug]/sucursales`) are added here even
+ * though the first exists in `src/app/` today and the second does not yet:
+ * reserving early is free, discovering the collision after a brand has
+ * taken the slug is not.
+ */
+export const RESERVED_SLUGS: readonly string[] = [
   "admin",
   "api",
   "app",
@@ -24,7 +38,11 @@ const RESERVED = new Set([
   "public",
   "static",
   "_next",
-]);
+  "sesion-cerrada",
+  "sucursales",
+];
+
+const RESERVED = new Set(RESERVED_SLUGS);
 
 export function slugify(input: string): string {
   const slug = input
@@ -45,13 +63,18 @@ export function isReservedSlug(slug: string): boolean {
   return RESERVED.has(slug);
 }
 
+/**
+ * Shape only — length and character set, with no opinion on whether the
+ * value is reserved. Split out from `isValidSlug` (F-017) so a caller that
+ * has to tell "malformed" apart from "reserved" (`features/storefront/`'s
+ * `assertProposableSlug`, I4) does not re-derive the regex.
+ */
+export function isWellFormedSlug(slug: string): boolean {
+  return slug.length > 0 && slug.length <= MAX_LENGTH && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug);
+}
+
 export function isValidSlug(slug: string): boolean {
-  return (
-    slug.length > 0 &&
-    slug.length <= MAX_LENGTH &&
-    /^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug) &&
-    !isReservedSlug(slug)
-  );
+  return isWellFormedSlug(slug) && !isReservedSlug(slug);
 }
 
 /**
