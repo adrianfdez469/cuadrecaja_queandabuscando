@@ -101,6 +101,13 @@ justifique midiendo.
   aceptan, así que un array hand-rolled no compila.
 - **`"use client"` sin estado ni eventos.** Y **nunca** en algo que renderice
   catálogo: el objetivo es que la tienda se lea sin esperar el JavaScript.
+- **`setState` dentro de un `useEffect`.** Con React 19 y el compilador activo
+  es error de ESLint, no aviso. Si el valor se pinta y viene de fuera de React,
+  `useSyncExternalStore`; si se deriva del render, derívalo; si es una intención
+  de una sola vez que necesita el DOM ya montado —mover el foco, medir, hacer
+  scroll—, guárdala en un `useRef`, ponla a `true` en el handler y **consúmela**
+  en el efecto, o un re-render posterior le roba el foco al usuario. Diferirlo
+  con `setTimeout(…, 0)` calla el lint y deja la cascada de renders: no cuenta.
 - **`any`.** Es error de ESLint.
 - **Magic strings y números.** A `src/constants/` o a un enum.
 - **Duplicar interfaces** entre la capa de datos y la vista.
@@ -157,6 +164,19 @@ un mensaje que no dice cuál es el archivo.
 instala su propio `Uint8Array` y librerías como `jose` fallan el `instanceof`.
 `*.test.ts` → node; `*.test.tsx` → jsdom. Es automático por extensión.
 
+**Un test que pasa solo y falla en la suite no es un test al que le falte
+tiempo.** Antes de subir un techo, busca qué evento cayó en el vacío: un
+`findByRole("button")` encuentra igualmente un botón deshabilitado —deshabilitado
+no lo saca del árbol de accesibilidad— y `fireEvent.click` sobre él no dispara el
+handler, así que el aserto siguiente agota su espera contra algo que ya no va a
+ocurrir. Espera a la precondición del control
+(`await waitFor(() => expect(boton).toBeEnabled())`) y retarda a propósito el
+`fetch` stubeado 50 ms, para que la transición loading→ready se ejercite siempre
+en vez de decidirse por lo rápido que vaya el runner. Los techos de
+`vitest.setup.ts` y `vitest.config.mts` están altos porque este fallo se
+diagnosticó mal dos veces seguidas: subirlos no arregló nada y ya no aseguran
+nada conocido.
+
 **Todo lo que el sync escribe es idempotente y va guardado contra escrituras
 rancias** (`sourceUpdatedAt`). Gracias a eso el orden de entrega no importa. Si
 agregas un handler, mantén ambas propiedades o el reintento corrompe datos.
@@ -170,6 +190,18 @@ nombran los archivos de una etapa futura ponen el sensor en rojo, y con él el
 criterio que exige `--full` en 0. Ya pasó en F-011 y en F-017. La convención:
 **un archivo que se va a crear se escribe sin comillas invertidas y con
 `(por crear)` o `(etapa N, por crear)` detrás.** Cuando exista, gana sus comillas.
+
+Y la mitad simétrica del mismo check: **una ruta abreviada da «does not exist»
+sobre un archivo que sí existe.** `scripts/check-harness.mjs` prueba solo tres
+candidatos —la ruta tal cual, la ruta relativa a su documento, y la ruta con
+src/ antepuesto—, así que el tres-puntos-y-nombre-de-componente que uno escribe
+en una tabla ancha cuando la columna anterior ya dio el directorio, o una
+carpeta citada en prosa sin el prefijo src/ completo, no resuelven en ninguno.
+Antes de creerte la referencia muerta comprueba con `ls` si el archivo está: si
+está, arregla la prosa escribiendo la ruta completa desde la raíz del repo —«fix
+the prose, not this check», que es lo que el propio mensaje pide—, y si ese
+documento no es tuyo escala a quien pueda editarlo en vez de darlo por bueno.
+Ya pasó en F-010, F-007, F-011 y F-017.
 
 **Un evento fallido NO es un duplicado.** Reportarlo en `ok` haría que el POS
 marque su outbox como procesado y la actualización se pierda en silencio. Ver

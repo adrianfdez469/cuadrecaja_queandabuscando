@@ -6,7 +6,7 @@ etapa: harness
 visto_en: F-010, F-007, F-011, F-017, PR #7
 creado: 2026-08-26T05:00:00Z
 actualizado: 2026-08-26T12:45:00Z
-promovido_a_agents: no
+promovido_a_agents: sí
 arreglo: si el archivo existe, escribe la ruta completa en el documento que abrevió — y si ese documento no es tuyo, escala a quien pueda editarlo; no lo des por bueno
 ---
 

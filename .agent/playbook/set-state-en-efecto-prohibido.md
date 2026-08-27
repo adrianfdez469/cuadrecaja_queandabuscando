@@ -5,7 +5,7 @@ firma: Avoid calling setState\(\) directly within an effect
 etapa: lint
 visto_en: F-010, F-017
 creado: 2026-08-26T11:20:00Z
-promovido_a_agents: no
+promovido_a_agents: sí
 arreglo: si el valor se pinta, derívalo del render o de useSyncExternalStore; si es una intención de una sola vez (mover el foco, hacer scroll), guárdala en un useRef y consúmela en el efecto — una ref no infringe la regla y además no debe sobrevivir al render siguiente
 ---
 

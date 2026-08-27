@@ -5,7 +5,7 @@ firma: Unable to find role|Test timed out in [0-9]+ms
 etapa: test
 visto_en: F-007, F-011, F-017, PR #7
 creado: 2026-08-26T12:20:00Z
-promovido_a_agents: no
+promovido_a_agents: sí
 arreglo: NO subas el techo — el diagnóstico original era falso. Busca un `fireEvent.click` sobre un control que se renderiza deshabilitado mientras carga algo: espera a que esté habilitado antes de pulsarlo (`await waitFor(() => expect(boton).toBeEnabled())`) y hazlo determinista retardando el fetch stubeado
 ---
 
