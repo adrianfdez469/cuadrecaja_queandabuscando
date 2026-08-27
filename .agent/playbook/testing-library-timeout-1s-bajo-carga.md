@@ -6,7 +6,7 @@ etapa: test
 visto_en: F-007, F-011, F-017, PR #7
 creado: 2026-08-26T12:20:00Z
 promovido_a_agents: no
-arreglo: no es tu cambio y NO se arregla subiendo el techo — `asyncUtilTimeout` ya está en 8000 ms en vitest.setup.ts y el intermitente sigue cayendo ~1 de cada 3 suites completas; reintenta la suite para desbloquearte y lee § «Lo que ya se descartó» antes de gastar tiempo en una hipótesis
+arreglo: NO subas el techo — el diagnóstico original era falso. Busca un `fireEvent.click` sobre un control que se renderiza deshabilitado mientras carga algo: espera a que esté habilitado antes de pulsarlo (`await waitFor(() => expect(boton).toBeEnabled())`) y hazlo determinista retardando el fetch stubeado
 ---
 
 ## Qué pasa de verdad
@@ -71,78 +71,131 @@ justamente la regresión que F-010 arregló y que estas dos pruebas fijan—, as
 que «arreglar» el componente sería perseguir un fantasma y probablemente
 romper lo que las pruebas protegen.
 
-## Lo que ya se descartó (PR #7)
+## Resuelto en PR #7: no era el techo, era una carrera
 
-La receta de arriba **ya está aplicada** y ya no basta: `vitest.setup.ts`
-tiene `configure({ asyncUtilTimeout: 8000 })` y el fallo se reprodujo aun
-así, 2 veces en 4 suites completas seguidas, cayendo indistintamente en
-cualquiera de las dos pruebas de `CheckoutForm.test.tsx`. Ocho segundos no
-son «un pelo»: a partir de aquí la explicación del timeout justo no se
-sostiene, y subirlo más es gastar tiempo de CI sin comprar nada.
+Esta ficha estuvo mal escrita desde F-007, y la receta de arriba —subir
+`asyncUtilTimeout`— nunca arregló nada: llegó a 8000 ms y el intermitente
+siguió cayendo ~1 de cada 3 suites completas. Ocho segundos no son «un pelo»,
+así que la explicación del timeout justo no se sostenía.
 
-Lo que se midió en el fallo real, con una sonda dentro del `catch` del
-`findByRole`:
+La causa real, en `CheckoutForm.test.tsx`:
 
-- el botón de enviar estaba **activo** (`disabled === false`),
-- el `fetch` de la cotización ya había corrido (`mock.calls.length === 1`),
-- y el `<div role="alert">` no apareció en 8 s.
+```ts
+const enviar = await screen.findByRole("button", { name: /confirmar/i });
+fireEvent.click(enviar); // ← no dispara nada si sigue deshabilitado
+const resumen = await screen.findByRole("alert"); // ← espera para siempre
+```
 
-Eso **refuta** la hipótesis más obvia —que el clic caía sobre el botón
-todavía deshabilitado mientras cargaba la cotización, y `fireEvent.click`
-sobre un botón deshabilitado no dispara nada—, que era por dónde iba esta
-ficha a empujar al siguiente. Si el botón está activo, `submit()` corrió; si
-`submit()` corrió con los campos vacíos, `validate()` devolvió errores y el
-resumen debería renderizarse. Ahí se acabó la evidencia.
+El botón de enviar se renderiza desde el primer commit, **deshabilitado**
+mientras `quoteState === "loading"`. `findByRole("button")` lo encuentra
+igualmente —deshabilitado no lo saca del árbol de accesibilidad— y
+`fireEvent.click` sobre un botón deshabilitado no dispara el handler. Sin
+`submit()` no hay `fieldErrors`; sin `fieldErrors` no hay `role="alert"`. El
+aserto siguiente agota su techo esperando algo que ya no va a ocurrir, y por
+eso subirlo solo cambiaba cuánto tardaba en reportar el fallo. En una máquina
+descargada la cotización stubeada resolvía antes del clic y la prueba ganaba
+la carrera por azar; bajo carga, la perdía.
 
-Segunda sonda, instrumentando el estado en el instante del clic: **12 suites
-completas seguidas en verde**, no volvió a caer. Así que tampoco está
-caracterizado cuándo ocurre, y no hay arreglo que ofrecer: quien lo retome
-empieza por reproducirlo con la sonda puesta, no por subir un número.
+### El arreglo, y cómo se prueba que es este
+
+Dos partes, las dos necesarias:
+
+1. **Esperar a la precondición, no al elemento final.** Un ayudante que
+   espera a que el botón esté habilitado —o sea, a `quoteState === "ready"`,
+   que es la precondición real de lo que la prueba afirma— antes de pulsarlo.
+2. **Quitarle el azar.** El `fetch` stubeado de la cotización ahora tarda
+   50 ms a propósito, así que la transición loading→ready se ejercita
+   siempre. Sin esto la prueba vuelve a pasar por lo rápido que iba el
+   runner.
+
+La segunda parte es también el instrumento que lo demuestra: con el retardo
+puesto y sin el ayudante, las dos pruebas fallan **de forma determinista** con
+la firma exacta de esta ficha, a los 8071 ms. Con el ayudante, verdes en 230 ms
+— y 8 suites completas seguidas en verde donde antes caía 1 de cada 3.
+
+### Por qué costó dos ciclos
+
+La hipótesis correcta se planteó y se descartó por una **medición mal
+cronometrada**: la sonda leía `enviar.disabled` dentro del `catch`, es decir
+8 s DESPUÉS del clic, cuando la cotización ya había llegado y React había
+actualizado ese mismo nodo a `disabled === false`. La sonda decía «el botón
+estaba activo» y refutaba la única hipótesis buena. Si instrumentas una
+carrera, **captura el estado en el instante del evento** y guárdalo en una
+variable; leerlo después mide otro momento, y no lo avisa.
+
+La segunda pista, gratis y desperdiciada: los campos `name` y `phone`
+arrancan en `""` y nada los rellena, así que `validate()` no puede devolver
+cero errores. Si el `alert` no aparece, el clic no llegó a `submit()`. Cuando
+el estado inicial demuestra que un camino es imposible, deja de sospechar de
+ese camino.
 
 ## Cuándo NO es esto
 
-La firma es ancha a propósito y pesca cualquier `Unable to find role`. Antes de
-aplicar el arreglo, las dos comprobaciones que lo descartan:
+La firma es ancha a propósito y pesca cualquier `Unable to find role`. Lo que
+la distingue **no** es el reloj —eso era el diagnóstico falso— sino que haya un
+`fireEvent`/`userEvent` sobre un control que pudo estar deshabilitado, ausente
+o reemplazado en ese instante. Tres cosas que la descartan:
 
-- **Corre el archivo solo.** Si falla solo también, no es esto: el elemento de
-  verdad no se renderiza y tienes un fallo real. Arréglalo, no le des más
-  tiempo.
-- **Mira el tiempo.** Si el test cayó a los 5 ms, tampoco es esto — no llegó a
-  esperar nada, así que el rol no existía en ningún momento.
+- **El volcado del DOM sale vacío o a medias** en vez de mostrar la pantalla
+  entera: el componente lanzó al renderizar. La causa está en la excepción, que
+  suele aparecer más arriba en el log.
+- **El test cayó a los pocos milisegundos**: no llegó a esperar nada, así que
+  el rol no existía en ningún momento y no hay carrera que perder.
+- **No hay ningún evento antes del aserto que falla**: si solo renderizas y
+  esperas, no hay clic que se pierda. Ahí sí es el elemento el que no llega.
 
-Y un caso que se parece pero es peor: si el rol falta porque el componente
-lanzó al renderizar, el volcado del DOM sale **vacío** o a medias en vez de
-mostrar el formulario entero. Ahí la causa está en la excepción, que suele
-aparecer más arriba en el log.
-
-Subir el timeout de un fallo que no es este lo convierte en un test que tarda
-5 s en dar el mismo rojo. Es la razón por la que esta sección existe.
+Y ojo con la comprobación que esta ficha recomendaba antes: «corre el archivo
+solo, si pasa es esto». Pasar solo no distingue nada — un clic que se pierde
+por una carrera **también** pasa solo, porque en una máquina descargada la
+carrera se gana. Sirve para saber que no es estado compartido entre archivos, y
+para nada más.
 
 ## Cómo se evita
 
-Al escribir una prueba que espera algo asíncrono, no dejar el timeout por
-defecto cuando el camino incluye un `fetch` stubeado más un re-render por
-estado. Un segundo parece muchísimo mientras la máquina está tranquila, y esta
-suite corre además en CI, en un runner compartido y siempre con la caché fría —
-es decir, en las condiciones exactas que lo disparan.
+Al escribir una prueba que dispara un evento sobre algo que aparece después de
+un `fetch`, esperar a la **precondición del control**, no a que el control
+exista:
 
-La regla general, que es la que vale más allá de este fallo: **un test que pasa
-solo y falla en la suite no es un test que dependa de otro hasta que lo hayas
-descartado.** Antes de buscar estado compartido entre archivos, mira el reloj
-del aserto. Aquí el reloj lo decía todo y el estado compartido no tenía nada
-que ver.
+```ts
+// frágil: el botón existe desde el primer commit, deshabilitado
+const boton = await screen.findByRole("button", { name: /confirmar/i });
+fireEvent.click(boton);
 
-## Actualización (F-011)
+// robusto: espera a que se pueda pulsar de verdad
+const boton = await screen.findByRole("button", { name: /confirmar/i });
+await waitFor(() => expect(boton).toBeEnabled());
+fireEvent.click(boton);
+```
 
-Con una suite más grande (~15 archivos de test nuevos), el mismo test volvió
-a fallar, pero con un mensaje distinto: **«Test timed out in 5000ms»**, sin
-ningún «Unable to find role». Es el mismo problema un escalón más arriba: la
-suma de los `findByRole`/`waitFor` del test (cada uno con su propio techo de
-`asyncUtilTimeout = 5000` ms) puede acercarse o superar el **`testTimeout`**
-por defecto de Vitest para el test completo, que también es 5000 ms — dos
-techos independientes, coincidentes por accidente. Subir solo
-`asyncUtilTimeout` no alcanza si el techo que se agota es el del test entero.
+Y retardar a propósito el `fetch` stubeado (50 ms bastan) en vez de resolverlo
+al instante. Cuesta 50 ms y convierte «pasa según cómo vaya el runner» en «pasa
+o falla siempre». Una prueba que gana una carrera por azar no está
+verificando lo que dice verificar.
 
-Arreglo aplicado: `testTimeout: 15_000` en el proyecto `ui` de
-`vitest.config.mts`. Confirmado con `CheckoutForm.test.tsx` solo (146 ms) vs.
-la suite completa (flakeaba de forma intermitente antes del cambio).
+La regla general, y la lección más cara de las dos veces que esto se fichó mal:
+**un test que pasa solo y falla en la suite no es un test al que le falte
+tiempo.** Antes de subir un techo, busca qué evento pudo caer en el vacío.
+Subir el timeout de un fallo que no es de timeout solo compra un rojo más
+lento, y esta ficha se pasó dos ciclos comprándolo.
+
+## Historia de los dos diagnósticos falsos
+
+Se conservan porque explican por qué los números de `vitest.setup.ts` y
+`vitest.config.mts` están donde están, y por qué no hay que volver a subirlos.
+
+- **F-007**: se midió el test cayendo a ~1013 ms y se leyó como que se pasaba
+  del techo de 1000 ms por un pelo. Era el techo agotándose esperando un
+  `alert` que el clic perdido nunca iba a provocar. Arreglo aplicado:
+  `asyncUtilTimeout` a 5000 y luego a 8000 ms. No arregló nada.
+- **F-011**: con ~15 archivos de test más, el mismo test empezó a fallar con
+  «Test timed out in 5000ms» en vez de «Unable to find role». La observación
+  técnica es correcta y sigue valiendo —`testTimeout` y `asyncUtilTimeout` son
+  dos techos independientes, y el del test completo puede agotarse antes—, pero
+  la causa era la misma carrera: el techo que se agotaba dependía de cuál
+  llegaba primero. Arreglo aplicado: `testTimeout: 15_000` en el proyecto `ui`.
+  Tampoco arregló nada.
+
+Los dos techos siguen en su sitio: un techo no es una espera y no cuesta nada
+en verde. Pero ninguno de los dos es ya un seguro contra nada conocido, y si
+alguna vez estorban para leer un fallo real, bajarlos hacia el valor por
+defecto es el movimiento correcto.
