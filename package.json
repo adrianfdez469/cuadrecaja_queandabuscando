@@ -20,6 +20,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
+    "db:backfill-search": "tsx scripts/backfill-search-vector.ts",
     "prepare": "husky",
     "postinstall": "prisma generate",
     "check:bundle": "node scripts/check-bundle-budget.mjs",
