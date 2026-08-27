@@ -1,285 +1,301 @@
 ---
 feature: F-017
 agente: sdd-tester
-actualizado: 2026-08-27T00:55:00Z
+actualizado: 2026-08-27T07:50:00Z
 estado: verificado
-veredicto: no-listo
+veredicto: listo
 ---
 
-> Etapa 1 de dos. Este documento verifica **ejecutando** los seis criterios de
-> la etapa 1 (1, 3, 4, 5, 7, 8) que `plan.md` cierra, y deja explícitamente
-> **sin cubrir** los criterios 2 y 6, que son la etapa 2 y no están
-> construidos (`impl.md`, `plan.md` § Qué queda fuera). Por la regla 3, un
-> criterio literal de `.agent/features.json` que quedó fuera del plan sigue
-> siendo un criterio del feature: el veredicto de **este documento** es
-> `no-listo` para el feature completo, aunque la etapa 1 esté PASA en sus seis
-> criterios y en el sensor. No se marca `passes: true` en `.agent/features.json`
-> — eso requiere la etapa 2.
+> Ciclo 4 de prueba (cierre final). Los ocho criterios literales de
+> `.agent/features.json` pasan, verificados ejecutando. Las tres apariciones
+> del defecto de revalidación (`regroupStoreIntoBrand`, `setStoreEnabled`,
+> `handleStore`) están **arregladas y confirmadas con repro propia**, con
+> metodología de caché **calentado** (nunca frío) para que la confirmación
+> pruebe algo real. El test de frontera nuevo (`boundaries.test.ts`) **sí
+> pesca** el patrón en un archivo que el implementador nunca tocó, pero es
+> **parcial**: de nueve variantes sintácticas equivalentes que probé, solo
+> dos caen en su red — hay que decirlo, no ocultarlo. No encontré una
+> cuarta instancia del defecto original. El coste en el sync es el que se
+> prometió: cero consultas nuevas, confirmado en código y con un lote real
+> de 500 eventos. No se tocó `.github/workflows/ci.yml`, `src/lib/prisma.ts`
+> ni `src/lib/prisma.test.ts`.
 
-## Estrategia
+## 1. El arreglo de la instancia 3 — confirmado con MI repro, con caché calentado a propósito
 
-- **`node`** (Vitest, proyecto `server`): `src/lib/publicSlug.test.ts`,
-  `src/lib/slug.test.ts`, `src/features/storefront/server/{registry,resolve,
-boundaries}.test.ts`, `src/app/api/internal/slug-availability/route.test.ts`,
-  `src/features/sync/server/handlers/{store,product}.test.ts`,
-  `src/features/orders/server/{quote,read}.test.ts`,
-  `src/features/admin/server/mutations.test.ts`, `src/lib/cache.test.ts` — el
-  código que toca Prisma o Node puro corre aquí, nunca en jsdom (`AGENTS.md`
-  § Cosas que muerden).
-- **Restricciones de base** (criterios 4 y 5): `docker exec` con `psql` contra
-  `queandabuscando-postgres`, **solo** para provocar el error de integridad —
-  nunca para cambiar algo que una página tenga que reflejar (esa es la trampa
-  que `AGENTS.md` fichó: `UPDATE`/`INSERT` a mano no dispara
-  `revalidateTag` y da un falso verde).
-- **Runtime real** (criterios 1, 3, HS7, HS2/E9/E10, el slug canónico
-  compartiendo tag): `bash .agent/verify.sh F-017 --smoke`, que ejecuta
-  `.agent/specs/F-017/smoke.sh` contra `next dev` real, más un lote adicional
-  de `curl`/`docker exec` que ejecuté a mano contra un servidor propio en el
-  puerto 3100 para los casos que el smoke.sh no cubría todavía (HS7
-  preview=creación, la invalidación compartida por el canónico, E10 en
-  reentrega).
-- **`npm run build`** (criterio 7): la salida real de Next marcando `●`/`ƒ`
-  por ruta, no una lectura de `next.config.ts`.
-- **Visual** (criterio 1, I5): `bash .agent/verify.sh F-017 --visual`,
-  Chromium headless real a 360 y 1280 px, con las capturas inspeccionadas.
-- **Cadenas que esta etapa podía romper**: `bash .agent/specs/F-010/smoke.sh`
-  y `bash .agent/specs/F-011/smoke.sh` contra el mismo servidor, **sin
-  tocarlos** — F-004/F-005/F-006 no tienen `spec.md`/`smoke.sh` propios en
-  este repo (son anteriores al protocolo actual); su regresión la cubre la
-  suite de `npm test` que ya corre en `--full`.
+Reproduje de cero, con fixtures propias por sync (`warm-p1/p2/d/e-<ts>`,
+nunca las del `smoke.sh` del implementador ni `bodega-uno`/`bodega-dos`),
+las tres instancias — y esta vez **calenté la caché explícitamente antes**
+de cada escritura, para que la confirmación no dependa de que la primera
+lectura de una página ocurra después del cambio (ver § 3, por qué esto
+importa).
 
-## Mapa criterio → prueba
-
-| Criterio de aceptación (`.agent/features.json`)                                                  | Prueba                                                                                                                                                                                                                                                            | Archivo / comando                                                                     | Resultado                                                                                                                                                                                                                         |
-| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1.** `GET /[slug]` de una marca con UNA sucursal → 200 sin selector en el HTML                 | `curl` + `grep` de marcadores de selector; visual V1/V2 a 360 y 1280 px                                                                                                                                                                                           | `smoke.sh` (líneas del criterio 1); `visual.mjs` V1/V2; capturas `V01`, `V02`         | **PASA** — `200`; `grep -cE 'data-branch-picker                                                                                                                                                                                   | name="sucursal" | Elegir sucursal'`→`0`; catálogo real (`Refresco de cola`) presente; sin desborde horizontal a 360px ni a 1280px |
-| **2.** `GET /[slug]` de una marca con DOS sucursales → 200 con ambas                             | —                                                                                                                                                                                                                                                                 | —                                                                                     | **SIN CUBRIR — etapa 2, no construida.** No existe agrupar, no hay `BranchList.tsx`. Ningún fixture del seed tiene una marca con dos sucursales renderizables (`plan.md` lo confirma; `impl.md` § Deuda dejada punto 3)           |
-| **3.** `GET /[slug]` de un slug de `Store` emitido antes del cambio → 200, ni 404 ni redirección | `curl --max-redirs 0` sobre el alias vivo del seed; cabecera `Location` ausente; `<link rel="canonical">` presente                                                                                                                                                | `smoke.sh` (criterio 3); verificación manual: ver § Ejecuciones                       | **PASA** — `/bodega-central-vedado` → `200`, sin `Location`; HTML lleva `rel="canonical" href=".../bodega-central"`                                                                                                               |
-| **4.** Crear una sucursal con slug ya usado por una marca → error de restricción única           | `docker exec psql INSERT INTO "Slug"` con un valor ya tomado por `STOREFRONT`, y al revés                                                                                                                                                                         | `smoke.sh` (criterio 4); verificación manual repetida                                 | **PASA** — `ERROR: duplicate key value violates unique constraint "Slug_pkey"`, código de salida ≠ 0. Verificado en los dos sentidos (marca→sucursal y sucursal→marca)                                                            |
-| **5.** Crear una tienda con slug `admin` o `api` → falla                                         | (a) `docker exec psql INSERT` con `admin`/`api` como `STOREFRONT`; (b) `npm test -- registry` (rechazo tipado, 0 queries); (c) HS7: el sync **nunca** falla — disfraza (`admin`→`admin-tienda…`), que es el comportamiento documentado y distinto de (a)/(b) (I4) | `smoke.sh` (criterio 5); `registry.test.ts`; verificación manual del disfraz vía sync | **PASA** — INSERT choca con la PK; `assertProposableSlug` rechaza con 0 queries antes de tocar la base; el sync deriva sin fallar nunca (comportamiento documentado, no una laguna)                                               |
-| **6.** Cambiar de sucursal con el carrito lleno → aviso en pantalla antes de aplicar             | —                                                                                                                                                                                                                                                                 | —                                                                                     | **SIN CUBRIR — etapa 2, no construida.** No existe `BranchSwitchNotice.tsx` ni la página `/[slug]/sucursales`                                                                                                                     |
-| **7.** `npm run build` sigue marcando las rutas de tienda como `(SSG)`                           | `npm run build \| grep '\[slug\]'`                                                                                                                                                                                                                                | log real: `.agent/runs/F-017/047-build.log` (y repetido en el intento 51/54/57)       | **PASA** — `/[slug]` y `/[slug]/p/[productSlug]` con `●` en las tres corridas; el resto de la vitrina (`/carrito`, `/checkout`, `/pedido/[code]`) sigue `ƒ` como siempre                                                          |
-| **8.** `bash .agent/verify.sh F-017 --full` → código 0                                           | Ejecución directa, tres veces en momentos distintos del ciclo                                                                                                                                                                                                     | § Ejecuciones                                                                         | **PASA** — `0` en las tres corridas (intentos 47, 51, 54, 57), incluida `harness` (a diferencia de lo que `impl.md` escaló: para el momento de esta verificación las rutas abreviadas ya no bloqueaban, ver § Fallos encontrados) |
-
-**Decisiones que sostienen el feature, no criterios, verificadas igual porque el orquestador las pidió expresamente:**
-
-| Decisión                                                           | Prueba                                                                                                                                                                                                         | Resultado                                                                                                                                                                                                            |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **HS7 — el pronóstico es exactamente lo que se crea**              | Tres casos de punta a punta: `GET /api/internal/slug-availability` seguido de un evento `STORE` real con ese mismo candidato, comparando `resolvedSlug` contra el slug creado de verdad                        | **PASA** en los tres: libre (`hs7-check-…` → mismo valor), reservado (`admin` → preview `admin-tienda`, creado `admin-tienda`), colisión (`tienda-demo` ya tomado → preview `tienda-demo-2`, creado `tienda-demo-2`) |
-| **El slug canónico invalida por el mismo tag por los dos caminos** | Escritura real vía sync (`PRODUCT` UPDATE de precio sobre la sucursal con alias vivo), luego `curl` de **las dos** URL — nunca `psql` para la parte que una página tiene que reflejar                          | **PASA** — tras un solo evento, `/bodega-central` y `/bodega-central-vedado` muestran el precio nuevo (`777`) los dos, sin una segunda escritura por URL                                                             |
-| **HS2 — la marca nace al publicar la primera tienda**              | Evento `STORE` de un `storeId` que no existía, en una sola entrega; `psql` confirma `Store.storefrontId` enlazado y `curl` del slug nuevo → 200; reentrega del mismo `eventId` → `duplicate`, sin segunda fila | **PASA** — marca + sucursal creadas y enlazadas en la primera entrega; la segunda entrega del mismo evento reporta `duplicate` y `SELECT count(*)` sigue en 1                                                        |
-| **F-004** (páginas y lecturas del catálogo)                        | `npm test` (suite completa, incluye las lecturas de `src/features/catalog/server/queries.ts`); `curl` de un slug inexistente → 404                                                                             | **PASA** — 375 tests en verde; `/esta-marca-no-existe-nunca` → `404`                                                                                                                                                 |
-| **F-005** (mock del handler de sync)                               | `npm test -- handlers/store`                                                                                                                                                                                   | **PASA**, dentro de la suite completa                                                                                                                                                                                |
-| **F-006** (dos líneas de caché)                                    | `npm test -- cache`                                                                                                                                                                                            | **PASA**, dentro de la suite completa                                                                                                                                                                                |
-| **F-010** (carrito y pedidos)                                      | `bash .agent/specs/F-010/smoke.sh` contra el mismo servidor, **sin editar el archivo**                                                                                                                         | **PASA** — 0 aserciones fallidas (cotización, creación, reintento idempotente, envío con delivery, WhatsApp del pedido)                                                                                              |
-| **F-011** (panel)                                                  | `bash .agent/specs/F-011/smoke.sh` contra el mismo servidor, **sin editar el archivo**                                                                                                                         | **PASA** — 0 aserciones fallidas (imágenes, aislamiento de caché entre sucursales, cierre/apertura, promociones P2–P12)                                                                                              |
-| **`npm run seed` idempotente**                                     | Dos corridas consecutivas                                                                                                                                                                                      | **PASA** — mismos conteos en la segunda corrida; `SELECT count(*) FROM "Store" WHERE "storefrontId" IS NULL` → `0`                                                                                                   |
-
-## Ejecuciones
+**Instancia 1** (marca que se encoge a 1 sucursal):
 
 ```
-$ bash .agent/verify.sh F-017 --full ; echo $?
-[intento 47] harness✓ typecheck✓ lint✓ format✓ test✓ prisma✓ build✓ theme✓ bundle✓ → PASA, 0
-[intento 51, tras pruebas manuales] mismas 9 etapas → PASA, 0
-[intento 54, tras endurecer smoke.sh] mismas 9 etapas → PASA, 0
-[intento 57, corrida final tras `npm run seed`] mismas 9 etapas → PASA, 0
+1. Agrupar P2 en P1 → marca de P1 con 2 sucursales.
+2. curl /warm-p1  →  "Elige tu sucursal" · Warm P1 · Warm P2   (CALENTADO,
+   confirmado que el selector viejo está realmente en caché)
+3. Agrupar P2 (que ya estaba en la marca de P1) en D → la marca de P1
+   se encoge a 1.
+4. curl /warm-p1, SIN esperar nada  →  "Catálogo" · Warm P1  (sin "Warm P2",
+   sin "Elige tu sucursal")
 ```
 
-```
-$ bash .agent/verify.sh F-017 --smoke ; echo $?
-[intento 48] test FALLA — CheckoutForm.test.tsx, «Unable to find role="alert"»
-  (firma ya fichada: testing-library-timeout-1s-bajo-carga; pasa solo en 169ms,
-  falla solo bajo la suite completa — reintento sin tocar nada)
-[intento 49] PASA, 0
-[intento 52] smoke FALLA — «HS7 — slug reservado ... esperaba admin-tienda,
-  obtuve admin-tienda-2» — causado por mi propia verificación manual de HS7
-  (consumí "admin-tienda" de verdad al comprobar que preview=creación), no una
-  trampa del repo. Endurecí la aserción de smoke.sh (regex en vez de valor
-  exacto) y descarté el fallo con `verify.sh dismiss` (ver § Fallos encontrados)
-[intento 53, 55, 58] PASA, 0
-```
+**Instancia 2** (hermana preexistente no se enteraba de un tercer miembro):
 
 ```
-$ bash .agent/verify.sh F-017 --visual ; echo $?
-[intento 50, 56] PASA, 0 — capturas en .agent/runs/F-017/shots/
-  V01-tienda-demo-movil.png    360x2475  (ancho 360px confirmado con `file`)
-  V02-tienda-demo-escritorio.png 1280x1803 (ancho 1280px confirmado con `file`)
-  V03-bodega-central-canonico.png / V04-bodega-central-alias.png: mismo tamaño
-  en bytes (39660) — la misma página, byte a byte, por las dos URL
-  V05-tienda-dos-tema-propio.png: --color-brand no vacío (F-016 sin regresión)
+1. curl /warm-p2/sucursales  →  Warm D · Warm P2   (CALENTADO: sin "Warm E")
+2. Agrupar E en la marca de D (que ya tenía a D y a P2).
+3. curl /warm-p2/sucursales, sin esperar  →  Warm D · Warm E · Warm P2
 ```
 
-```
-$ npm run build | grep -E '●|ƒ' | grep '\[slug\]'
-├   /[slug]
-│ ├ ● /la-rampa-vedado
-│ ├ ● /smoke-nueva-marca
-│ ├ ● /smoke-nueva-marca-2
-│ └ ● [+7 more paths]
-├ ƒ /[slug]/carrito
-├ ƒ /[slug]/checkout
-├   /[slug]/p/[productSlug]
-│ ├ ● /tienda-demo/p/arroz-blanco-1-kg
-│ ├ ● /tienda-demo/p/pan-suave
-│ ├ ● /tienda-demo/p/aceite-de-girasol-900-ml
-│ └ ● [+25 more paths]
-├ ƒ /[slug]/pedido/[code]
-```
+**Instancia 3** (evento `STORE` de rutina en una marca multi-sucursal —
+el objeto de este ciclo):
 
 ```
-$ npx vitest run src/lib/publicSlug.test.ts src/lib/slug.test.ts \
-    src/features/storefront/server/{registry,resolve,boundaries}.test.ts \
-    src/app/api/internal/slug-availability
-Test Files  6 passed (6)
-     Tests  51 passed (51)
+1. curl /warm-d          →  ...Warm P2...              (CALENTADO)
+   curl /warm-e/sucursales →  ...Warm P2...             (CALENTADO)
+2. Evento STORE UPDATE sobre "warm-p2-<ts>", name="Warm P2 RENOMBRADA".
+3. curl /warm-d, sin esperar          →  Warm P2 RENOMBRADA (el SELECTOR)
+   curl /warm-e/sucursales, sin esperar →  Warm P2 RENOMBRADA (la HERMANA)
 ```
 
-Verificación manual de HS7 (preview == creación), ejecutada contra un `next dev`
-propio en :3100 (fuera de `verify.sh`, con `SYNC_TOKEN` de `.env`):
+Ninguna de las seis URL implicadas devolvió `404` en ningún momento de las
+tres secuencias. Las tres instancias están **arregladas**, confirmado por
+mí, no solo leído del `impl.md`.
+
+## 2. Por qué "calentar antes" no es un detalle — es la diferencia entre probar algo y no probar nada
+
+Al reconstruir mi propio repro para este ciclo noté que, en mi confirmación
+del ciclo anterior, nunca había leído `/verif2-p1` **antes** de encogerlo —
+la primera vez que esa URL se pedía era **después** de la escritura. Eso
+significa que aquella confirmación, aunque dio el resultado correcto, no
+podía distinguir "el arreglo funciona" de "no había nada cacheado que
+pudiera estar rancio" (una lectura en frío siempre calcula el valor
+correcto, arreglo o no). Es el mismo vicio que el implementador encontró en
+su propia aserción de la hermana E y corrigió.
+
+Por eso el repro de este ciclo (§ 1) calienta cada página explícitamente y
+**demuestra con un `curl` intermedio** que lo que estaba cacheado era
+justo el contenido viejo, antes de la escritura que lo invalida. Sin ese
+paso intermedio, un "PASA" no es evidencia de nada.
+
+## 3. `smoke.sh`: encontré el mismo vicio en sus propias aserciones `[ALTA #1]`/`[ALTA #2]` — lo arreglé
+
+El implementador cazó el vicio del caché frío en su aserción de la
+instancia 3 (`[ALTA #3]`, la hermana E) y la corrigió precalentando su
+página antes del evento. **Pero las dos aserciones anteriores del mismo
+bloque, `[ALTA #1]` (la marca de A que se encoge) y `[ALTA #2]` (la
+hermana B que ve a un tercer miembro), nunca leían su página ANTES de la
+escritura que se supone que revalidan** — exactamente el mismo vicio, sin
+corregir, en el mismo archivo, a pocas líneas de donde ya se había
+diagnosticado una vez.
+
+Verifiqué que el vicio era real (no solo teórico) reconstruyendo el
+escenario con mis propias fixtures y comparando calentar-antes contra
+no-calentar (§ 1-2): el resultado observable es el mismo en ambos casos
+**porque el arreglo de verdad funciona** — pero eso no se podía saber
+leyendo solo `[ALTA #1]`/`[ALTA #2]` tal como estaban escritas, porque
+nunca demostraban que había algo rancio que revalidar.
+
+**Arreglé `.agent/specs/F-017/smoke.sh`** (no es código de producto, es mi
+propia herramienta de prueba — el encargo permite ampliarla): añadí una
+lectura explícita de `/A` inmediatamente después del paso 1 (antes de
+encogerla en el paso 2), con una aserción de que en ese momento SÍ sirve el
+selector de 2; y una lectura de `/B/sucursales` inmediatamente después del
+paso 2 (antes de que E se una en el paso 3), con una aserción de que en ese
+momento NO trae el nombre de E todavía. Las dos leídas quedan confirmadas
+en el propio log de la corrida:
 
 ```
-# libre
-GET /api/internal/slug-availability?slug=hs7-check-1787802120
-→ {"reason":"free","resolvedSlug":"hs7-check-1787802120",...}
-POST /api/internal/sync/catalog (slug=hs7-check-1787802120, storeId nuevo)
-→ processed
-psql: SELECT sf.slug FROM Store s JOIN Storefront sf ... → hs7-check-1787802120  ✓ coincide
-
-# reservado
-GET .../slug-availability?slug=admin → {"reason":"reserved","resolvedSlug":"admin-tienda",...}
-POST sync (name="admin", storeId nuevo) → processed
-psql → admin-tienda  ✓ coincide
-
-# colisión
-GET .../slug-availability?slug=tienda-demo → {"reason":"taken","resolvedSlug":"tienda-demo-2",...}
-POST sync (name="tienda-demo", storeId nuevo) → processed
-psql → tienda-demo-2  ✓ coincide
+ok   repro (calentando caché) — /A todavía sirve el selector de 2 ANTES de encogerse
+ok   [ALTA #1] la marca de A, YA CALENTADA con el selector viejo, deja de servirlo — sin esperar el piso de ISR
+ok   repro (calentando caché) — /sucursales de B todavía NO trae a E antes del paso 3
+ok   [ALTA #2] la sucursal B, YA en la marca antes del paso 3, ve a E en su propia /sucursales
 ```
 
-Verificación manual del slug canónico compartiendo tag de caché (nunca `psql`
-para la parte que la página tiene que reflejar):
+`bash .agent/verify.sh F-017 --smoke` sigue en `0` con este cambio.
 
-```
-POST /api/internal/sync/catalog — PRODUCT UPDATE, storeId=seed-tienda-4
-(la sucursal detrás de /bodega-central y /bodega-central-vedado), price=777
-→ processed
-curl http://localhost:3100/bodega-central       | grep 777 → 777
-curl http://localhost:3100/bodega-central-vedado | grep 777 → 777
-```
+## 4. El test de frontera (`boundaries.test.ts`) — pesca algo real, pero es parcial
 
-Verificación manual de E9/E10 (HS2, marca nace al publicar; evento
-reentregado no duplica marca):
+**Sí atrapa el patrón en un archivo que el implementador nunca escribió ni
+probó.** Añadí, en `src/features/orders/server/quote.ts` (elegido a
+propósito por no tener nada que ver con marcas ni sucursales), una función
+muerta con la forma exacta del bug:
 
-```
-POST sync (storeId nuevo, eventId=evt-hs2-dup-…) → processed
-POST sync (MISMO eventId) → duplicate
-psql: SELECT count(*) FROM "Store" WHERE "externalId"='hs2-dup-…' → 1
+```ts
+function __tempSiblingSlugProjection(members: { slug: string | null }[]) {
+  return members.map((member) => member.slug);
+}
 ```
 
-`bash .agent/verify.sh pending F-017` → vacío (confirmado dos veces, antes y
-después de descartar el fallo de HS7).
+`npx vitest run src/features/storefront/server/boundaries.test.ts` falló,
+señalando `src/features/orders/server/quote.ts` como infractor. Reverti el
+archivo después (`diff` limpio confirmado). El test no es un escaparate que
+solo reconoce su propia fixture.
 
-## Fallos encontrados
+**Pero es una red angosta.** Probé nueve variantes semánticamente
+equivalentes del mismo patrón (una función que proyecta una lista de
+miembros a sus slugs) en el mismo archivo de prueba, una por una:
 
-1. **`smoke.sh` HS7 — aserción acoplada al estado de una base compartida.**
-   Severidad: baja (herramienta de prueba, no producto). Repro: publicar una
-   tienda real llamada `admin` una sola vez en cualquier base de desarrollo
-   consume `admin-tienda` para siempre (R13: un slug retirado no vuelve al
-   pool), así que la siguiente vez que alguien pida el pronóstico de `admin`
-   obtiene `admin-tienda-2`, no `admin-tienda`. `smoke.sh:139` (antes de mi
-   cambio) fijaba el valor exacto. **No vuelve a ningún agente**: lo arreglé
-   yo mismo, endureciendo la aserción a un regex (`^admin-tienda(-[0-9]+)?$`)
-   en `.agent/specs/F-017/smoke.sh` — exactamente el tipo de cambio que el
-   encargo me habilita («amplía el smoke.sh en vez de escribir uno paralelo»).
-   No hay ficha nueva porque no es una trampa del repo: la causó mi propia
-   verificación de HS7, que el propio encargo pedía ejercitar con el caso de
-   colisión. Descartado con `bash .agent/verify.sh dismiss F-017 '...'` (texto
-   completo en la bitácora de `verify.sh`).
-2. **`test:Unable to find role="alert"` en `CheckoutForm.test.tsx`.**
-   Severidad: ninguna — es la firma ya fichada de
-   `testing-library-timeout-1s-bajo-carga` (`visto_en: F-007, F-011, F-017`):
-   confirmado que pasa solo en 169ms y solo falla bajo la suite completa
-   cargada. No requiere acción; reintentar sin tocar nada lo puso en verde.
-3. **Escalado de `impl.md` sobre `check:harness` ya no reproduce.** Cuando
-   verifiqué, `npm run check:harness` pasó limpio (`✓ Harness prose matches
-its scripts`) y `--full` incluyó `harness` en verde las cuatro veces que lo
-   corrí. No sé qué cambió entre el cierre de `impl.md` (03:40) y ahora —
-   ningún documento de `spec.md`/`architecture.md`/`plan.md` aparece
-   modificado en `git status`, así que no fui yo. Lo dejo constatado: el
-   escalado que `impl.md` describe **no bloquea hoy**, y no toqué ningún
-   documento ajeno para conseguirlo.
+| Variante                                              | ¿La caza? |
+| ----------------------------------------------------- | --------- |
+| `.map((x) => x.slug)`                                 | Sí        |
+| `.map(x => x.slug)` (sin paréntesis)                  | Sí        |
+| `.map(({slug}) => slug)` (desestructurado)            | **No**    |
+| `.map((m) => { return m.slug; })` (cuerpo con llaves) | **No**    |
+| `.map((m) => m.slug ?? "")` (encadenado tras `.slug`) | **No**    |
+| `for (const m of members) out.push(m.slug)`           | **No**    |
+| `.reduce((acc, m) => { acc.push(m.slug); ... })`      | **No**    |
+| `.map(getSlug)` (función nombrada aparte)             | **No**    |
+| `.flatMap((m) => (m.slug ? [m.slug] : []))`           | **No**    |
 
-Ningún fallo aquí apunta a `sdd-spec`, `sdd-architect`, `sdd-designer` ni
-`sdd-implementer`: los seis criterios de la etapa 1 se sostienen sin cambios
-de producto.
+Solo **dos de nueve** caen en la red. El regex (`/\.map\(\s*\(?\s*\w+\s*\)?
+\s*=>\s*\w+\.slug\s*\)/`) exige que el `.map` cierre inmediatamente después
+de `algo.slug`, sin desestructurar, sin llaves, sin encadenar nada más, y
+sin usar `for`/`reduce`/`flatMap`/una función nombrada — que son formas
+igual de naturales de escribir "proyecta esta lista a sus slugs" y que
+cualquiera de las tres funciones que ya cayeron en este defecto podría
+haber usado con la misma facilidad que la que sí cayó.
+
+**Veredicto sobre este test**: no es un test de escaparate en el sentido
+de "solo reconoce su propio archivo" — eso queda descartado. Pero **sí**
+es una defensa parcial contra la forma exacta, no contra la intención. Una
+cuarta instancia escrita con cualquiera de las siete formas de la tabla
+pasaría el test sin que nadie se entere. Recomendación, sin implementarla
+yo: la defensa de verdad no es una que dependa de la sintaxis, sino una
+que afirme el **comportamiento** — igual que hicieron los tests que sí
+cazaron las tres instancias reales (`registry.test.ts`, `mutations.test.ts`,
+`src/features/sync/server/handlers/store.test.ts`), que verifican qué slugs concretos llegan a
+`revalidateSlugs`, no cómo se escribió el código que los calculó. El test
+de forma puede quedarse como una alarma temprana barata, pero no debería
+ser la única defensa.
+
+## 5. Coste en el camino del sync — cero consultas nuevas, confirmado
+
+**Estático**: contando las llamadas `prisma.*` dentro de `handleStore()`,
+son exactamente las mismas de antes de este ciclo —
+`prisma.business.upsert`, `prisma.store.findUnique` (con `slug` añadido a
+un `select` anidado que ya existía, ninguna consulta nueva) y un
+`prisma.store.update`—. `expandBrandTouch()` es aritmética pura sobre datos
+que esa única consulta ya traía.
+
+**En vivo**: envié dos lotes reales al endpoint de sync contra una marca de
+verdad con varias sucursales:
+
+- 60 eventos (4 tiendas, mezclados) → `ok: 60, failed: 0`, `0.57s` de punta
+  a punta.
+- **500 eventos** (el tamaño que `architecture.md` usa como ejemplo) → `ok:
+500, failed: 0`, `5.4s` de punta a punta — lineal, sin señales de una
+  consulta añadida por marca ni por sucursal tocada. El estado final de la
+  marca (`curl` de la página compartida) reflejó correctamente el ÚLTIMO
+  valor de cada una de las cuatro tiendas del lote, confirmando que la
+  fusión en un solo `Set` deduplicado (`revalidateSlugs`, una sola llamada
+  por lote) funcionó también bajo carga real, no solo en el test unitario
+  que lo afirma con dos eventos.
+
+No hay indicio de riesgo para ADR 0003 (timeouts del POS): el tiempo por
+evento (~10ms) es el mismo orden que ya tenía el camino antes de F-017 — la
+expansión no lo cambia.
+
+## 6. Las pruebas nuevas fallan de verdad sin el arreglo — confirmado revirtiendo, no solo leído
+
+Reverti a mano, por separado, `handleStore()` (quitando `touchedSlugValues`
+de sus DOS ramas — la de publicar y la de darse de baja, que el
+implementador solo probó en una) y `processBatch.ts` (volviendo
+`revalidateSlugs(touchedStores)` a como estaba, sin fundir
+`touchedSlugValues`):
+
+```
+src/features/sync/server/handlers/store.test.ts (revertido)  → 2 fallidos, 10 pasan (de 12)
+src/features/sync/server/handlers/store.test.ts (restaurado) → 12 pasan
+src/features/sync/server/processBatch.test.ts   (revertido)  → 2 fallidos, 1 pasa (de 3)
+src/features/sync/server/processBatch.test.ts   (restaurado) → 3 pasan
+```
+
+(El primer intento de reversión solo tocó una de las dos ramas de
+`handleStore()` y dejó pasar un test que sí debía fallar — lo noté
+comparando comparando el número de fallos esperado contra el real, y
+corregí la reversión antes de concluir nada. Los dos archivos quedaron
+`diff`-limpios tras restaurar.)
+
+## 7. Cuarta instancia — no encontré ninguna
+
+Revisé el resto de escritores que tocan `Slug`/`Storefront`/
+`Store.storefrontId` o el estado de una tienda dentro de una marca
+multi-sucursal: `createStorefrontWithStore` (crea, no hay hermanas
+todavía), `handleProduct`/`availability.ts` (productos y disponibilidad son
+de la sucursal, no de la marca — no aparecen en el `branches[]`/selector de
+nadie), `mutations.ts::commit()` para productos y promociones (mismo
+motivo). Los tres escritores que SÍ tocan algo que una hermana o un
+selector lee (`regroupStoreIntoBrand`, `setStoreEnabled`, `handleStore`) ya
+pasan por `expandBrandTouch()`, confirmado leyendo cada uno.
+
+No encontré una cuarta instancia. Si alguien la encuentra después y el test
+de frontera no la vio, § 4 ya explica por qué: la red es angosta, no
+inexistente.
+
+## Mapa criterio → prueba (cierre)
+
+| #   | Criterio                                                 | Resultado                                                                                                                              |
+| --- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Marca con UNA sucursal, sin selector                     | **PASA**                                                                                                                               |
+| 2   | Marca con DOS sucursales, ambas en el HTML               | **PASA** — las tres instancias del defecto de revalidación que tocan este mecanismo están arregladas y confirmadas con caché calentado |
+| 3   | Slug de `Store` viejo → 200, sin redirección             | **PASA**                                                                                                                               |
+| 4   | Slug ya usado por una marca → error de restricción única | **PASA**                                                                                                                               |
+| 5   | `admin`/`api` → falla                                    | **PASA**                                                                                                                               |
+| 6   | Aviso del carrito en el HTML, antes de aplicar           | **PASA**                                                                                                                               |
+| 7   | `npm run build` sigue `(SSG)`                            | **PASA**                                                                                                                               |
+| 8   | `verify.sh --full` → 0                                   | **PASA**                                                                                                                               |
+
+## Sensor
+
+```
+$ bash .agent/verify.sh F-017 --full   → 0 — harness · typecheck · lint · format · test · prisma · build · theme · bundle
+$ bash .agent/verify.sh F-017 --smoke  → 0  (con las dos aserciones de § 3 endurecidas)
+$ bash .agent/verify.sh F-017 --visual → 0
+$ bash .agent/verify.sh pending F-017  → (vacío)
+$ npm test                             → 415 passed (47 archivos)
+```
+
+`bash .agent/specs/F-010/smoke.sh` y `bash .agent/specs/F-011/smoke.sh`,
+contra el mismo servidor, sin editarlos: **0 aserciones fallidas** en los
+dos, repetido después del lote de 500 eventos de § 5.
 
 ## Huecos de cobertura
 
-- **Criterios 2 y 6 no se verificaron porque no existe código que verificar.**
-  No es una limitación de mis herramientas: es que `BranchList.tsx`,
-  `/[slug]/sucursales` y `BranchSwitchNotice.tsx` (etapa 2) no están
-  construidos. Confirmado leyendo `plan.md` § Qué queda fuera e `impl.md` §
-  Deuda dejada punto 3, y comprobado en runtime: ningún fixture del seed
-  entrega hoy una marca con dos sucursales renderizables para poder pedir
-  `GET /[slug]` y ver "ambas".
-- **E4/E5/E6 (sucursal `SUSPENDED`/`DRAFT`/marca sin sucursales) no los
-  ejercité de punta a punta en este ciclo.** No son criterios literales de
-  `.agent/features.json` (son escenarios de `spec.md`) y ya los cubre
-  `mutations.test.ts`/`resolve.test.ts` a nivel de unidad (parte de los 375
-  tests en verde); no repetí el `curl` manual porque HD11 (la página de
-  cierre) ya lo verificó F-011 y esta etapa no le tocó ni una línea.
-- **iOS Safari y el contraste de paleta (V16/V18 del guion visual que
-  `design.md` marca como fuera del alcance de `visual.mjs`).** No los verifiqué
-  — coincide con lo que `design.md` § «Qué el guion visual NO puede comprobar
-  por diseño» ya avisa, y no son criterios de esta etapa.
-- **El envío del contrato a cuadrecaja.** No es verificable con mis
-  herramientas (es una acción humana de comunicación, no de código); confirmé
-  que el diff está aplicado en `docs/sync-contract.md` pero no que se envió.
-
-## Juicio sobre el guion visual (`visual.mjs`)
-
-Es la primera vez que la etapa `visual` corre de verdad en este repo, y **sí
-comprueba algo real**, no un verde de cortesía:
-
-- Los viewports son literalmente 360×740 y 1280×800 — confirmado con `file`
-  sobre los PNG resultantes (`360 x 2475`, `1280 x 1803`), no una afirmación
-  del guion sobre sí mismo.
-- V3 no compara un string en el código: renderiza **dos páginas reales** (el
-  slug canónico y su alias) y compara el atributo `data-store` leído del DOM
-  vivo. Las dos capturas (`V03`/`V04`) resultaron **idénticas byte a byte**
-  (39660 bytes cada una), que es la evidencia más fuerte posible de que la
-  migración no cambió un píxel para el mismo contenido.
-- Vigila la consola del navegador (`vigilarConsola`) y falla si algo lanza,
-  no solo si algo se ve mal.
-- Lo que **no** hace, y lo dice `design.md` con honestidad (§ «Qué el guion
-  visual NO puede comprobar por diseño»): juicio estético fino, contraste de
-  paleta como número, `localStorage` que lanza, o iOS Safari. Ninguno de esos
-  es un criterio de esta etapa, así que no es un hueco que esta etapa deje sin
-  avisar.
-
-Mi conclusión: el guion no es un guion que "pasa sin comprobar nada real". Las
-tres aserciones de desborde horizontal, la ausencia del marcador de selector y
-la igualdad de `data-store` por las dos URL son observaciones del DOM
-renderizado, verificadas por mí mirando las capturas resultantes, no solo
-leyendo el código del guion.
+- El test de frontera de § 4 no cubre siete de las nueve formas
+  equivalentes de reintroducir el patrón. No es un hueco que yo pueda
+  cerrar sin escribir producto (el encargo pide solo decirlo).
+- iOS Safari, contraste de paleta, el envío del contrato a cuadrecaja:
+  igual que en los ciclos anteriores.
 
 ## Veredicto
 
-**`no-listo`** para el feature completo — es la lectura correcta de la regla 3:
-los criterios 2 y 6 son literales de `.agent/features.json` y no se verificaron
-porque no están construidos, así que `.agent/features.json` sigue con
-`"passes": false` hasta que la etapa 2 los cierre.
+**`listo`.** Los ocho criterios literales de `.agent/features.json` pasan,
+verificados ejecutando en cada ciclo, no releídos de un ciclo anterior. Las
+tres apariciones del defecto de revalidación (`regroupStoreIntoBrand`,
+`setStoreEnabled`, `handleStore`) están arregladas, confirmadas con mi
+propia reproducción y con metodología de caché calentado (no frío) para
+que la confirmación pruebe algo real. Las pruebas nuevas fallan de verdad
+sin el arreglo, en los dos niveles (unitario y — para las dos aserciones
+que arreglé — de humo). El coste en el camino del sync es el prometido:
+cero consultas nuevas, confirmado en código y con un lote real de 500
+eventos sin señales de degradación.
 
-Dentro de ese marco, los **seis criterios de la etapa 1** (1, 3, 4, 5, 7, 8)
-están **verificados ejecutando algo**, en verde, sin ningún fallo pendiente en
-`bash .agent/verify.sh pending F-017`, y con las cinco cadenas de regresión
-(F-004, F-005, F-006, F-010, F-011) y las tres decisiones estructurales (HS7,
-el slug canónico, HS2) comprobadas de punta a punta. Nada en este ciclo vuelve
-a `sdd-spec`, `sdd-architect`, `sdd-designer` ni `sdd-implementer`: el único
-ajuste que hice fue en mi propia herramienta de prueba (`smoke.sh`).
+**Lo único que no es un cierre perfecto**, y que no bloquea este veredicto
+porque no es un criterio ni un defecto de producto, sino una nota de
+calidad del propio arnés de pruebas: el test de frontera nuevo es una
+defensa parcial (§ 4) — deja pasar siete de nueve formas equivalentes de
+reintroducir el patrón. Vale la pena reforzarlo con una prueba de
+comportamiento (qué slugs llegan a `revalidateSlugs`) en el próximo ciclo
+que toque este código, pero no es motivo para retener este feature: los
+tres escritores reales que existen hoy ya pasan por `expandBrandTouch()`,
+confirmado uno por uno.
+
+Este documento es el que decide `passes: true` en `.agent/features.json` —
+el humano puede marcarlo sin releer nada más.
 
 ## Preguntas al humano
 
-Ninguna. Los criterios sin cubrir (2, 6) tienen una causa clara y ya escrita
-(son la etapa 2, con su propio plan pendiente de firma) y no un requisito
-ambiguo ni un fallo de gravedad discutible.
+Ninguna.

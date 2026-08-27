@@ -147,6 +147,81 @@ describe("resolvePublicSlug() — E1..E6, criterio 3", () => {
   });
 });
 
+function groupedStorefrontRow(overrides: Partial<Record<string, unknown>> = {}) {
+  return storefrontRow({
+    stores: [
+      {
+        id: "store-1",
+        slug: "la-rampa-vedado",
+        name: "La Rampa · Vedado",
+        city: "La Habana",
+        address: "Calle 23",
+        status: "PUBLISHED",
+        disabledReasonCode: null,
+        disabledMessage: null,
+        disabledAt: null,
+      },
+      {
+        id: "store-2",
+        slug: "tienda-dos",
+        name: "La Rampa · Playa",
+        city: "La Habana",
+        address: "5ta Avenida",
+        status: "PUBLISHED",
+        disabledReasonCode: null,
+        disabledMessage: null,
+        disabledAt: null,
+      },
+    ],
+    ...overrides,
+  });
+}
+
+describe("resolvePublicSlug() — etapa 2, marca agrupada (criterio 2)", () => {
+  it("the brand's own slug resolves to the SELECTOR once it groups 2+ branches", async () => {
+    slugFindUnique.mockResolvedValue({
+      kind: "STOREFRONT",
+      retiredAt: null,
+      storefrontId: "storefront-1",
+      storeId: null,
+    });
+    storefrontFindUnique.mockResolvedValue(groupedStorefrontRow());
+
+    const resolution = await resolvePublicSlug("la-rampa");
+    expect(resolution).toMatchObject({
+      kind: "selector",
+      brandSlug: "la-rampa",
+      branches: [
+        { storeId: "store-1", canonicalSlug: "la-rampa-vedado", name: "La Rampa · Vedado" },
+        { storeId: "store-2", canonicalSlug: "tienda-dos", name: "La Rampa · Playa" },
+      ],
+    });
+  });
+
+  it("a branch's own slug resolves to itself, canonical = its OWN slug, with its siblings attached", async () => {
+    slugFindUnique.mockResolvedValue({
+      kind: "STORE",
+      retiredAt: null,
+      storefrontId: null,
+      storeId: "store-1",
+    });
+    storeFindUnique.mockResolvedValue({ storefrontId: "storefront-1" });
+    storefrontFindUnique.mockResolvedValue(groupedStorefrontRow());
+
+    const resolution = await resolvePublicSlug("la-rampa-vedado");
+    expect(resolution).toMatchObject({
+      kind: "branch",
+      storeId: "store-1",
+      canonicalSlug: "la-rampa-vedado",
+      isAlias: false,
+      branchCount: 2,
+    });
+    expect(resolution).toMatchObject({
+      branches: [{ storeId: "store-1" }, { storeId: "store-2" }],
+    });
+  });
+});
+
 describe("requireResolution()", () => {
   it("throws Next's not-found boundary when there is no resolution", async () => {
     slugFindUnique.mockResolvedValue(null);

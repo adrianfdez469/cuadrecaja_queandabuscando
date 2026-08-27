@@ -98,3 +98,62 @@ describe("storefront resolver boundaries (I6)", () => {
     expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
   });
 });
+
+/**
+ * Backstop for the revalidation funnel (I5/R18, `.agent/playbook/
+ * revalida-solo-lo-que-se-escribe-no-lo-que-cambia-de-significado.md`): the
+ * SAME defect appeared three times — `regroupStoreIntoBrand()`,
+ * `setStoreEnabled()`, and the sync's routine `STORE` update — each time
+ * because a writer hand-rolled its OWN `.map()`/`.filter()` over a brand's
+ * `stores`/members list to build the slugs to revalidate, and each time
+ * forgot a different case (the brand's own slug, a preexisting sibling, a
+ * shrinking brand).
+ *
+ * `expandBrandTouch()` in `registry.ts` is now the ONE place that does this
+ * projection, and its return type (`SlugTouchSet`, see that type's own
+ * comment) is what a fourth instance actually has to get past at the two
+ * sites that store the result in a typed field
+ * (`RegroupResult.revalidate.slugValues`,
+ * `features/sync/server/handlers/types.ts`'s `HandlerOutcome.
+ * touchedSlugValues`): a hand-rolled replacement there is a TYPE ERROR,
+ * in any syntactic shape, not something that depends on this test
+ * recognizing the right one.
+ *
+ * THIS test is a SECOND, weaker line of defense — kept for the one call
+ * site the type cannot reach (`setStoreEnabled`'s inline
+ * `revalidateSlugs(expandBrandTouch(...))`, `features/admin/server/
+ * mutations.ts` — no field there to brand) and as an early, cheap alarm
+ * for the sites the type already covers. It greps for the exact SHAPE of
+ * the bug — a `.map()` whose callback returns a bare `<something>.slug`
+ * off a members/stores collection — anywhere outside `registry.ts`, and
+ * `sdd-tester` measured exactly how partial that net is: of nine
+ * syntactically-equivalent ways to write "project this list down to its
+ * slugs", only the two closest to `.map((x) => x.slug)` (with or without
+ * the callback's parens) land in it. Destructuring
+ * (`.map(({slug}) => slug)`), a block body (`.map((m) => { return
+ * m.slug; })`), chaining after `.slug`, a `for` loop, `.reduce`,
+ * `.flatMap`, and a named helper function passed by reference all pass
+ * this test unnoticed (`.agent/specs/F-017/tests.md` § 4 has the full
+ * table). Do not read a green run of this test as "no hand-rolled
+ * projection exists" — read it as "the two narrowest spellings of it
+ * don't".
+ */
+const REVALIDATION_ALLOWED_FILES = [join(ROOT, "src/features/storefront/server/registry.ts")];
+
+const SIBLING_SLUG_PROJECTION = /\.map\(\s*\(?\s*\w+\s*\)?\s*=>\s*\w+\.slug\s*\)/;
+
+describe("revalidation funnel boundaries (I5/R18) — partial, second-line grep; SlugTouchSet is the real guarantee", () => {
+  it("only registry.ts (expandBrandTouch) projects a members/stores list down to its own slugs, in the narrow syntactic shapes this regex knows", () => {
+    const files = listFiles(SRC_DIR).filter(
+      (file) => !file.endsWith(".test.ts") && !file.endsWith(".test.tsx"),
+    );
+
+    const offenders = files.filter((file) => {
+      if (REVALIDATION_ALLOWED_FILES.includes(file)) return false;
+      const source = stripComments(readFileSync(file, "utf8"));
+      return SIBLING_SLUG_PROJECTION.test(source);
+    });
+
+    expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
+  });
+});

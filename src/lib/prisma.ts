@@ -2,8 +2,8 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 
 /**
- * Single Prisma instance, cached on globalThis outside production so hot reload
- * does not exhaust the connection pool.
+ * Single Prisma instance for the whole process, additionally parked on
+ * globalThis outside production so hot reload does not exhaust the pool.
  *
  * Construction is lazy. Importing this module must not throw when DATABASE_URL
  * is absent: `next build` imports every route module to collect metadata, and a
@@ -20,13 +20,12 @@ import { PrismaClient } from "@/generated/prisma/client";
  *
  * `max: 5` on the underlying `pg.Pool`: `next build`'s static generation
  * spawns several worker processes in parallel, each with its OWN client
- * (and so its own pool) — with no cap, enough concurrent product pages
- * (F-017's `generateStaticParams` resolves a branch, then loads it, per
- * page) exhaust the LOCAL dev Postgres's `max_connections` (100, no
- * pooler in front of it) with `P2037 TooManyConnections` (ficha
- * `prisma-p2037-too-many-connections-build-static-params`). Production
- * runs behind Supavisor's own pooler, so this cap is a floor either way,
- * never a bottleneck a single request would notice.
+ * (and so its own pool), and every pre-rendered page queries. The cap
+ * bounds what one worker can hold, so the build stays well under
+ * Postgres's `max_connections` (100 by default, both on the dev database
+ * and on CI's `postgres:16` service) instead of scaling with page count.
+ * Production runs behind Supavisor's own pooler, so this cap is a floor
+ * either way, never a bottleneck a single request would notice.
  */
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -44,13 +43,24 @@ function createClient(): PrismaClient {
   });
 }
 
+/**
+ * The cache has to live in module scope, not only on globalThis: returning a
+ * freshly constructed client in production made EVERY property access below
+ * build its own `PrismaClient` — and so its own `pg.Pool`, which opens a
+ * connection on first query and never closes it. One leaked connection per
+ * query is invisible in a request that runs a handful of them, and fatal in
+ * `next build`, where three workers pre-render every product page until
+ * Postgres answers `P2037 TooManyConnections` (ficha
+ * `prisma-p2037-too-many-connections-build-static-params`).
+ */
+let cached: PrismaClient | undefined;
+
 function client(): PrismaClient {
-  if (!globalForPrisma.prisma) {
-    const created = createClient();
-    if (process.env.NODE_ENV === "production") return created;
-    globalForPrisma.prisma = created;
-  }
-  return globalForPrisma.prisma;
+  cached ??= globalForPrisma.prisma ?? createClient();
+  // Outside production the same instance also goes on globalThis, so the
+  // next hot-reloaded copy of this module reuses it instead of adding a pool.
+  if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = cached;
+  return cached;
 }
 
 /**

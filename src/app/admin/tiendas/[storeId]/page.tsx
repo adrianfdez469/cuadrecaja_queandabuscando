@@ -2,11 +2,17 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getAdminSession } from "@/lib/auth/adminSession";
 import { authorizeStore } from "@/features/admin/authorization";
-import { requireManagedStore } from "@/features/admin/server/stores";
+import {
+  listBrandBranches,
+  listGroupCandidates,
+  listManagedStores,
+  requireManagedStore,
+} from "@/features/admin/server/stores";
 import { summarizeStoreProducts } from "@/features/admin/server/products";
 import { listPromotions } from "@/features/admin/server/promotions";
 import { promotionStatus } from "@/features/admin/promotionLabel";
 import { StorePublicSwitch } from "@/features/admin/components/StorePublicSwitch";
+import { StoreBrandCard, type BrandCardBranch } from "@/features/admin/components/StoreBrandCard";
 import { STORE_STATUS_LABEL, STORE_STATUS_TONE } from "@/features/admin/storeStatus";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -33,13 +39,31 @@ export default async function StoreHubPage({ params }: PageProps<"/admin/tiendas
   if (!authorized.ok) notFound();
 
   const store = await requireManagedStore(authorized.storeId);
-  const [products, promotions] = await Promise.all([
-    summarizeStoreProducts(authorized.storeId),
-    listPromotions(authorized.storeId),
-  ]);
+  const [products, promotions, groupCandidates, brandBranchesRaw, managedStores] =
+    await Promise.all([
+      summarizeStoreProducts(authorized.storeId),
+      listPromotions(authorized.storeId),
+      listGroupCandidates(authorized.session, authorized.storeId),
+      store.branchCount > 1 ? listBrandBranches(store.storefrontId) : Promise.resolve([]),
+      // Only needed to build "Abrir en el panel" links for OTHER managed
+      // branches — DP2/HS12: `listBrandBranches` itself never returns a
+      // `storeId`, so this is the only source that can produce one.
+      store.branchCount > 1 ? listManagedStores(authorized.session) : Promise.resolve([]),
+    ]);
   const now = new Date();
   const vigentCount = promotions.filter((p) => promotionStatus(p, now) === "vigente").length;
   const scheduledCount = promotions.filter((p) => promotionStatus(p, now) === "programada").length;
+
+  const managedHrefBySlug = new Map(
+    managedStores.map((managed) => [managed.canonicalSlug, `/admin/tiendas/${managed.id}`]),
+  );
+  const brandBranches: BrandCardBranch[] = brandBranchesRaw.map((branch) => ({
+    canonicalSlug: branch.canonicalSlug,
+    name: branch.name,
+    status: branch.status as "PUBLISHED" | "SUSPENDED",
+    isCurrent: branch.canonicalSlug === store.canonicalSlug,
+    managedHref: managedHrefBySlug.get(branch.canonicalSlug) ?? null,
+  }));
 
   return (
     <Container className="py-8">
@@ -100,6 +124,16 @@ export default async function StoreHubPage({ params }: PageProps<"/admin/tiendas
             {NON_PUBLISHED_NOTE.DRAFT}
           </Alert>
         )}
+      </Card>
+
+      <Card className="mt-4 p-6">
+        <StoreBrandCard
+          brandName={store.brandName}
+          brandSlug={store.brandSlug}
+          branches={brandBranches}
+          hasCandidates={groupCandidates.length > 0}
+          primaryStoreId={store.id}
+        />
       </Card>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">

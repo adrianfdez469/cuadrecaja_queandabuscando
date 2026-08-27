@@ -1,10 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { revalidateStores } from "@/lib/cache";
+import { revalidateSlugs, revalidateStorefronts, revalidateStores } from "@/lib/cache";
 import { canonicalSlug, type PublicSlug } from "@/lib/publicSlug";
 import type { Prisma } from "@/generated/prisma/client";
 import { extensionForMime } from "@/lib/imageType";
 import type { AllowedImageMime } from "@/constants/media";
 import { uploadStoreObject } from "@/lib/supabase/storage";
+import { expandBrandTouch, regroupStoreIntoBrand } from "@/features/storefront/server/registry";
 import { objectPathFor } from "../storagePaths";
 import type { AuthorizedStoreId } from "../authorization";
 import { PRODUCT_ROW_SELECT, toAdminProductRow } from "./products";
@@ -14,6 +15,7 @@ import type {
   AdminPromotionRow,
   AdminStoreRow,
   AdminWriteResult,
+  GroupStoresRow,
   PromotionBody,
   ProductWriteBody,
   StoreStatusBody,
@@ -80,14 +82,19 @@ const STORE_CANONICAL_SELECT = {
   storefront: {
     select: {
       slug: true,
-      stores: { where: { status: { not: "DRAFT" } }, select: { id: true } },
+      // `slug` here (not just `id`) is what lets `setStoreEnabled` revalidate
+      // every sibling's own slug tag when their brand is multi-branch (§
+      // below) — a status flip changes the Badge every cached selector/
+      // sibling-list page shows for THIS store, without moving any `Slug`
+      // row of its own.
+      stores: { where: { status: { not: "DRAFT" } }, select: { id: true, slug: true } },
     },
   },
 } satisfies Prisma.StoreSelect;
 
 type StoreCanonicalRef = {
   slug: string | null;
-  storefront: { stores: { id: string }[]; slug: string };
+  storefront: { stores: { id: string; slug: string | null }[]; slug: string };
 };
 
 function canonicalOfStore(store: StoreCanonicalRef): PublicSlug {
@@ -228,6 +235,24 @@ export async function setStoreEnabled(
 
     const canonical = canonicalOfStore(updated);
     revalidateStores([canonical]);
+    // Etapa 2: a status flip on a branch of a MULTI-branch brand changes
+    // what every cached selector page (and every sibling's own
+    // `branches[]`-carrying resolution, resolve.ts) shows for THIS store —
+    // its Badge, its closure reason — without moving a single `Slug` row.
+    // `revalidateStores([canonical])` above only busts THIS store's own
+    // catalog tags; the brand's own slug and each sibling's own slug also
+    // have to lose their cached resolution, or the selector (and the
+    // siblings' /sucursales) keep the stale Badge until the 3600s ISR
+    // floor — the same "revalidar solo lo que escribí, no todo lo que
+    // cambia de significado" gap `regroupStoreIntoBrand` had (ficha
+    // `revalida-solo-lo-que-se-escribe-no-lo-que-cambia-de-significado`).
+    if (updated.storefront.stores.length > 1) {
+      // `expandBrandTouch` is the ONE place that turns a brand's slug plus
+      // its member list into every slug value this status flip might have
+      // gone stale on — never hand-rolled here (`boundaries.test.ts` in
+      // `features/storefront/server/` backs that with a grep).
+      revalidateSlugs(expandBrandTouch(updated.storefront.slug, updated.storefront.stores));
+    }
     return {
       kind: "saved",
       value: {
@@ -358,4 +383,64 @@ export async function deletePromotion(
   );
 
   return { kind: "saved", value: { id: existing.id } };
+}
+
+/**
+ * HS8, etapa 2: agrupar `joiningStoreId` bajo la marca de `primaryStoreId`.
+ * Las CINCO escrituras y su orden viven en
+ * `features/storefront/server/registry.ts` — el único archivo autorizado a
+ * tocar `Slug` (`storefront/server/boundaries.test.ts`) — así que esta
+ * función solo autoriza (ya lo hizo el guard del endpoint), revalida y
+ * relee la marca resultante para devolver las URL de verdad, no las que
+ * prometió la vista previa.
+ */
+export async function groupStoreIntoBrand(
+  primaryStoreId: AuthorizedStoreId,
+  joiningStoreId: AuthorizedStoreId,
+): Promise<AdminWriteResult<GroupStoresRow>> {
+  const result = await regroupStoreIntoBrand({ primaryStoreId, joiningStoreId });
+  if (!result.ok) {
+    if (result.error === "NOT_FOUND") return { kind: "not_found" };
+    return result.error === "DIFFERENT_BUSINESS"
+      ? { kind: "different_business" }
+      : { kind: "already_in_brand" };
+  }
+
+  revalidateStores(result.revalidate.canonicalSlugs);
+  revalidateStorefronts(result.revalidate.brandSlugs);
+  revalidateSlugs(result.revalidate.slugValues);
+
+  const brand = await prisma.storefront.findUnique({
+    where: { id: result.storefrontId },
+    select: {
+      slug: true,
+      stores: {
+        where: { status: { not: "DRAFT" } },
+        select: { id: true, slug: true },
+        orderBy: { name: "asc" },
+      },
+    },
+  });
+  // The write above just committed this exact row: it cannot be gone a
+  // moment later on the same connection.
+  if (!brand) return { kind: "failed" };
+
+  const branchCount = brand.stores.length;
+  const branches = brand.stores.map((store) => {
+    const slug = canonicalSlug({
+      storeSlug: store.slug,
+      brandSlug: brand.slug,
+      brandBranchCount: branchCount,
+    });
+    return { storeId: store.id, slug, url: `/${slug}` };
+  });
+
+  return {
+    kind: "saved",
+    value: {
+      storefrontId: result.storefrontId,
+      brandSlug: brand.slug as PublicSlug,
+      branches,
+    },
+  };
 }

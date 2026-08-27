@@ -26,6 +26,14 @@ export type BranchRef = {
   city: string | null;
   address: string | null;
   status: "PUBLISHED" | "SUSPENDED";
+  /** Etapa 2: why a SUSPENDED branch is closed — same columns
+   *  `StoreClosedNotice`/`classifyStoreClosure` already read off `Store`,
+   *  free on this query (it already selects the row), so `BranchCard` can
+   *  show "Cerrada ahora" vs "Suspendida" and the closure headline without a
+   *  second round-trip. `null` for a PUBLISHED branch. */
+  disabledReasonCode: string | null;
+  disabledMessage: string | null;
+  disabledAt: Date | null;
 };
 
 export type PublicResolution = BranchResolution | SelectorResolution;
@@ -37,10 +45,18 @@ export type BranchResolution = {
   storefrontId: string;
   brandSlug: PublicSlug;
   brandName: string;
-  /** Renderable branches of the brand. Always 1 in etapa 1. */
+  /** Renderable branches of the brand. 1 unless the brand was grouped (etapa 2). */
   branchCount: number;
   /** True when the requested value was not the canonical one (criterio 3). */
   isAlias: boolean;
+  /**
+   * Every renderable sibling, INCLUDING this one — only when `branchCount >
+   * 1` (etapa 2). The query behind this resolution already loaded the whole
+   * `storefront.stores` list to count them; carrying it here is what lets
+   * `BranchBar` and `/[slug]/sucursales` show the tira and the switch screen
+   * without a second query for data this call already paid for.
+   */
+  branches?: BranchRef[];
 };
 
 export type SelectorResolution = {
@@ -81,7 +97,17 @@ async function loadResolution(requested: string): Promise<PublicResolution | nul
       name: true,
       stores: {
         where: { status: { not: "DRAFT" } },
-        select: { id: true, slug: true, name: true, city: true, address: true, status: true },
+        select: {
+          id: true,
+          slug: true,
+          name: true,
+          city: true,
+          address: true,
+          status: true,
+          disabledReasonCode: true,
+          disabledMessage: true,
+          disabledAt: true,
+        },
         orderBy: { name: "asc" },
       },
     },
@@ -93,6 +119,22 @@ async function loadResolution(requested: string): Promise<PublicResolution | nul
   const branchCount = storefront.stores.length;
 
   if (branchCount === 0) return null;
+
+  const toBranchRef = (store: (typeof storefront.stores)[number]): BranchRef => ({
+    storeId: store.id,
+    canonicalSlug: canonicalSlug({
+      storeSlug: store.slug,
+      brandSlug,
+      brandBranchCount: branchCount,
+    }),
+    name: store.name,
+    city: store.city,
+    address: store.address,
+    status: store.status as "PUBLISHED" | "SUSPENDED",
+    disabledReasonCode: store.disabledReasonCode,
+    disabledMessage: store.disabledMessage,
+    disabledAt: store.disabledAt,
+  });
 
   if (branchCount === 1) {
     const store = storefront.stores[0];
@@ -114,6 +156,8 @@ async function loadResolution(requested: string): Promise<PublicResolution | nul
   // Etapa 2 territory: a brand with several renderable branches. The
   // request either named the brand (selector) or one branch by its own
   // slug (branch, canonical = its own slug).
+  const branches = storefront.stores.map(toBranchRef);
+
   if (slugRow.kind === "STORE") {
     const store = storefront.stores.find((candidate) => candidate.id === slugRow.storeId);
     if (!store || !store.slug) return null;
@@ -130,6 +174,7 @@ async function loadResolution(requested: string): Promise<PublicResolution | nul
       brandName: storefront.name,
       branchCount,
       isAlias: false,
+      branches,
     };
   }
 
@@ -138,18 +183,7 @@ async function loadResolution(requested: string): Promise<PublicResolution | nul
     storefrontId: storefront.id,
     brandSlug,
     brandName: storefront.name,
-    branches: storefront.stores.map((store) => ({
-      storeId: store.id,
-      canonicalSlug: canonicalSlug({
-        storeSlug: store.slug,
-        brandSlug,
-        brandBranchCount: branchCount,
-      }),
-      name: store.name,
-      city: store.city,
-      address: store.address,
-      status: store.status as "PUBLISHED" | "SUSPENDED",
-    })),
+    branches,
   };
 }
 

@@ -1,10 +1,10 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { cached, storeCatalogTag, storeTag } from "@/lib/cache";
+import { cached, storeCatalogTag, storeTag, storefrontTag } from "@/lib/cache";
 import { canonicalSlug, asPublicSlug, type PublicSlug } from "@/lib/publicSlug";
 import { presentationContact } from "@/lib/storeContact";
 import { indexPromotions, type AppliedPromotion, type PromotionRow } from "@/lib/promotions";
-import type { BranchResolution } from "@/features/storefront/server/resolve";
+import type { BranchResolution, SelectorResolution } from "@/features/storefront/server/resolve";
 
 /** Only what these reads actually need: a `BranchResolution` satisfies it,
  *  and so does a lighter object built once for `generateStaticParams`. */
@@ -163,6 +163,30 @@ export async function requireStore(branch: StoreRef): Promise<StoreSummary> {
   return store;
 }
 
+export type StorefrontBranding = { name: string; themeTokens: unknown };
+
+async function loadStorefrontBranding(storefrontId: string): Promise<StorefrontBranding | null> {
+  return prisma.storefront.findUnique({
+    where: { id: storefrontId },
+    select: { name: true, themeTokens: true },
+  });
+}
+
+/**
+ * Etapa 2: what the selector's layout needs when `/[slug]` resolves to
+ * `kind: "selector"` — the brand's own name and theme, tagged by
+ * `storefrontTag` (R19: every branding write already fires this tag, from
+ * etapa 1 on, precisely so this reader needs nothing new to invalidate).
+ */
+export function getStorefrontBranding(
+  selector: Pick<SelectorResolution, "storefrontId" | "brandSlug">,
+): Promise<StorefrontBranding | null> {
+  return cached(loadStorefrontBranding, {
+    keyParts: ["storefront-branding"],
+    tags: [storefrontTag(selector.brandSlug)],
+  })(selector.storefrontId);
+}
+
 async function loadCatalog(storeId: string): Promise<CatalogProduct[]> {
   const [products, promotionRows] = await Promise.all([
     prisma.storeProduct.findMany({
@@ -275,26 +299,32 @@ export function getStoreRates(branch: StoreRef): Promise<Record<string, string>>
 }
 
 type PublishedBranch = { storeId: string; canonical: PublicSlug; alias: PublicSlug | null };
+/** Etapa 2, DP4(a): a brand grouping 2+ branches gets its OWN pre-rendered
+ *  page (the selector) — distinct content, distinct slug, never the same
+ *  string as one of its branches' canonicals. */
+type PublishedBrandSelector = { brandSlug: PublicSlug };
 
 /**
- * Every published branch, canonical slug plus its live alias if it has one.
- * The ONE query `getPublishedStoreSlugs` (pre-rendering), `getCanonicalStoreSlugs`
- * (`sitemap.ts`, R22) and `getPublishedBranchesForParams` (the product
- * page's `generateStaticParams`) all build on, so none of the three can
- * drift on which brands/branches count — and so a build never resolves the
- * SAME branch twice over (once per slug variant), which is what exhausted
- * the dev database's connection pool the first time this ran (ficha
+ * Every published branch (canonical slug plus its live alias if it has one)
+ * AND every brand whose own slug now serves a selector (etapa 2, 2+
+ * renderable branches). The ONE query `getPublishedStoreSlugs`
+ * (pre-rendering), `getCanonicalStoreSlugs` (`sitemap.ts`, R22) and
+ * `getPublishedBranchesForParams` (the product page's `generateStaticParams`)
+ * all build on, so none of the three can drift on which brands/branches
+ * count — and so a build never resolves the SAME branch twice over (once
+ * per slug variant), which is what exhausted the dev database's connection
+ * pool the first time this ran (ficha
  * `prisma-p2037-too-many-connections-build-static-params`).
  *
- * A brand with more than one renderable branch (etapa 2) is skipped here —
- * its selector page pre-renders itself, this list is only branch pages.
- *
- * Returns an empty list rather than throwing when the database is
- * unreachable: pre-rendering is a warm-start optimisation, and a build
- * should not fail because the database happened to be down. Anything not
- * pre-rendered is rendered on first request and cached from then on.
+ * Returns empty rather than throwing when the database is unreachable:
+ * pre-rendering is a warm-start optimisation, and a build should not fail
+ * because the database happened to be down. Anything not pre-rendered is
+ * rendered on first request and cached from then on.
  */
-async function loadPublishedBranches(): Promise<PublishedBranch[]> {
+async function loadPublishedStorefronts(): Promise<{
+  branches: PublishedBranch[];
+  selectors: PublishedBrandSelector[];
+}> {
   try {
     const storefronts = await prisma.storefront.findMany({
       select: {
@@ -307,53 +337,77 @@ async function loadPublishedBranches(): Promise<PublishedBranch[]> {
     });
 
     const branches: PublishedBranch[] = [];
+    const selectors: PublishedBrandSelector[] = [];
+
     for (const storefront of storefronts) {
-      if (storefront.stores.length !== 1) continue; // etapa 2 territory
-      const [store] = storefront.stores;
-      if (store.status !== "PUBLISHED") continue;
-      branches.push({
-        storeId: store.id,
-        canonical: canonicalSlug({
-          storeSlug: store.slug,
-          brandSlug: storefront.slug,
-          brandBranchCount: 1,
-        }),
-        alias: store.slug ? asPublicSlug(store.slug) : null,
-      });
+      const branchCount = storefront.stores.length;
+      if (branchCount === 0) continue;
+      const brandSlug = storefront.slug as PublicSlug;
+
+      // A brand's selector renders 200 as soon as it has 2+ renderable
+      // branches, even if every one of them is closed (design.md § 1,
+      // "Todas cerradas") — so it pre-renders regardless of their status.
+      if (branchCount >= 2) selectors.push({ brandSlug });
+
+      for (const store of storefront.stores) {
+        if (store.status !== "PUBLISHED") continue; // pre-render only what is live
+        branches.push({
+          storeId: store.id,
+          canonical: canonicalSlug({
+            storeSlug: store.slug,
+            brandSlug,
+            brandBranchCount: branchCount,
+          }),
+          // Only a single-branch brand can have a live alias distinct from
+          // its canonical (etapa 1, E2) — a grouped branch's own slug IS
+          // already its canonical (etapa 2).
+          alias: branchCount === 1 && store.slug ? asPublicSlug(store.slug) : null,
+        });
+      }
     }
-    return branches;
+    return { branches, selectors };
   } catch (error) {
     console.warn("[catalog] could not list stores for pre-rendering:", error);
-    return [];
+    return { branches: [], selectors: [] };
   }
 }
 
-/** For `generateStaticParams`: canonical slugs AND their live aliases — both
- *  URLs have to pre-render, since both serve the same page (E21). */
+/** For `generateStaticParams`: canonical slugs, their live aliases, AND the
+ *  brand slugs that now serve a selector (DP4(b)) — both URLs have to
+ *  pre-render, since both serve real pages (E21). */
 export async function getPublishedStoreSlugs(): Promise<PublicSlug[]> {
-  const branches = await loadPublishedBranches();
-  return branches.flatMap((branch) =>
-    branch.alias ? [branch.canonical, branch.alias] : [branch.canonical],
-  );
+  const { branches, selectors } = await loadPublishedStorefronts();
+  return [
+    ...branches.flatMap((branch) =>
+      branch.alias ? [branch.canonical, branch.alias] : [branch.canonical],
+    ),
+    ...selectors.map((selector) => selector.brandSlug),
+  ];
 }
 
-/** For `sitemap.ts` (R22): ONE url per branch, the canonical one — an alias
- *  never competes with its own canonical in a search index. */
+/** For `sitemap.ts` (R22): one url per branch (the canonical one — an alias
+ *  never competes with its own canonical in a search index) PLUS one url per
+ *  grouped brand's selector (DP4(a)): distinct content, so it never competes
+ *  with its own branches' entries either. A single-branch brand's selector
+ *  URL and its one branch's canonical are the same string, so nothing here
+ *  ever duplicates a sitemap entry. */
 export async function getCanonicalStoreSlugs(): Promise<PublicSlug[]> {
-  const branches = await loadPublishedBranches();
-  return branches.map((branch) => branch.canonical);
+  const { branches, selectors } = await loadPublishedStorefronts();
+  return [...branches.map((branch) => branch.canonical), ...selectors.map((s) => s.brandSlug)];
 }
 
 /**
  * For `/[slug]/p/[productSlug]`'s `generateStaticParams`: one entry per
  * branch, with EVERY slug that page has to answer under (canonical + a
  * live alias, if any) — so the caller resolves and fetches the catalogue
- * ONCE per branch, not once per slug variant.
+ * ONCE per branch, not once per slug variant. A brand's selector slug is
+ * DELIBERATELY absent here (DP4(b)): there is no catalogue to iterate under
+ * `/[slug]/p/*` for a slug that serves a selector, not a branch.
  */
 export async function getPublishedBranchesForParams(): Promise<
   { storeId: string; canonicalSlug: PublicSlug; slugs: PublicSlug[] }[]
 > {
-  const branches = await loadPublishedBranches();
+  const { branches } = await loadPublishedStorefronts();
   return branches.map((branch) => ({
     storeId: branch.storeId,
     canonicalSlug: branch.canonical,

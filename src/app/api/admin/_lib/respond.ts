@@ -72,6 +72,10 @@ export function writeResultToResponse<T>(result: AdminWriteResult<T>): NextRespo
       );
     case "not_found":
       return NextResponse.json({ error: "NOT_FOUND" }, { status: 404, headers: NO_STORE });
+    case "different_business":
+      return NextResponse.json({ error: "DIFFERENT_BUSINESS" }, { status: 409, headers: NO_STORE });
+    case "already_in_brand":
+      return NextResponse.json({ error: "ALREADY_IN_BRAND" }, { status: 409, headers: NO_STORE });
     case "failed":
       return NextResponse.json({ error: "WRITE_FAILED" }, { status: 500, headers: NO_STORE });
   }
