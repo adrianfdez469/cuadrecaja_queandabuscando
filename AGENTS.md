@@ -94,6 +94,11 @@ justifique midiendo.
 ### Prohibiciones
 
 - **Prisma en componentes.** Pasa por `features/*/server/`.
+- **Armar a mano el array de slugs a revalidar de una marca** (`.map`/
+  `.reduce`/`for` sobre una lista de sucursales). Llama a
+  `expandBrandTouch()` (`features/storefront/server/registry.ts`); su
+  `SlugTouchSet` es el único tipo que `RegroupResult`/`HandlerOutcome`
+  aceptan, así que un array hand-rolled no compila.
 - **`"use client"` sin estado ni eventos.** Y **nunca** en algo que renderice
   catálogo: el objetivo es que la tienda se lea sin esperar el JavaScript.
 - **`any`.** Es error de ESLint.

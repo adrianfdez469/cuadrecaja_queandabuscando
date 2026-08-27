@@ -1,9 +1,9 @@
 ---
 feature: F-017
 agente: orquestador
-actualizado: 2026-08-27T05:00:00Z
+actualizado: 2026-08-27T04:01:32Z
 estado: listo
-aprobado: no
+aprobado: sí
 ---
 
 ## Etapa 1 — firmada, construida y verificada
@@ -149,3 +149,5 @@ tu decisión y dice la verdad.
      se añade al pie. -->
 
 - 2026-08-27T02:30:16Z — aprobado por el humano: «Ok» (**etapa 1**)
+
+- 2026-08-27T04:01:32Z — aprobado por el humano: «comitea etapa 1, abre PR y despues comienza con la etapa 2»
