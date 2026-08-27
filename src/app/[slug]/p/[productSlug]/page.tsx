@@ -5,11 +5,12 @@ import { AVAILABILITY_LABEL, AVAILABILITY_TONE, isOrderable } from "@/lib/availa
 import { resolvePrice, type ResolvedPrice } from "@/lib/pricing";
 import { formatMoney } from "@/lib/money";
 import {
-  getPublishedStoreSlugs,
+  getPublishedBranchesForParams,
   getStoreCatalog,
   getStoreRates,
   requireStore,
 } from "@/features/catalog/server/queries";
+import { requireResolution } from "@/features/storefront/server/resolve";
 import { Badge } from "@/components/ui/Badge";
 import { Container } from "@/components/ui/Container";
 import { AddToCartButton } from "@/features/cart/components/AddToCartButton";
@@ -18,13 +19,21 @@ import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
 /**
  * Pre-render the catalogue of every published store. Like the store page, this
  * is a warm-start optimisation: anything missed renders on first request.
+ *
+ * ONE catalogue fetch per branch, reused for every slug it answers under
+ * (canonical + a live alias, if any) — resolving and fetching separately
+ * per slug variant doubled every query for an aliased branch and, combined
+ * with the build's parallel workers, exhausted the dev database's
+ * connection pool (ficha `prisma-p2037-too-many-connections-build-static-params`).
  */
 export async function generateStaticParams() {
-  const slugs = await getPublishedStoreSlugs();
+  const branches = await getPublishedBranchesForParams();
   const params = await Promise.all(
-    slugs.map(async (slug) => {
-      const catalog = await getStoreCatalog(slug);
-      return catalog.map((product) => ({ slug, productSlug: product.slug }));
+    branches.map(async (branch) => {
+      const catalog = await getStoreCatalog(branch);
+      return branch.slugs.flatMap((slug) =>
+        catalog.map((product) => ({ slug, productSlug: product.slug })),
+      );
     }),
   );
   return params.flat();
@@ -34,7 +43,9 @@ export async function generateMetadata({
   params,
 }: PageProps<"/[slug]/p/[productSlug]">): Promise<Metadata> {
   const { slug, productSlug } = await params;
-  const store = await requireStore(slug);
+  const resolution = await requireResolution(slug);
+  if (resolution.kind === "selector") notFound(); // etapa 2, unreachable in this stage
+  const store = await requireStore(resolution);
   // HD11: never read the product for a closed store — not even to build
   // metadata. A closed store's product pages all share the store's own
   // "closed" metadata, exactly like `/[slug]` itself.
@@ -42,7 +53,7 @@ export async function generateMetadata({
     return { title: `${store.name} · No disponible ahora`, robots: { index: false } };
   }
 
-  const product = (await getStoreCatalog(slug)).find((p) => p.slug === productSlug);
+  const product = (await getStoreCatalog(resolution)).find((p) => p.slug === productSlug);
   if (!product) return { title: "Producto no encontrado" };
 
   return {
@@ -57,7 +68,9 @@ export async function generateMetadata({
 
 export default async function ProductPage({ params }: PageProps<"/[slug]/p/[productSlug]">) {
   const { slug, productSlug } = await params;
-  const store = await requireStore(slug);
+  const resolution = await requireResolution(slug);
+  if (resolution.kind === "selector") notFound(); // etapa 2, unreachable in this stage
+  const store = await requireStore(resolution);
 
   // HD11: the closed notice, WITHOUT reading the product — not even to
   // decide it exists. One fewer query, and no way to leak whether a given
@@ -78,7 +91,10 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
     );
   }
 
-  const [catalog, rates] = await Promise.all([getStoreCatalog(slug), getStoreRates(slug)]);
+  const [catalog, rates] = await Promise.all([
+    getStoreCatalog(resolution),
+    getStoreRates(resolution),
+  ]);
 
   const product = catalog.find((candidate) => candidate.slug === productSlug);
   if (!product) notFound();
@@ -154,7 +170,7 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
         <div className="mt-8">
           <AddToCartButton
             storeId={store.id}
-            storeSlug={slug}
+            storeSlug={store.canonicalSlug}
             storeProductId={product.id}
             slug={product.slug}
             name={product.name}

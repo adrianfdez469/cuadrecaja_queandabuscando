@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { uniqueSlug } from "@/lib/slug";
+import { canonicalSlug } from "@/lib/publicSlug";
+import { createStorefrontWithStore } from "@/features/storefront/server/registry";
 import type { StorePayload } from "../../schemas";
 import { SKIPPED, STALE, type HandlerOutcome } from "./types";
 
@@ -25,6 +26,12 @@ import { SKIPPED, STALE, type HandlerOutcome } from "./types";
  *      reopen a store closed from the panel for vacation.
  *   3. A real opt-in flip always wins, in either direction: that is HD13
  *      ("gana el último... de verdad") applied on purpose, not a bug.
+ *
+ * F-017 (E9, HS2): the FIRST time a `Store` publishes, this handler creates
+ * its brand (`Storefront`) in the SAME event, through the registry — the
+ * only writer of `Slug`/`Storefront`. `Business.slug` no longer exists to
+ * write (I1): a business's name never resolves a URL, so it never entered
+ * the registry.
  */
 export async function handleStore(
   payload: StorePayload,
@@ -35,9 +42,6 @@ export async function handleStore(
     create: {
       externalId: payload.businessId,
       name: payload.businessName,
-      slug: await uniqueSlug(payload.businessName, businessSlugTaken, {
-        fallback: "negocio",
-      }),
       baseCurrencyCode: payload.baseCurrency,
     },
     update: { name: payload.businessName, baseCurrencyCode: payload.baseCurrency },
@@ -46,7 +50,18 @@ export async function handleStore(
 
   const existing = await prisma.store.findUnique({
     where: { externalId: payload.storeId },
-    select: { id: true, slug: true, sourceUpdatedAt: true, sourceOptIn: true },
+    select: {
+      id: true,
+      slug: true,
+      sourceUpdatedAt: true,
+      sourceOptIn: true,
+      storefront: {
+        select: {
+          slug: true,
+          stores: { where: { status: { not: "DRAFT" } }, select: { id: true } },
+        },
+      },
+    },
   });
 
   const payloadUpdatedAt = new Date(payload.updatedAt);
@@ -84,7 +99,16 @@ export async function handleStore(
           : {}),
       },
     });
-    return { status: "processed", touchedStoreSlug: existing.slug };
+    const canonical = canonicalSlug({
+      storeSlug: existing.slug,
+      brandSlug: existing.storefront.slug,
+      brandBranchCount: existing.storefront.stores.length,
+    });
+    return {
+      status: "processed",
+      touchedStoreSlug: canonical,
+      touchedBrandSlug: existing.storefront.slug,
+    };
   }
 
   const common = {
@@ -104,23 +128,37 @@ export async function handleStore(
   };
 
   if (!existing) {
-    const slug = await uniqueSlug(payload.slug || payload.name, storeSlugTaken, {
-      fallback: "tienda",
-    });
-    const created = await prisma.store.create({
-      data: {
+    // E9/HS2: the brand and its first branch are created in ONE nested
+    // write. `payload.slug` travels as a DERIVATION SEED, never as a
+    // proposal — a sync event must never fail over an unfortunate name
+    // (E14, HS7).
+    const created = await createStorefrontWithStore({
+      businessId: business.id,
+      brandName: payload.name,
+      proposedSlug: null,
+      derivedFrom: payload.slug || payload.name,
+      store: {
         businessId: business.id,
         externalId: payload.storeId,
-        slug,
         status: "PUBLISHED",
         publishedAt: new Date(),
         sourceOptIn: true,
         sourceUpdatedAt: payloadUpdatedAt,
         ...common,
       },
-      select: { slug: true },
     });
-    return { status: "processed", touchedStoreSlug: created.slug };
+    // The registry only rejects an EXPLICIT proposal; `proposedSlug: null`
+    // always derives and never returns `ok: false` (E14).
+    if (!created.ok) {
+      throw new Error(
+        `handleStore: unexpected slug rejection deriving from a name: ${created.error}`,
+      );
+    }
+    return {
+      status: "processed",
+      touchedStoreSlug: created.canonicalSlug,
+      touchedBrandSlug: created.canonicalSlug,
+    };
   }
 
   const optInChanged = existing.sourceOptIn !== true;
@@ -145,13 +183,14 @@ export async function handleStore(
     },
     select: { slug: true },
   });
-  return { status: "processed", touchedStoreSlug: updated.slug };
-}
-
-async function businessSlugTaken(candidate: string): Promise<boolean> {
-  return (await prisma.business.count({ where: { slug: candidate } })) > 0;
-}
-
-async function storeSlugTaken(candidate: string): Promise<boolean> {
-  return (await prisma.store.count({ where: { slug: candidate } })) > 0;
+  const canonical = canonicalSlug({
+    storeSlug: updated.slug,
+    brandSlug: existing.storefront.slug,
+    brandBranchCount: existing.storefront.stores.length,
+  });
+  return {
+    status: "processed",
+    touchedStoreSlug: canonical,
+    touchedBrandSlug: existing.storefront.slug,
+  };
 }

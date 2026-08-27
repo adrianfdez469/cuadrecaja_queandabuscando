@@ -8,6 +8,8 @@ vi.mock("@/lib/prisma", () => ({
 
 const { getOrderByCode, orderWhatsappUrl } = await import("./read");
 
+const STORE_ID = "store-1";
+
 function dbOrder(overrides: Record<string, unknown> = {}) {
   return {
     code: "A7K3M9PQR2",
@@ -23,11 +25,12 @@ function dbOrder(overrides: Record<string, unknown> = {}) {
     notes: null,
     createdAt: new Date("2026-08-26T02:00:00.000Z"),
     store: {
-      slug: "tienda-demo",
+      slug: null,
       name: "La Rampa",
       checkoutMode: "WHATSAPP",
       whatsapp: "+5350000001",
       phone: null,
+      storefront: { slug: "tienda-demo", stores: [{ id: STORE_ID }] },
     },
     items: [
       {
@@ -48,53 +51,60 @@ beforeEach(() => {
 
 describe("getOrderByCode()", () => {
   it("returns null for a malformed code without querying the database", async () => {
-    expect(await getOrderByCode("tienda-demo", "not-a-code")).toBeNull();
+    expect(await getOrderByCode(STORE_ID, "not-a-code")).toBeNull();
     expect(orderFindFirst).not.toHaveBeenCalled();
   });
 
-  it("normalizes a lowercase, hyphenated code before querying", async () => {
+  it("normalizes a lowercase, hyphenated code before querying, filtered by storeId (never by slug)", async () => {
     orderFindFirst.mockResolvedValue(dbOrder());
-    await getOrderByCode("tienda-demo", "a7k3m-9pqr2");
+    await getOrderByCode(STORE_ID, "a7k3m-9pqr2");
     expect(orderFindFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { code: "A7K3M9PQR2", store: { slug: "tienda-demo" } } }),
+      expect.objectContaining({ where: { code: "A7K3M9PQR2", storeId: STORE_ID } }),
     );
   });
 
   it("returns null when nothing matches (E17: cross-store 404 by construction)", async () => {
     orderFindFirst.mockResolvedValue(null);
-    expect(await getOrderByCode("tienda-demo", "A7K3M9PQR2")).toBeNull();
+    expect(await getOrderByCode(STORE_ID, "A7K3M9PQR2")).toBeNull();
   });
 
   it("maps Decimal-like fields to plain strings, never leaking a Decimal", async () => {
     orderFindFirst.mockResolvedValue(dbOrder());
-    const snapshot = await getOrderByCode("tienda-demo", "A7K3M9PQR2");
+    const snapshot = await getOrderByCode(STORE_ID, "A7K3M9PQR2");
     expect(snapshot?.subtotal).toBe("900.00");
     expect(typeof snapshot?.items[0].quantity).toBe("string");
   });
 
+  it("the order URL uses the CANONICAL slug (the brand's, for a single-branch brand)", async () => {
+    orderFindFirst.mockResolvedValue(dbOrder());
+    const snapshot = await getOrderByCode(STORE_ID, "A7K3M9PQR2");
+    expect(snapshot?.storeSlug).toBe("tienda-demo");
+  });
+
   it("derives fulfillment from whether a delivery address is present", async () => {
     orderFindFirst.mockResolvedValue(dbOrder({ deliveryAddress: "Calle 23, Vedado" }));
-    const snapshot = await getOrderByCode("tienda-demo", "A7K3M9PQR2");
+    const snapshot = await getOrderByCode(STORE_ID, "A7K3M9PQR2");
     expect(snapshot?.fulfillment).toBe("DELIVERY");
 
     orderFindFirst.mockResolvedValue(dbOrder({ deliveryAddress: null }));
-    const pickup = await getOrderByCode("tienda-demo", "A7K3M9PQR2");
+    const pickup = await getOrderByCode(STORE_ID, "A7K3M9PQR2");
     expect(pickup?.fulfillment).toBe("PICKUP");
   });
 
-  it("falls back to Store.phone when there is no whatsapp number", async () => {
+  it("falls back to Store.phone when there is no whatsapp number (R15: always the branch, never the brand)", async () => {
     orderFindFirst.mockResolvedValue(
       dbOrder({
         store: {
-          slug: "tienda-demo",
+          slug: null,
           name: "x",
           checkoutMode: "WHATSAPP",
           whatsapp: null,
           phone: "+539",
+          storefront: { slug: "tienda-demo", stores: [{ id: STORE_ID }] },
         },
       }),
     );
-    const snapshot = await getOrderByCode("tienda-demo", "A7K3M9PQR2");
+    const snapshot = await getOrderByCode(STORE_ID, "A7K3M9PQR2");
     expect(snapshot?.whatsappNumber).toBe("+539");
   });
 });
@@ -104,7 +114,7 @@ describe("orderWhatsappUrl()", () => {
     orderFindFirst.mockResolvedValue(
       dbOrder({ store: { ...dbOrder().store, checkoutMode: "ONSITE" } }),
     );
-    const snapshot = await getOrderByCode("tienda-demo", "A7K3M9PQR2");
+    const snapshot = await getOrderByCode(STORE_ID, "A7K3M9PQR2");
     expect(orderWhatsappUrl(snapshot!)).toBeNull();
   });
 
@@ -112,21 +122,22 @@ describe("orderWhatsappUrl()", () => {
     orderFindFirst.mockResolvedValue(
       dbOrder({
         store: {
-          slug: "tienda-demo",
+          slug: null,
           name: "x",
           checkoutMode: "WHATSAPP",
           whatsapp: null,
           phone: null,
+          storefront: { slug: "tienda-demo", stores: [{ id: STORE_ID }] },
         },
       }),
     );
-    const snapshot = await getOrderByCode("tienda-demo", "A7K3M9PQR2");
+    const snapshot = await getOrderByCode(STORE_ID, "A7K3M9PQR2");
     expect(orderWhatsappUrl(snapshot!)).toBeNull();
   });
 
   it("builds a wa.me link with the order's code and total", async () => {
     orderFindFirst.mockResolvedValue(dbOrder());
-    const snapshot = await getOrderByCode("tienda-demo", "A7K3M9PQR2");
+    const snapshot = await getOrderByCode(STORE_ID, "A7K3M9PQR2");
     const url = orderWhatsappUrl(snapshot!)!;
     expect(url).toMatch(/^https:\/\/wa\.me\/5350000001\?text=/);
     expect(decodeURIComponent(url)).toContain("Código: A7K3M-9PQR2");

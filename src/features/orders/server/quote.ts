@@ -9,6 +9,9 @@ import {
 } from "@/lib/promotions";
 import type { CheckoutMode } from "@/generated/prisma/enums";
 import type { QuoteLineReason, QuoteResponse } from "../types";
+import { resolvePublicSlug } from "@/features/storefront/server/resolve";
+import { routingWhatsappNumber } from "@/lib/storeContact";
+import type { PublicSlug } from "@/lib/publicSlug";
 
 /**
  * Cotización.
@@ -18,19 +21,25 @@ import type { QuoteLineReason, QuoteResponse } from "../types";
  * through `quoteCart`, so what the cart shows and what the checkout charges
  * cannot diverge. Nothing here is cached: every read is fresh, on purpose —
  * a stale price here is a wrong total there.
+ *
+ * F-017: the incoming `storeSlug` (from the client, ANY live URL of the
+ * branch — criterio 3) is resolved through the single resolver before ever
+ * touching `Store` — never a `findFirst({ where: { slug } })` of its own.
  */
 
 export type OrderStore = {
   id: string;
   businessId: string;
-  slug: string;
+  /** Always the CANONICAL slug (R17), whatever URL the client sent. */
+  slug: PublicSlug;
   name: string;
   /** `Business.baseCurrencyCode`, read at the same moment as everything else. */
   currencyCode: string;
   checkoutMode: CheckoutMode;
   deliveryEnabled: boolean;
   deliveryFee: string | null;
-  /** `Store.whatsapp ?? Store.phone`. `null` disables the wa.me link (E18). */
+  /** R15: always the branch's own number, never the brand's. `null`
+   *  disables the wa.me link (E18). */
   whatsappNumber: string | null;
   /** HD10-HD15: the checkout has to reject explicitly when this is not
    *  `PUBLISHED` — the query below no longer filters by it. */
@@ -80,14 +89,25 @@ export type CartQuote = {
   capturedAt: string;
 };
 
-export async function loadStoreForOrder(slug: string): Promise<OrderStore | null> {
+/**
+ * `requestedSlug` is whatever the client sent as `storeSlug` — any live URL
+ * of the branch (criterio 3: the brand's slug, or a live `Store.slug`
+ * alias). Resolved through the single resolver before anything else runs.
+ */
+export async function loadStoreForOrder(requestedSlug: string): Promise<OrderStore | null> {
+  const resolution = await resolvePublicSlug(requestedSlug);
+  // `null` = not in the registry. `kind === "selector"` = the brand has
+  // several branches (etapa 2) and no single one to charge — a pedido is
+  // always fulfilled by ONE branch (R15/ADR 0012), so this is 404, same as
+  // "not found", not a new error kind.
+  if (!resolution || resolution.kind === "selector") return null;
+
   // HD11: no `status` filter — the checkout has to answer "closed", not
   // "does not exist", for a store that is merely SUSPENDED.
-  const store = await prisma.store.findFirst({
-    where: { slug },
+  const store = await prisma.store.findUnique({
+    where: { id: resolution.storeId },
     select: {
       id: true,
-      slug: true,
       name: true,
       checkoutMode: true,
       deliveryEnabled: true,
@@ -106,13 +126,13 @@ export async function loadStoreForOrder(slug: string): Promise<OrderStore | null
   return {
     id: store.id,
     businessId: store.business.id,
-    slug: store.slug,
+    slug: resolution.canonicalSlug,
     name: store.name,
     currencyCode: store.business.baseCurrencyCode,
     checkoutMode: store.checkoutMode,
     deliveryEnabled: store.deliveryEnabled,
     deliveryFee: store.deliveryFee?.toString() ?? null,
-    whatsappNumber: store.whatsapp ?? store.phone ?? null,
+    whatsappNumber: routingWhatsappNumber(store),
     status: store.status,
     disabledReasonCode: store.disabledReasonCode,
     disabledMessage: store.disabledMessage,

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { buildSearchDocument, resolveCanonicalIdentity } from "@/lib/canonical";
 import { uniqueSlug } from "@/lib/slug";
+import { canonicalSlug } from "@/lib/publicSlug";
 import type { ProductPayload } from "../../schemas";
 import { SKIPPED, STALE, type HandlerOutcome } from "./types";
 
@@ -27,12 +28,28 @@ export async function handleProduct(
 ): Promise<HandlerOutcome> {
   const store = await prisma.store.findUnique({
     where: { externalId: payload.storeId },
-    select: { id: true, slug: true, businessId: true },
+    select: {
+      id: true,
+      slug: true,
+      businessId: true,
+      storefront: {
+        select: {
+          slug: true,
+          stores: { where: { status: { not: "DRAFT" } }, select: { id: true } },
+        },
+      },
+    },
   });
 
   // Not an error: this is exactly what makes per-location opt-in work without
   // the two systems having to coordinate.
   if (!store) return SKIPPED;
+
+  const canonical = canonicalSlug({
+    storeSlug: store.slug,
+    brandSlug: store.storefront.slug,
+    brandBranchCount: store.storefront.stores.length,
+  });
 
   const existing = await prisma.storeProduct.findUnique({
     where: { storeId_externalId: { storeId: store.id, externalId: payload.storeProductId } },
@@ -55,7 +72,8 @@ export async function handleProduct(
     });
     return {
       status: "processed",
-      touchedStoreSlug: store.slug,
+      touchedStoreSlug: canonical,
+      touchedBrandSlug: store.storefront.slug,
       touchedProductId: existing.id,
     };
   }
@@ -107,7 +125,8 @@ export async function handleProduct(
 
   return {
     status: "processed",
-    touchedStoreSlug: store.slug,
+    touchedStoreSlug: canonical,
+    touchedBrandSlug: store.storefront.slug,
     touchedProductId: product.id,
   };
 }

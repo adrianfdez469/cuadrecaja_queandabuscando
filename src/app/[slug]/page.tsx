@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import {
   getPublishedStoreSlugs,
   getStoreCatalog,
   getStoreRates,
   requireStore,
 } from "@/features/catalog/server/queries";
+import { requireResolution } from "@/features/storefront/server/resolve";
+import { publicEnv } from "@/lib/env";
 import { Container } from "@/components/ui/Container";
 import { ProductCard } from "@/components/store/ProductCard";
 import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
@@ -21,17 +24,27 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({ params }: PageProps<"/[slug]">): Promise<Metadata> {
   const { slug } = await params;
-  const store = await requireStore(slug);
+  const resolution = await requireResolution(slug);
+  if (resolution.kind === "selector") notFound(); // etapa 2, unreachable in this stage
+  const store = await requireStore(resolution);
+  // R22: a live branch alias (criterio 3) declares its canonical, so it
+  // never competes with the brand's own URL in a search index — and never
+  // redirects (HS4): both URLs still respond 200 with the same page.
+  const canonical = resolution.isAlias
+    ? new URL(`/${store.canonicalSlug}`, publicEnv.siteUrl).toString()
+    : undefined;
   if (store.status !== "PUBLISHED") {
     return {
       title: `${store.name} · No disponible ahora`,
       description: store.disabledMessage ?? undefined,
       robots: { index: false },
+      alternates: canonical ? { canonical } : undefined,
     };
   }
   return {
     title: store.name,
     description: store.description ?? `Catálogo y pedidos de ${store.name}.`,
+    alternates: canonical ? { canonical } : undefined,
     openGraph: {
       title: store.name,
       description: store.description ?? undefined,
@@ -42,7 +55,9 @@ export async function generateMetadata({ params }: PageProps<"/[slug]">): Promis
 
 export default async function StorePage({ params }: PageProps<"/[slug]">) {
   const { slug } = await params;
-  const store = await requireStore(slug);
+  const resolution = await requireResolution(slug);
+  if (resolution.kind === "selector") notFound(); // etapa 2, unreachable in this stage
+  const store = await requireStore(resolution);
 
   // HD11: no catalog query at all for a closed store — one fewer query, and
   // no chance of ever leaking catalog data through this branch.
@@ -62,7 +77,10 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
     );
   }
 
-  const [products, rates] = await Promise.all([getStoreCatalog(slug), getStoreRates(slug)]);
+  const [products, rates] = await Promise.all([
+    getStoreCatalog(resolution),
+    getStoreRates(resolution),
+  ]);
 
   return (
     <Container className="py-8">
@@ -77,7 +95,7 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
             <li key={product.id}>
               <ProductCard
                 product={product}
-                storeSlug={slug}
+                storeSlug={store.canonicalSlug}
                 displayCurrency={store.baseCurrencyCode}
                 rates={rates}
               />

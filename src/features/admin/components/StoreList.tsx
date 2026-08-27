@@ -63,7 +63,7 @@ export function StoreList({
                 </Link>
                 {store.status !== "DRAFT" && (
                   <a
-                    href={`/${store.slug}`}
+                    href={`/${store.canonicalSlug}`}
                     target="_blank"
                     rel="noreferrer"
                     aria-label="Ver la tienda en una pestaña nueva"

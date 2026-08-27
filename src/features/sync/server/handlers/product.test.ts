@@ -55,8 +55,9 @@ function payload(overrides: Partial<Record<string, unknown>> = {}) {
 beforeEach(() => {
   storeFindUnique.mockReset().mockResolvedValue({
     id: "store-1",
-    slug: "tienda-demo",
+    slug: null,
     businessId: "business-1",
+    storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] },
   });
   storeProductFindUnique.mockReset().mockResolvedValue({
     id: "product-1",

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { isReservedSlug, isValidSlug, slugify, uniqueSlug } from "./slug";
+import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { RESERVED_SLUGS, isReservedSlug, isValidSlug, slugify, uniqueSlug } from "./slug";
 
 describe("slugify()", () => {
   it("strips Spanish accents", () => {
@@ -45,6 +47,64 @@ describe("isValidSlug()", () => {
     expect(isReservedSlug("admin")).toBe(true);
     expect(isValidSlug("admin")).toBe(false);
     expect(isValidSlug("carrito")).toBe(false);
+  });
+});
+
+/** Criterio 5 / criterio propuesto 14 (spec.md): `admin`, `api` and `buscar`
+ *  are rejected, and `sesion-cerrada` — I3, the reservation F-011 skipped
+ *  when it built the page — is reserved too. */
+describe("RESERVED_SLUGS (criterio 5, I3)", () => {
+  it("rejects admin, api and buscar as proposable slugs", () => {
+    for (const word of ["admin", "api", "buscar"]) {
+      expect(isReservedSlug(word)).toBe(true);
+      expect(isValidSlug(word)).toBe(false);
+    }
+  });
+
+  it("reserves sesion-cerrada, the top-level route F-011 built without reserving it", () => {
+    expect(isReservedSlug("sesion-cerrada")).toBe(true);
+  });
+
+  it("reserves sucursales, the segment etapa 2 introduces", () => {
+    expect(isReservedSlug("sucursales")).toBe(true);
+  });
+
+  it("never drops a word that was already reserved (R11)", () => {
+    const original = [
+      "admin",
+      "api",
+      "app",
+      "auth",
+      "buscar",
+      "carrito",
+      "checkout",
+      "cuenta",
+      "login",
+      "logout",
+      "pedido",
+      "public",
+      "static",
+      "_next",
+    ];
+    for (const word of original) expect(RESERVED_SLUGS).toContain(word);
+  });
+
+  /**
+   * The real backstop: every literal top-level directory under `src/app/`
+   * that could shadow a slug is in the list. A route group like
+   * `(marketing)` is not a URL segment and is excluded; `[slug]` is the
+   * dynamic catch-all itself. A new top-level route that nobody reserves
+   * would otherwise be a silent 404 in production the day a brand takes it.
+   */
+  it("contains every real top-level literal segment of src/app/", () => {
+    const appDir = join(process.cwd(), "src/app");
+    const literalSegments = readdirSync(appDir).filter((entry) => {
+      if (entry.startsWith("(") || entry.startsWith("[") || entry.includes(".")) return false;
+      return statSync(join(appDir, entry)).isDirectory();
+    });
+    for (const segment of literalSegments) {
+      expect(RESERVED_SLUGS).toContain(segment);
+    }
   });
 });
 

@@ -1,5 +1,6 @@
 import type { Availability, StoreStatus } from "@/generated/prisma/enums";
 import type { StorageFailureReason as LibStorageFailureReason } from "@/lib/supabase/storage";
+import type { PublicSlug } from "@/lib/publicSlug";
 
 /**
  * Wire types for the admin panel.
@@ -12,7 +13,9 @@ import type { StorageFailureReason as LibStorageFailureReason } from "@/lib/supa
 
 export type AdminStoreListItem = {
   id: string;
-  slug: string;
+  /** F-017: the CANONICAL public slug — never `Store.slug` directly, which
+   *  is nullable and, in this stage, always empty for a brand-new store. */
+  canonicalSlug: PublicSlug;
   name: string;
   status: StoreStatus;
   city: string | null;
@@ -25,7 +28,7 @@ export type AdminStoreListItem = {
 /** What `setStoreEnabled` returns and the switch's endpoint sends back. */
 export type AdminStoreRow = {
   id: string;
-  slug: string;
+  canonicalSlug: PublicSlug;
   status: StoreStatus;
   disabledReasonCode: string | null;
   disabledMessage: string | null;

@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import { requireStore } from "@/features/catalog/server/queries";
+import { requireResolution } from "@/features/storefront/server/resolve";
 import { Container } from "@/components/ui/Container";
 import { CheckoutForm } from "@/features/cart/components/CheckoutForm";
 import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
@@ -16,7 +18,9 @@ export const metadata: Metadata = { robots: { index: false } };
 
 export default async function CheckoutPage({ params }: PageProps<"/[slug]/checkout">) {
   const { slug } = await params;
-  const store = await requireStore(slug);
+  const resolution = await requireResolution(slug);
+  if (resolution.kind === "selector") notFound(); // etapa 2, unreachable in this stage
+  const store = await requireStore(resolution);
 
   if (store.status !== "PUBLISHED") {
     return (
@@ -37,7 +41,7 @@ export default async function CheckoutPage({ params }: PageProps<"/[slug]/checko
 
   return (
     <Container className="py-8">
-      <CheckoutForm storeId={store.id} storeSlug={store.slug} />
+      <CheckoutForm storeId={store.id} storeSlug={store.canonicalSlug} />
     </Container>
   );
 }
