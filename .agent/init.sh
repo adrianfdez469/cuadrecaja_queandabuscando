@@ -73,7 +73,11 @@ c.connect()
 case "$DB_CHECK" in
   OK) ok "Postgres alcanzable" ;;
   NOURL) bad "DATABASE_URL no está definida" ;;
-  *) warn "Postgres no alcanzable: ${DB_CHECK#ERR }" ;;
+  # F-015 (PP1, plan.md): el proyecto `db` de vitest falla ruidosamente si
+  # Postgres no responde — nunca un salto silencioso. Un aviso aquí haría que
+  # ENTORNO LISTO saliera verde justo antes de que `npm test` se ponga rojo,
+  # así que esto pasa de warn a bad.
+  *) bad "Postgres no alcanzable: ${DB_CHECK#ERR } — ejecuta: docker compose up -d postgres && npm run db:deploy" ;;
 esac
 
 echo "== Storage =="

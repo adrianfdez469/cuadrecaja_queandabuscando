@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "project": "queandabuscando",
-  "updated_at": "2026-08-26",
+  "updated_at": "2026-08-27",
   "rules": [
     "Solo se cambia 'passes' a true cuando TODOS los acceptance_criteria fueron verificados ejecutando algo, no leyendo código.",
     "Nunca se borra un feature: se marca 'status': 'deprecated' y se explica en 'notes'.",
@@ -263,8 +263,8 @@
         "Los canónicos con isExclusive = true quedan FUERA de los resultados.",
         "Un alias nuevo se refleja en los resultados sin reprocesar el catálogo."
       ],
-      "passes": false,
-      "notes": "Sin empezar, y a propósito: el acuerdo fue anticipar el marketplace solo en el modelo de datos. Las tablas, el searchDocument y los índices GIN ya existen; falta poblar searchVector y construir la consulta. La busqueda DENTRO de una tienda no es este feature: es F-021. F-015 sigue siendo el buscador del marketplace sobre CanonicalProduct, con los exclusivos fuera de los resultados."
+      "passes": true,
+      "notes": "Hecho y verificado ejecutando: los cuatro criterios tienen su comando y su salida en .agent/specs/F-015/tests.md, y 'bash .agent/verify.sh F-015 --full' sale 0 en las nueve etapas. Alcance: SOLO la capa de consulta — sin ruta HTTP y sin UI, decidido por el humano al abrir. La pantalla que use searchCanonicalProducts() es otro feature. Se devuelven todos los canonicos no exclusivos; exigir oferta viva es un FILTRO OPCIONAL que deja fuera solo OUT_OF_STOCK (LOW_STOCK sigue siendo comprable) y exige oferta visible, no borrada, en tienda publicada. Orden por ts_rank con 'tiene oferta viva' desempatando. storeCount cuenta ofertas VIVAS, no totales. Termino vacio devuelve vacio sin consultar. F-015 disparaba la reapertura de ADR 0011 (PostGIS) y NO se reabrio: ningun criterio habla de distancia; la nota esta escrita en la propia ADR y el disparador queda reducido a 'cualquier consulta de tipo tiendas a menos de N km'. DOS ESTRENOS DEL REPO, en docs/adr/0019: el primer SQL crudo (solo Prisma.sql, nunca Unsafe) y las primeras pruebas contra Postgres real, en un tercer proyecto de vitest que FALLA en vez de saltarse — por eso ahora cualquier sesion de este repo necesita 'docker compose up -d postgres', y .agent/init.sh pasa de avisar a fallar. searchDocument se quito de los cuatro create tipados del sync y de las dos escrituras del seed: queda UN solo sitio en el repo que escribe esa columna, y escribe documento y vector en el mismo UPDATE, asi que la trampa de ADR 0004 pasa a ser propiedad de construccion. prisma/schema.prisma no se toco y no se ejecuto migrate dev, asi que el indice GIN no hubo que esquivarlo. La busqueda DENTRO de una tienda sigue siendo F-021, no esto."
     },
     {
       "id": "F-016",
