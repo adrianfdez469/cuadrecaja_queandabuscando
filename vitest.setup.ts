@@ -2,22 +2,23 @@ import "@testing-library/jest-dom/vitest";
 import { configure } from "@testing-library/dom";
 
 /**
- * Testing Library waits 1000 ms by default in `findBy*` and `waitFor`, and that
- * default is what makes this suite flaky rather than slow.
+ * Testing Library waits 1000 ms by default in `findBy*` and `waitFor`. This
+ * raises that ceiling to 8 s.
  *
- * Measured in F-007: `CheckoutForm.test.tsx` finishes in 86 ms on its own, but
- * with a cold Vitest transform cache and the whole suite running in parallel it
- * drifts to ~1000-1100 ms and loses by a hair — twice in seven runs of one
- * cycle, on either of its two tests indifferently. CI is exactly those
- * conditions: a shared runner, always cold.
+ * Read the history before trusting the number. It was introduced in F-007 for
+ * a `CheckoutForm.test.tsx` flake diagnosed as the suite drifting past the
+ * 1000 ms default under load — and that diagnosis was WRONG. The real cause
+ * was a race the test lost, not a budget it exceeded: it clicked a submit
+ * button still disabled while the quote loaded, so nothing was ever going to
+ * render and no ceiling could have helped. Raising this to 8 s only made the
+ * failure take 8 s to report; the flake survived every increase until the test
+ * itself was fixed (see `enviarActivado()` there, and the ficha
+ * `testing-library-timeout-1s-bajo-carga`).
  *
- * The timeout is a **ceiling, not a wait**. An element that shows up in 40 ms
- * still resolves at 40 ms, so raising it costs nothing on a green run — it only
- * changes how long a slow one is allowed to take before giving up. A real
- * missing element now takes 5 s to report instead of 1 s, which is the whole
- * price.
- *
- * Full diagnosis, and how to tell this apart from an element that genuinely
- * never renders: .agent/playbook/testing-library-timeout-1s-bajo-carga.md
+ * The ceiling stays because a ceiling is not a wait: an element that appears
+ * in 40 ms still resolves at 40 ms, so it costs nothing on a green run. But it
+ * is no longer load insurance for anything known, and if it ever gets in the
+ * way of reading a real failure, lowering it back towards the default is the
+ * right move — not raising it again.
  */
 configure({ asyncUtilTimeout: 8000 });

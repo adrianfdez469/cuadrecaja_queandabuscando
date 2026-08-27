@@ -65,9 +65,18 @@ beforeEach(() => {
   });
   // Solo se stubea la cotización: lo que se prueba es el foco, y para llegar al
   // botón de enviar el formulario necesita un quote resuelto.
+  //
+  // La cotización tarda a propósito. Resolverla al instante hacía que estas dos
+  // pruebas ganaran por azar la carrera descrita en `enviarActivado()`: verdes
+  // en una máquina descargada, rojas ~1 de cada 3 suites completas. Con el
+  // retardo fijo la transición loading→ready se ejercita SIEMPRE, así que la
+  // prueba pasa por lo que afirma y no por lo rápido que iba el runner.
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => new Response(JSON.stringify(quote()), { status: 200 })),
+    vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return new Response(JSON.stringify(quote()), { status: 200 });
+    }),
   );
 });
 
@@ -75,12 +84,32 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/**
+ * El botón de enviar se renderiza desde el primer commit, DESHABILITADO
+ * mientras `quoteState === "loading"`. `findByRole("button")` lo encuentra
+ * igual —deshabilitado no lo saca del árbol de accesibilidad—, y
+ * `fireEvent.click` sobre un botón deshabilitado no dispara nada: sin
+ * `submit()` no hay `fieldErrors`, sin `fieldErrors` no hay `role="alert"`, y
+ * el `findByRole` siguiente agota su techo esperando algo que ya no va a
+ * ocurrir. De ahí que el fallo dijera «Unable to find role="alert"» y que
+ * subir `asyncUtilTimeout` no lo arreglara nunca (ficha
+ * `testing-library-timeout-1s-bajo-carga`).
+ *
+ * Esperar a que esté habilitado es esperar a `quoteState === "ready"`, que es
+ * la precondición real de todo lo que estas pruebas afirman.
+ */
+async function enviarActivado() {
+  const enviar = await screen.findByRole("button", { name: /confirmar/i });
+  await waitFor(() => expect(enviar).toBeEnabled());
+  return enviar;
+}
+
 describe("CheckoutForm — foco en el resumen de errores", () => {
   it("mueve el foco al resumen en el PRIMER envío inválido", async () => {
     render(<CheckoutForm storeId={STORE_ID} storeSlug="tienda-demo" />);
 
     // Enviar con todos los campos vacíos: nombre y teléfono son obligatorios.
-    const enviar = await screen.findByRole("button", { name: /confirmar/i });
+    const enviar = await enviarActivado();
     fireEvent.click(enviar);
 
     const resumen = await screen.findByRole("alert");
@@ -92,7 +121,7 @@ describe("CheckoutForm — foco en el resumen de errores", () => {
   it("sigue moviéndolo en el segundo envío inválido", async () => {
     render(<CheckoutForm storeId={STORE_ID} storeSlug="tienda-demo" />);
 
-    const enviar = await screen.findByRole("button", { name: /confirmar/i });
+    const enviar = await enviarActivado();
     fireEvent.click(enviar);
     await waitFor(() => expect(screen.getByRole("alert")).toHaveFocus());
 
