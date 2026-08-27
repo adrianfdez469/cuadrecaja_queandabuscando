@@ -3,7 +3,7 @@ slug: testing-library-timeout-1s-bajo-carga
 sintoma: "un test de componente falla con «Unable to find role=...» a ~1000-1100 ms, o con «Test timed out in 5000ms» cuando la suite crece, y vuelve a pasar si lo corres solo"
 firma: Unable to find role|Test timed out in [0-9]+ms
 etapa: test
-visto_en: F-007, F-011
+visto_en: F-007, F-011, F-017
 creado: 2026-08-26T12:20:00Z
 promovido_a_agents: no
 arreglo: no es tu cambio — sube `asyncUtilTimeout` (vitest.setup.ts) para el hallazgo de rol, y si el fallo es «Test timed out» sube también `testTimeout` del proyecto `ui` en vitest.config.mts (el techo del test completo, no el de findBy*/waitFor); no toques el componente
