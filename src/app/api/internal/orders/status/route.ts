@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { guardInternalRequest } from "../../_lib/guard";
+import { withInternalAuth } from "../../_lib/guard";
 import { serializableIssues } from "../../_lib/issues";
-import { prisma } from "@/lib/prisma";
+import { setOrderStatus } from "@/features/orders/server/status";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +13,7 @@ const bodySchema = z.object({
 });
 
 /** The POS reports what happened to an order it pulled. */
-export async function POST(request: Request) {
-  const denied = guardInternalRequest(request);
-  if (denied) return denied;
-
+export const POST = withInternalAuth(async (request, caller) => {
   let body: unknown;
   try {
     body = await request.json();
@@ -39,17 +36,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "INVALID_ORDER_ID" }, { status: 400 });
   }
 
-  const updated = await prisma.order.updateMany({
-    where: { id: orderId },
-    data: {
-      status: parsed.data.status,
-      cancelReason: parsed.data.reason ?? null,
-    },
+  const result = await setOrderStatus({
+    businessId: caller.businessId,
+    orderId,
+    status: parsed.data.status,
+    reason: parsed.data.reason ?? null,
   });
 
-  if (updated.count === 0) {
+  if (!result.ok) {
     return NextResponse.json({ error: "UNKNOWN_ORDER" }, { status: 404 });
   }
 
   return NextResponse.json({ ok: true });
-}
+});

@@ -1,58 +1,61 @@
-import { timingSafeEqual, createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 /**
- * Authentication for /api/internal/*.
+ * Pure helpers for /api/internal/* authentication (F-018).
  *
- * Baseline is a long random bearer token compared in constant time. TLS already
- * provides confidentiality and integrity in transit, and the only caller is a
- * cron in a Vercel project we control.
+ * This module only ever looks at the SHAPE of the bearer credential (scheme,
+ * length) and the cryptographic transforms on it (hash, mint). It never
+ * touches Prisma and never knows what a Business is — resolving a hash to an
+ * identity lives in src/features/sync/server/caller.ts (R9, AGENTS.md §
+ * Arquitectura).
  *
- * The upgrade path is HMAC-SHA256 over `timestamp + "." + rawBody` with a
- * ±5 minute window, which buys body integrity and a bounded replay window if
- * the token ever surfaces in a log. See docs/adr/0008. It is deliberately not
- * the starting point, but the verification is isolated here so switching does
- * not touch a single route.
+ * Identity used to be checked in memory against a single global shared
+ * secret,
+ * which is why a constant-time compare (`timingSafeEqual`) used to live here.
+ * F-018 replaces that comparison with an equality lookup on a `@unique`
+ * index (`Business.syncTokenHash`), so there is no longer a comparison "in
+ * memory" to protect — R4 stays the rule for the day one exists again. The
+ * residual timing signal of a btree lookup is accepted explicitly: what is
+ * being searched for is the SHA-256 of the presented token, not the token
+ * itself, and ADR 0008's path to HMAC is untouched.
  */
 
 export const SYNC_AUTH_SCHEME = "Bearer";
+export const MIN_BEARER_TOKEN_LENGTH = 32;
 
-export type SyncAuthResult =
-  { ok: true } | { ok: false; reason: "missing" | "malformed" | "mismatch" | "unconfigured" };
+export type BearerRead =
+  { ok: true; token: string } | { ok: false; reason: "missing" | "malformed" };
 
-/** Constant-time compare that does not leak length through early return. */
-function safeEqual(a: string, b: string): boolean {
-  // Hash both sides first: timingSafeEqual throws on length mismatch, and the
-  // throw itself would leak whether the lengths matched.
-  const ha = createHash("sha256").update(a, "utf8").digest();
-  const hb = createHash("sha256").update(b, "utf8").digest();
-  return timingSafeEqual(ha, hb);
-}
-
-export function verifySyncToken(
-  authorizationHeader: string | null | undefined,
-  expectedToken: string | undefined,
-): SyncAuthResult {
-  if (!expectedToken || expectedToken.length < 32) {
-    return { ok: false, reason: "unconfigured" };
-  }
-  if (!authorizationHeader) {
-    return { ok: false, reason: "missing" };
-  }
+/**
+ * Validates only the FORM of the `Authorization` header: scheme, non-empty,
+ * minimum length. Never resolves anything against a database.
+ */
+export function readBearerToken(header: string | null | undefined): BearerRead {
+  if (!header) return { ok: false, reason: "missing" };
 
   const prefix = `${SYNC_AUTH_SCHEME} `;
-  if (!authorizationHeader.startsWith(prefix)) {
+  if (!header.startsWith(prefix)) return { ok: false, reason: "malformed" };
+
+  const presented = header.slice(prefix.length).trim();
+  if (!presented || presented.length < MIN_BEARER_TOKEN_LENGTH) {
     return { ok: false, reason: "malformed" };
   }
 
-  const presented = authorizationHeader.slice(prefix.length).trim();
-  if (!presented) {
-    return { ok: false, reason: "malformed" };
-  }
-
-  return safeEqual(presented, expectedToken) ? { ok: true } : { ok: false, reason: "mismatch" };
+  return { ok: true, token: presented };
 }
 
-/** Stored on Business so a per-business token can be rotated independently. */
+/** SHA-256 hex digest. What gets stored in `Business.syncTokenHash`. */
 export function hashSyncToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+/**
+ * Mints a fresh token and its hash. The plaintext is returned once, to the
+ * caller — never stored anywhere (R11): scripts/mint-sync-token.ts and
+ * prisma/seed.ts are the only two callers, and both print it and discard it.
+ * 36 random bytes -> 48 base64url characters (E23).
+ */
+export function mintSyncToken(): { token: string; hash: string } {
+  const token = randomBytes(36).toString("base64url");
+  return { token, hash: hashSyncToken(token) };
 }

@@ -12,20 +12,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * (`createStorefrontWithStore`), which is why `prisma.storefront.create` and
  * `prisma.slug.findUnique` are mocked here too — the SAME `@/lib/prisma`
  * module `registry.ts` imports.
+ *
+ * F-018 (R8, E16): the handler no longer `upsert`s a `Business` from the
+ * payload — it only `update`s the one the caller already authenticated as
+ * (`businessId`, third argument). `existing` also carries its own
+ * `businessId`, so a store that belongs to someone else is skipped, never
+ * touched (same rule product.ts already applies).
  */
 
-const businessUpsert = vi.fn();
+const businessUpdate = vi.fn();
 const storeFindUnique = vi.fn();
 const storeUpdate = vi.fn();
 const storefrontCreate = vi.fn();
 const slugFindUnique = vi.fn();
-const businessCount = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     business: {
-      upsert: (...a: unknown[]) => businessUpsert(...a),
-      count: (...a: unknown[]) => businessCount(...a),
+      update: (...a: unknown[]) => businessUpdate(...a),
     },
     store: {
       findUnique: (...a: unknown[]) => storeFindUnique(...a),
@@ -42,14 +46,18 @@ vi.mock("@/lib/prisma", () => ({
 
 const { handleStore } = await import("./store");
 
+const BUSINESS_ID = "business-1";
+
 /** An `existing` row the way the handler's own select shapes it — a single
- *  branch of a single-branch brand, unless the test says otherwise. */
+ *  branch of a single-branch brand owned by `BUSINESS_ID`, unless the test
+ *  says otherwise. */
 function existingStore(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: "store-1",
     slug: null,
     sourceUpdatedAt: null,
     sourceOptIn: true,
+    businessId: BUSINESS_ID,
     storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] },
     ...overrides,
   };
@@ -69,13 +77,20 @@ function payload(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function callHandleStore(
+  overrides: Partial<Record<string, unknown>> = {},
+  operation: "CREATE" | "UPDATE" | "DELETE" = "UPDATE",
+  businessId = BUSINESS_ID,
+) {
+  return handleStore(payload(overrides), operation, businessId);
+}
+
 beforeEach(() => {
-  businessUpsert.mockReset().mockResolvedValue({ id: "business-1" });
+  businessUpdate.mockReset().mockResolvedValue({ id: BUSINESS_ID });
   storeFindUnique.mockReset();
   storeUpdate.mockReset().mockResolvedValue({ slug: "tienda-demo" });
   storefrontCreate.mockReset();
   slugFindUnique.mockReset().mockResolvedValue(null);
-  businessCount.mockReset().mockResolvedValue(0);
 });
 
 describe("handleStore() — stale-write guard (AP6)", () => {
@@ -84,7 +99,7 @@ describe("handleStore() — stale-write guard (AP6)", () => {
       existingStore({ sourceUpdatedAt: new Date("2026-08-27T12:00:00.000Z") }),
     );
 
-    const outcome = await handleStore(payload({ updatedAt: "2026-08-27T00:00:00.000Z" }), "UPDATE");
+    const outcome = await callHandleStore({ updatedAt: "2026-08-27T00:00:00.000Z" }, "UPDATE");
 
     expect(outcome.status).toBe("stale");
     expect(storeUpdate).not.toHaveBeenCalled();
@@ -95,7 +110,7 @@ describe("handleStore() — stale-write guard (AP6)", () => {
       existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z") }),
     );
 
-    const outcome = await handleStore(payload({ updatedAt: "2026-08-27T00:00:00.000Z" }), "UPDATE");
+    const outcome = await callHandleStore({ updatedAt: "2026-08-27T00:00:00.000Z" }, "UPDATE");
 
     expect(outcome.status).toBe("processed");
     expect(outcome.touchedStoreSlug).toBe("tienda-demo");
@@ -104,12 +119,37 @@ describe("handleStore() — stale-write guard (AP6)", () => {
   });
 });
 
+describe("handleStore() — el negocio nunca se crea (R8, E16)", () => {
+  it("solo actualiza el Business autenticado, nunca hace upsert", async () => {
+    storeFindUnique.mockResolvedValue(existingStore());
+
+    await callHandleStore({ updatedAt: "2026-08-27T00:00:00.000Z" }, "UPDATE");
+
+    expect(businessUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: BUSINESS_ID } }),
+    );
+  });
+
+  it("una tienda que pertenece a otro negocio se salta, no se toca (R1, R6)", async () => {
+    storeFindUnique.mockResolvedValue(existingStore({ businessId: "otro-negocio" }));
+
+    const outcome = await callHandleStore(
+      { updatedAt: "2026-08-27T00:00:00.000Z" },
+      "UPDATE",
+      BUSINESS_ID,
+    );
+
+    expect(outcome.status).toBe("skipped_not_published");
+    expect(storeUpdate).not.toHaveBeenCalled();
+  });
+});
+
 describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
   it("a real opt-in flip to unpublish suspends and records the reason", async () => {
     storeFindUnique.mockResolvedValue(existingStore({ sourceUpdatedAt: null, sourceOptIn: true }));
 
-    await handleStore(
-      payload({ publishToStore: false, unpublishReason: "Cerrado por reformas" }),
+    await callHandleStore(
+      { publishToStore: false, unpublishReason: "Cerrado por reformas" },
       "UPDATE",
     );
 
@@ -128,7 +168,7 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
       existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"), sourceOptIn: true }),
     );
 
-    await handleStore(payload({ publishToStore: true, phone: "+5350000099" }), "UPDATE");
+    await callHandleStore({ publishToStore: true, phone: "+5350000099" }, "UPDATE");
 
     const data = storeUpdate.mock.calls[0][0].data;
     expect(data).not.toHaveProperty("status");
@@ -146,7 +186,7 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
       existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"), sourceOptIn: false }),
     );
 
-    await handleStore(payload({ publishToStore: true }), "UPDATE");
+    await callHandleStore({ publishToStore: true }, "UPDATE");
 
     const data = storeUpdate.mock.calls[0][0].data;
     expect(data.status).toBe("PUBLISHED");
@@ -161,7 +201,7 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
       existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"), sourceOptIn: false }),
     );
 
-    await handleStore(payload({ publishToStore: false }), "UPDATE");
+    await callHandleStore({ publishToStore: false }, "UPDATE");
 
     const data = storeUpdate.mock.calls[0][0].data;
     expect(data).not.toHaveProperty("status");
@@ -171,7 +211,7 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
   it("DELETE is treated as an unpublish regardless of publishToStore", async () => {
     storeFindUnique.mockResolvedValue(existingStore({ sourceUpdatedAt: null, sourceOptIn: true }));
 
-    await handleStore(payload({ publishToStore: true }), "DELETE");
+    await callHandleStore({ publishToStore: true }, "DELETE");
 
     const data = storeUpdate.mock.calls[0][0].data;
     expect(data.status).toBe("SUSPENDED");
@@ -186,7 +226,7 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
       stores: [{ id: "store-1" }],
     });
 
-    const outcome = await handleStore(payload(), "CREATE");
+    const outcome = await callHandleStore({}, "CREATE");
 
     expect(outcome.status).toBe("processed");
     expect(outcome.touchedStoreSlug).toBe("tienda-demo");
@@ -200,7 +240,7 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
   it("DELETE with no existing row is skipped, not an error", async () => {
     storeFindUnique.mockResolvedValue(null);
 
-    const outcome = await handleStore(payload(), "DELETE");
+    const outcome = await callHandleStore({}, "DELETE");
 
     expect(outcome.status).toBe("skipped_not_published");
     expect(storeUpdate).not.toHaveBeenCalled();
@@ -224,12 +264,12 @@ describe("handleStore() — F-017 ALTA #3 (tests.md § Fallos encontrados #3): a
     );
     storeUpdate.mockResolvedValue({ slug: "bodega-dos" });
 
-    const outcome = await handleStore(
-      payload({
+    const outcome = await callHandleStore(
+      {
         updatedAt: "2026-08-27T00:00:00.000Z",
         name: "Bodega Dos RENOMBRADA",
         city: "Nueva ciudad",
-      }),
+      },
       "UPDATE",
     );
 
@@ -258,7 +298,7 @@ describe("handleStore() — F-017 ALTA #3 (tests.md § Fallos encontrados #3): a
       }),
     );
 
-    const outcome = await handleStore(payload({ publishToStore: false }), "UPDATE");
+    const outcome = await callHandleStore({ publishToStore: false }, "UPDATE");
 
     expect(outcome.status).toBe("processed");
     expect(outcome.touchedSlugValues).toEqual(["bodega-uno", "bodega-uno-2", "bodega-dos"]);
@@ -269,7 +309,7 @@ describe("handleStore() — F-017 ALTA #3 (tests.md § Fallos encontrados #3): a
       existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z") }),
     );
 
-    const outcome = await handleStore(payload({ updatedAt: "2026-08-27T00:00:00.000Z" }), "UPDATE");
+    const outcome = await callHandleStore({ updatedAt: "2026-08-27T00:00:00.000Z" }, "UPDATE");
 
     expect(outcome.touchedSlugValues).toBeUndefined();
   });

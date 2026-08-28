@@ -30,7 +30,8 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/queandabuscando
       DIRECT_URL: postgresql://postgres:postgres@localhost:5432/queandabuscando
       # Dummy values: enough to satisfy validation, never used against anything real.
-      SYNC_TOKEN: ci-only-token-that-is-long-enough-to-pass-validation
+      # F-018: no server-side variable authenticates /api/internal/* anymore
+      # (the corte limpio of the old global token) — env.ts no longer parses one.
       SSO_JWT_SECRET: ci-only-secret-that-is-long-enough-to-pass-check
       ADMIN_SESSION_SECRET: ci-only-admin-secret-long-enough-to-pass-check
       NEXT_PUBLIC_SITE_URL: http://localhost:3000

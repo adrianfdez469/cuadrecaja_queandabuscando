@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { guardInternalRequest } from "../../_lib/guard";
+import { withInternalAuth } from "../../_lib/guard";
 import { serializableIssues } from "../../_lib/issues";
 import { availabilityBatchSchema } from "@/features/sync/schemas";
 import { applyAvailability } from "@/features/sync/server/availability";
+import { findAvailabilityMismatch } from "@/features/sync/identity";
 
 export const dynamic = "force-dynamic";
 
@@ -15,10 +16,7 @@ export const dynamic = "force-dynamic";
  * `dispPublicada` column, so there is no cursor to lose data through. It
  * confirms only what this endpoint reports back in `confirmed`.
  */
-export async function POST(request: Request) {
-  const denied = guardInternalRequest(request);
-  if (denied) return denied;
-
+export const POST = withInternalAuth(async (request, caller) => {
   let body: unknown;
   try {
     body = await request.json();
@@ -34,11 +32,15 @@ export async function POST(request: Request) {
     );
   }
 
+  if (findAvailabilityMismatch(caller.externalId, parsed.data)) {
+    return NextResponse.json({ error: "BUSINESS_MISMATCH" }, { status: 403 });
+  }
+
   try {
-    const result = await applyAvailability(parsed.data.items);
+    const result = await applyAvailability(caller.businessId, parsed.data.items);
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
     console.error("[sync/availability] batch failed", error);
     return NextResponse.json({ error: "BATCH_FAILED" }, { status: 500 });
   }
-}
+});

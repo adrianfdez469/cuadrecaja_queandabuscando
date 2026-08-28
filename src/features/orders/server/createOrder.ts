@@ -245,6 +245,7 @@ export async function createOrder(body: CreateOrderRequest): Promise<CreateOrder
         data: {
           code,
           storeId: store.id,
+          businessId: store.businessId,
           customerId: null,
           contactName: body.contact.name,
           contactPhone: phone,

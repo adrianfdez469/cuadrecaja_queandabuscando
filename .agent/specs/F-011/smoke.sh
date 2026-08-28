@@ -43,6 +43,14 @@ FAILS=0
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
+# F-018: P10/P11 más abajo llaman a /api/internal/orders con el token de
+# seed-negocio-1. Nunca se salta en verde: falla ahora, con el comando
+# exacto, en vez de dejar que /api/internal/orders devuelva 401 en silencio.
+if [ -z "${QAB_BEARER_TOKEN:-}" ] && ! grep -q '^QAB_BEARER_TOKEN=".\{32,\}"' .env 2>/dev/null; then
+  printf 'SMOKE FAIL QAB_BEARER_TOKEN no está configurado — acúñalo con: npm run mint:token -- seed-negocio-1\n'
+  exit 1
+fi
+
 check() { # check <qué se espera> <esperado> <obtenido>
   if [ "$2" = "$3" ]; then
     printf '  ok   %s\n' "$1"
@@ -107,15 +115,20 @@ json_field() { # json_field <archivo> <campo>
 
 code() { curl -sS -o "$WORKDIR/last_body" -w '%{http_code}' "$@"; }
 
-# SYNC_TOKEN vive en .env, no en el entorno del sensor. Leído a mano (sin el
-# paquete dotenv) porque `require("dotenv").config()` imprime un banner
-# informativo en STDOUT ("injected env (N) from .env"), que se mete dentro
-# de cualquier valor capturado con $(...) y corrompe el token en silencio.
+# F-018: el token es por negocio. QAB_BEARER_TOKEN vive en .env (el de
+# seed-negocio-1), no en el entorno del sensor. Leído a mano (sin el paquete
+# dotenv) porque `require("dotenv").config()` imprime un banner informativo
+# en STDOUT ("injected env (N) from .env"), que se mete dentro de cualquier
+# valor capturado con $(...) y corrompe el token en silencio.
 sync_token() {
+  if [ -n "${QAB_BEARER_TOKEN:-}" ]; then
+    printf '%s' "$QAB_BEARER_TOKEN"
+    return
+  fi
   node -e '
     const fs = require("fs");
     const env = fs.readFileSync(".env", "utf8");
-    const m = env.match(/^SYNC_TOKEN="([^"]*)"/m);
+    const m = env.match(/^QAB_BEARER_TOKEN="([^"]*)"/m);
     process.stdout.write(m ? m[1] : "");
   '
 }

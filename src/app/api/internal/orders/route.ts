@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { guardInternalRequest } from "../_lib/guard";
+import { withInternalAuth } from "../_lib/guard";
 import { serializableIssues } from "../_lib/issues";
 import { pullOrders } from "@/features/orders/server/pull";
 
@@ -12,10 +12,7 @@ const querySchema = z.object({
 });
 
 /** The POS pulls new orders. Nothing here ever calls out to cuadrecaja. */
-export async function GET(request: Request) {
-  const denied = guardInternalRequest(request);
-  if (denied) return denied;
-
+export const GET = withInternalAuth(async (request, caller) => {
   const url = new URL(request.url);
   const parsed = querySchema.safeParse({
     since: url.searchParams.get("since") ?? undefined,
@@ -30,10 +27,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await pullOrders(parsed.data.since, parsed.data.limit);
+    const result = await pullOrders(caller.businessId, parsed.data.since, parsed.data.limit);
     return NextResponse.json(result);
   } catch (error) {
     console.error("[internal/orders] pull failed", error);
     return NextResponse.json({ error: "PULL_FAILED" }, { status: 500 });
   }
-}
+});

@@ -31,6 +31,7 @@ import { SKIPPED, STALE, type HandlerOutcome } from "./types";
 export async function handleProduct(
   payload: ProductPayload,
   operation: "CREATE" | "UPDATE" | "DELETE",
+  businessId: string,
 ): Promise<HandlerOutcome> {
   const store = await prisma.store.findUnique({
     where: { externalId: payload.storeId },
@@ -48,8 +49,10 @@ export async function handleProduct(
   });
 
   // Not an error: this is exactly what makes per-location opt-in work without
-  // the two systems having to coordinate.
-  if (!store) return SKIPPED;
+  // the two systems having to coordinate. A store that belongs to ANOTHER
+  // business is treated the same way — never a new query, just the
+  // `businessId` this `select` already carried (F-018, R1).
+  if (!store || store.businessId !== businessId) return SKIPPED;
 
   const canonical = canonicalSlug({
     storeSlug: store.slug,
@@ -84,7 +87,7 @@ export async function handleProduct(
     };
   }
 
-  const canonicalId = await resolveCanonical(payload);
+  const canonicalId = await resolveCanonical(payload, store.id);
   const localCategoryId = await resolveLocalCategory(payload, store.businessId);
 
   const synced = {
@@ -143,7 +146,7 @@ export async function handleProduct(
  * canonical that is excluded from the marketplace. There is never a product
  * that cannot be published.
  */
-async function resolveCanonical(payload: ProductPayload): Promise<string> {
+async function resolveCanonical(payload: ProductPayload, storeId: string): Promise<string> {
   const resolution = resolveCanonicalIdentity({
     canonicalProductId: payload.canonicalProductId,
     barcode: payload.barcode,
@@ -190,8 +193,19 @@ async function resolveCanonical(payload: ProductPayload): Promise<string> {
 
   // Orphan. Reuse the one already attached to this product if there is one,
   // so repeated updates do not spawn a new canonical every time.
+  //
+  // F-018 (PP6): scoped by `storeId`, not global. `StoreProduct.externalId`
+  // is unique PER STORE (`@@unique([storeId, externalId])`), and two
+  // different POS installs number their products from 1 — the same
+  // `externalId` in two stores is the normal case, not a coincidence. An
+  // unscoped `findFirst` here handed the first matching row's canonical to
+  // whichever store asked second, a real cross-tenant (and cross-branch)
+  // leak this fixes by construction: `(storeId, externalId)` is the actual
+  // identity of the product. Orphans are `isExclusive: true` and excluded
+  // from the marketplace by design, so this never touches the by-ean merge
+  // F-015 relies on.
   const reusable = await prisma.storeProduct.findFirst({
-    where: { externalId: payload.storeProductId },
+    where: { storeId, externalId: payload.storeProductId },
     select: { canonicalProductId: true },
   });
   if (reusable) return reusable.canonicalProductId;

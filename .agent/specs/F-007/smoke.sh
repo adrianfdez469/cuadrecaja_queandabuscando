@@ -39,10 +39,11 @@ if ! curl -sf -o /dev/null "$BASE/tienda-demo"; then
   exit 1
 fi
 
-# El .mjs necesita el token para hacer de POS. Si no está, sus 44 aserciones
-# fallarían todas con un 401 y el motivo real quedaría enterrado.
-if [ -z "${SYNC_TOKEN:-}" ] && ! grep -q '^SYNC_TOKEN=".\{32,\}"' .env 2>/dev/null; then
-  printf 'SMOKE FAIL SYNC_TOKEN no está configurado — /api/internal/* respondería 503\n'
+# El .mjs necesita el token de seed-negocio-1 para hacer de POS (F-018: el
+# token es por negocio). Si no está, sus 44 aserciones fallarían todas con un
+# 401/503 y el motivo real quedaría enterrado. Nunca se salta en verde.
+if [ -z "${QAB_BEARER_TOKEN:-}" ] && ! grep -q '^QAB_BEARER_TOKEN=".\{32,\}"' .env 2>/dev/null; then
+  printf 'SMOKE FAIL QAB_BEARER_TOKEN no está configurado — acúñalo con: npm run mint:token -- seed-negocio-1\n'
   exit 1
 fi
 

@@ -37,6 +37,14 @@ check_ge() { # check_ge <qué se espera> <minimo> <obtenido>
 code() { curl -s -o /dev/null -w '%{http_code}' "$BASE$1"; }
 body() { curl -s "$BASE$1"; }
 
+# F-018: el criterio 11/V4/V5 de más abajo llama a /api/internal/orders con
+# el token de seed-negocio-1. Nunca se salta en verde: falla ahora, con el
+# comando exacto, en vez de dejar que LAST_CODE quede vacío más abajo.
+if [ -z "${QAB_BEARER_TOKEN:-}" ] && ! grep -q '^QAB_BEARER_TOKEN=".\{32,\}"' .env 2>/dev/null; then
+  printf 'SMOKE FAIL QAB_BEARER_TOKEN no está configurado — acúñalo con: npm run mint:token -- seed-negocio-1\n'
+  exit 1
+fi
+
 # ---------------------------------------------------------------- V1..V6 ----
 
 # V1 — el botón de agregar de un producto agotado llega deshabilitado en el
@@ -130,7 +138,7 @@ fi
 
 # tienda-demo es WHATSAPP con número: la página del pedido debe traer wa.me.
 LAST_CODE=$(curl -s "$BASE/api/internal/orders?since=0&limit=1" \
-  -H "authorization: Bearer ${SYNC_TOKEN:-$(grep -m1 '^SYNC_TOKEN' .env | cut -d'"' -f2)}" |
+  -H "authorization: Bearer ${QAB_BEARER_TOKEN:-$(grep -m1 '^QAB_BEARER_TOKEN' .env | cut -d'"' -f2)}" |
   node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(d);console.log(j.orders?.[0]?.code ?? "");}catch{console.log("");}})')
 
 if [ -n "$LAST_CODE" ]; then

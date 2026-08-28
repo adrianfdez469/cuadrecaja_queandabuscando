@@ -11,6 +11,14 @@
  *   node scripts/pull-orders.mjs --transition    # criterion 2: PENDING → PULLED
  *   node scripts/pull-orders.mjs --status        # criterion 3: status + 404
  *   node scripts/pull-orders.mjs --no-outbound   # criterion 4: no calls out
+ *   node scripts/pull-orders.mjs --token=<token> # F-018: a business's own
+ *                                                 # token, instead of QAB_BEARER_TOKEN
+ *
+ * F-018: the token is now per business. `QAB_BEARER_TOKEN` in the environment
+ * (a local-dev-only token for one business, minted with
+ * `npm run mint:token`) or `--token=` on the command line — never the
+ * global bearer this repo used to read. Without one, this fails with the
+ * exact command to fix it, never a silent skip.
  *
  * This script IS the POS for the duration of the run: it seeds orders through
  * the public checkout (the same path a shopper takes, no session cookie) and
@@ -30,7 +38,11 @@ import { spawnSync } from "node:child_process";
 import { Client } from "pg";
 
 const BASE = process.env.QAB_BASE_URL ?? "http://localhost:3000";
-const SYNC_TOKEN = process.env.SYNC_TOKEN;
+const AUTH_TOKEN =
+  process.argv
+    .slice(2)
+    .find((arg) => arg.startsWith("--token="))
+    ?.split("=")[1] ?? process.env.QAB_BEARER_TOKEN;
 const STORE_SLUG =
   process.argv
     .slice(2)
@@ -42,9 +54,10 @@ const ABSENT_ORDER_ID = "999999999999";
 
 const args = new Set(process.argv.slice(2).map((arg) => arg.split("=")[0]));
 
-if (!SYNC_TOKEN) {
+if (!AUTH_TOKEN) {
   console.error(
-    "FAIL  SYNC_TOKEN no está en el entorno — sin él no se puede llamar a /api/internal/*",
+    "FAIL  ningún token — pásalo con --token=<token> o exporta QAB_BEARER_TOKEN " +
+      "(acúñalo con: npm run mint:token -- seed-negocio-1)",
   );
   process.exit(1);
 }
@@ -137,12 +150,12 @@ async function seedOrder() {
 
 async function pull(since, limit) {
   const response = await fetch(`${BASE}/api/internal/orders?since=${since}&limit=${limit}`, {
-    headers: { authorization: `Bearer ${SYNC_TOKEN}` },
+    headers: { authorization: `Bearer ${AUTH_TOKEN}` },
   });
   return { status: response.status, json: await response.json().catch(() => null) };
 }
 
-async function reportStatus(body, { token = SYNC_TOKEN, raw = false } = {}) {
+async function reportStatus(body, { token = AUTH_TOKEN, raw = false } = {}) {
   const headers = { "content-type": "application/json" };
   if (token !== null) headers.authorization = `Bearer ${token}`;
 
@@ -234,7 +247,7 @@ async function verifyPagination() {
   check("limit>500 responde 400", (await pull(base, 501)).status === 400);
 
   const noParams = await fetch(`${BASE}/api/internal/orders`, {
-    headers: { authorization: `Bearer ${SYNC_TOKEN}` },
+    headers: { authorization: `Bearer ${AUTH_TOKEN}` },
   });
   check("sin since ni limit responde 200 (defaults 0 y 100)", noParams.status === 200);
 

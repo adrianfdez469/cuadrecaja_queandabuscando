@@ -109,7 +109,7 @@ const PANEL_COLUMNS = [
 
 describe("handleProduct() UPDATE", () => {
   it("changes syncedPrice but never touches any of the six panel-owned fields", async () => {
-    const outcome = await handleProduct(payload({ price: 499 }), "UPDATE");
+    const outcome = await handleProduct(payload({ price: 499 }), "UPDATE", "business-1");
 
     expect(outcome.status).toBe("processed");
     expect(storeProductUpdate).toHaveBeenCalledOnce();
@@ -131,7 +131,7 @@ describe("handleProduct() UPDATE", () => {
       canonicalProductId: "canon-1",
     });
 
-    const outcome = await handleProduct(payload(), "UPDATE");
+    const outcome = await handleProduct(payload(), "UPDATE", "business-1");
 
     expect(outcome.status).toBe("stale");
     expect(storeProductUpdate).not.toHaveBeenCalled();
@@ -148,7 +148,7 @@ describe("handleProduct() search indexing (F-015, E1-E4)", () => {
       canonicalProductId: "canon-1",
     });
 
-    const outcome = await handleProduct(payload(), "UPDATE");
+    const outcome = await handleProduct(payload(), "UPDATE", "business-1");
 
     expect(outcome.status).toBe("stale");
     expect(writeSearchDocumentMock).not.toHaveBeenCalled();
@@ -157,7 +157,7 @@ describe("handleProduct() search indexing (F-015, E1-E4)", () => {
   it("a repeated alias does not call the writer", async () => {
     // Default mocks: the explicit canonical already exists and the alias
     // already exists for this business — nothing is new.
-    const outcome = await handleProduct(payload(), "UPDATE");
+    const outcome = await handleProduct(payload(), "UPDATE", "business-1");
 
     expect(outcome.status).toBe("processed");
     expect(writeSearchDocumentMock).not.toHaveBeenCalled();
@@ -168,7 +168,7 @@ describe("handleProduct() search indexing (F-015, E1-E4)", () => {
     canonicalProductFindUnique.mockResolvedValueOnce(null);
     canonicalProductCreate.mockResolvedValueOnce({ id: "canon-new" });
 
-    const outcome = await handleProduct(payload(), "UPDATE");
+    const outcome = await handleProduct(payload(), "UPDATE", "business-1");
 
     expect(outcome.status).toBe("processed");
     expect(writeSearchDocumentMock).toHaveBeenCalledOnce();
@@ -189,7 +189,11 @@ describe("handleProduct() search indexing (F-015, E1-E4)", () => {
       aliases: [{ text: "Coca-Cola 1.5L" }],
     });
 
-    const outcome = await handleProduct(payload({ localName: "Coca-Cola 1.5L" }), "UPDATE");
+    const outcome = await handleProduct(
+      payload({ localName: "Coca-Cola 1.5L" }),
+      "UPDATE",
+      "business-1",
+    );
 
     expect(outcome.status).toBe("processed");
     expect(writeSearchDocumentMock).toHaveBeenCalledOnce();

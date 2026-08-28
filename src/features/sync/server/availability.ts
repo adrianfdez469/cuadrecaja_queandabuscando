@@ -23,10 +23,13 @@ export type AvailabilityResult = {
  * confirmed — an unknown product stays divergent in the POS and is retried,
  * which is exactly the self-healing property the convergent query provides.
  */
-export async function applyAvailability(items: AvailabilityItem[]): Promise<AvailabilityResult> {
+export async function applyAvailability(
+  businessId: string,
+  items: AvailabilityItem[],
+): Promise<AvailabilityResult> {
   const storeExternalIds = [...new Set(items.map((item) => item.storeId))];
   const stores = await prisma.store.findMany({
-    where: { externalId: { in: storeExternalIds } },
+    where: { businessId, externalId: { in: storeExternalIds } },
     select: {
       id: true,
       externalId: true,

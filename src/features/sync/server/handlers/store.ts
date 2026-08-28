@@ -49,15 +49,14 @@ import { SKIPPED, STALE, type HandlerOutcome } from "./types";
 export async function handleStore(
   payload: StorePayload,
   operation: "CREATE" | "UPDATE" | "DELETE",
+  businessId: string,
 ): Promise<HandlerOutcome> {
-  const business = await prisma.business.upsert({
-    where: { externalId: payload.businessId },
-    create: {
-      externalId: payload.businessId,
-      name: payload.businessName,
-      baseCurrencyCode: payload.baseCurrency,
-    },
-    update: { name: payload.businessName, baseCurrencyCode: payload.baseCurrency },
+  // R8/E16: the sync no longer creates a Business — a business is born only
+  // when its token is minted (script or seed). `businessId` is the caller's
+  // OWN identity, already authenticated; this only ever updates it.
+  await prisma.business.update({
+    where: { id: businessId },
+    data: { name: payload.businessName, baseCurrencyCode: payload.baseCurrency },
     select: { id: true },
   });
 
@@ -68,6 +67,7 @@ export async function handleStore(
       slug: true,
       sourceUpdatedAt: true,
       sourceOptIn: true,
+      businessId: true,
       storefront: {
         select: {
           slug: true,
@@ -80,6 +80,10 @@ export async function handleStore(
       },
     },
   });
+
+  // A store whose externalId collides with another business's is never this
+  // handler's to touch — treated exactly like "does not exist yet" (R1, R6).
+  if (existing && existing.businessId !== businessId) return SKIPPED;
 
   const payloadUpdatedAt = new Date(payload.updatedAt);
 
@@ -151,12 +155,12 @@ export async function handleStore(
     // proposal — a sync event must never fail over an unfortunate name
     // (E14, HS7).
     const created = await createStorefrontWithStore({
-      businessId: business.id,
+      businessId,
       brandName: payload.name,
       proposedSlug: null,
       derivedFrom: payload.slug || payload.name,
       store: {
-        businessId: business.id,
+        businessId,
         externalId: payload.storeId,
         status: "PUBLISHED",
         publishedAt: new Date(),

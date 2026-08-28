@@ -77,6 +77,7 @@ describe("handleProduct against real Postgres", () => {
         updatedAt: new Date().toISOString(),
       }),
       "CREATE",
+      session.businessId,
     );
     expect(outcome.status).toBe("processed");
 
@@ -109,6 +110,7 @@ describe("handleProduct against real Postgres", () => {
           updatedAt: new Date().toISOString(),
         }),
         "CREATE",
+        session.businessId,
       );
       expect(first.status).toBe("processed");
 
@@ -125,6 +127,7 @@ describe("handleProduct against real Postgres", () => {
           updatedAt: new Date().toISOString(),
         }),
         "CREATE",
+        otherSession.businessId,
       );
       expect(second.status).toBe("processed");
 
@@ -162,6 +165,7 @@ describe("handleProduct against real Postgres", () => {
         updatedAt: firstUpdatedAt.toISOString(),
       }),
       "CREATE",
+      session.businessId,
     );
     expect(first.status).toBe("processed");
 
@@ -197,6 +201,7 @@ describe("handleProduct against real Postgres", () => {
         updatedAt: new Date(firstUpdatedAt.getTime() + 60_000).toISOString(),
       }),
       "UPDATE",
+      session.businessId,
     );
     expect(second.status).toBe("processed");
 
@@ -237,6 +242,7 @@ describe("handleProduct against real Postgres", () => {
         updatedAt: currentUpdatedAt.toISOString(),
       }),
       "CREATE",
+      session.businessId,
     );
     expect(first.status).toBe("processed");
 
@@ -258,6 +264,7 @@ describe("handleProduct against real Postgres", () => {
         updatedAt: new Date(currentUpdatedAt.getTime() - 60_000).toISOString(),
       }),
       "UPDATE",
+      session.businessId,
     );
     expect(stale.status).toBe("stale");
 
@@ -284,6 +291,7 @@ describe("handleProduct against real Postgres", () => {
         updatedAt: new Date().toISOString(),
       }),
       "CREATE",
+      session.businessId,
     );
     expect(first.status).toBe("processed");
 
@@ -300,6 +308,7 @@ describe("handleProduct against real Postgres", () => {
         updatedAt: new Date().toISOString(),
       }),
       "CREATE",
+      session.businessId,
     );
     expect(second.status).toBe("processed");
 

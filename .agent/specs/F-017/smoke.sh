@@ -2,7 +2,8 @@
 # Verificación en runtime de F-017 (Storefront por encima de Store), etapa 1.
 # La ejecuta `bash .agent/verify.sh F-017 --smoke` con `next dev` ya levantado
 # en $SMOKE_BASE_URL, contra la base real de docker-compose.yml (`npm run
-# seed` ya corrido) y con SYNC_TOKEN en el entorno.
+# seed` ya corrido) y con QAB_BEARER_TOKEN (el token de seed-negocio-1, F-018)
+# en el entorno.
 #
 # Cubre los criterios 1, 3, 4, 5 y 8 (7 y 9 se verifican con `npm run build`
 # en `--full`, no aquí — el build en sí ES la verificación). Copiado con
@@ -78,10 +79,14 @@ matches() { # matches <qué se espera> <valor> <regex>
 }
 
 sync_token() {
+  if [ -n "${QAB_BEARER_TOKEN:-}" ]; then
+    printf '%s' "$QAB_BEARER_TOKEN"
+    return
+  fi
   node -e '
     const fs = require("fs");
     const env = fs.readFileSync(".env", "utf8");
-    const m = env.match(/^SYNC_TOKEN="([^"]*)"/m);
+    const m = env.match(/^QAB_BEARER_TOKEN="([^"]*)"/m);
     process.stdout.write(m ? m[1] : "");
   '
 }
@@ -136,7 +141,7 @@ echo "$DUP_RESERVED" | grep -qi 'duplicate key value violates unique constraint'
 # --------------------------------------------------- HS7 ----
 
 if [ -z "$TOKEN" ]; then
-  printf 'SMOKE FAIL SYNC_TOKEN no está en .env — no se puede probar el servicio de slug\n'
+  printf 'SMOKE FAIL QAB_BEARER_TOKEN no está configurado — acúñalo con: npm run mint:token -- seed-negocio-1\n'
   FAILS=$((FAILS + 1))
 else
   FREE_BODY="$(curl -s -H "authorization: Bearer $TOKEN" "$BASE/api/internal/slug-availability?slug=una-marca-que-no-existe-$(date +%s)")"
@@ -328,7 +333,7 @@ sync_create_store() { # sync_create_store <externalId> <name>
 store_id_by_external() { psql_val "SELECT id FROM \"Store\" WHERE \"externalId\"='$1'"; }
 
 if [ -z "$TOKEN" ]; then
-  printf 'SMOKE FAIL etapa 2 (revalidación) — SYNC_TOKEN no disponible, no se pueden crear las fixtures\n'
+  printf 'SMOKE FAIL etapa 2 (revalidación) — QAB_BEARER_TOKEN no disponible, acúñalo con: npm run mint:token -- seed-negocio-1\n'
   FAILS=$((FAILS + 1))
 else
   SUFFIX="$(date +%s)"

@@ -8,15 +8,26 @@
  *   node scripts/send-catalog-batch.mjs --bad-token      # expect 401
  *   node scripts/send-catalog-batch.mjs --unknown-store  # expect skipped_not_published
  *   node scripts/send-catalog-batch.mjs --stale          # expect stale
+ *   node scripts/send-catalog-batch.mjs --token=<token>  # F-018: seed-negocio-1's own token
+ *
+ * F-018: the token is per business — `QAB_BEARER_TOKEN` (or `--token=`) has to
+ * be the token of `businessId` below (`seed-negocio-1`), minted with
+ * `npm run mint:token -- seed-negocio-1`, or the server answers 403
+ * BUSINESS_MISMATCH instead of the cases this script means to exercise.
  */
 import "dotenv/config";
 
 const BASE = process.env.QAB_BASE_URL ?? "http://localhost:3000";
 const args = new Set(process.argv.slice(2));
 
+const explicitToken = process.argv
+  .slice(2)
+  .find((arg) => arg.startsWith("--token="))
+  ?.split("=")[1];
+
 const token = args.has("--bad-token")
   ? "wrong-token-value-that-is-long-enough"
-  : process.env.SYNC_TOKEN;
+  : (explicitToken ?? process.env.QAB_BEARER_TOKEN);
 
 const businessId = "seed-negocio-1";
 const storeId = args.has("--unknown-store") ? "no-such-store" : "seed-tienda-1";

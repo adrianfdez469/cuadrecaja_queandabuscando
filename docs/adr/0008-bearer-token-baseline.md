@@ -2,6 +2,8 @@
 
 **Aceptada** · 2026-08-25
 
+> **Modificada en parte por [ADR 0013](0013-identidad-de-integracion.md) (F-018)**: la invariante del 503 sigue viva, pero su sujeto ya no es `SYNC_TOKEN` —que dejó de existir— sino «ningún `Business` tiene `syncTokenHash`».
+
 ## Contexto
 
 `/api/internal/*` acepta escrituras del catálogo. Hay que autenticarlo.
@@ -20,9 +22,11 @@ La verificación está aislada en `src/lib/syncAuth.ts`.
 throw filtraría si las longitudes coinciden. Por eso se hashea primero: la
 comparación es siempre entre dos buffers de 32 bytes.
 
-Sin `SYNC_TOKEN` configurado el servidor responde **503**, nunca 200. Un token
+Sin ningún token configurado el servidor responde **503**, nunca 200. Un token
 ausente jamás puede significar «deja pasar todo», y un 401 escondería un deploy
-roto detrás de lo que parece un error del llamante.
+roto detrás de lo que parece un error del llamante. (F-018: el sujeto de esa
+frase pasó de una variable de entorno única a «ningún `Business` tiene
+`syncTokenHash`» — ver la nota de arriba.)
 
 ## Cuándo pasar a HMAC
 

@@ -194,6 +194,7 @@ export async function previewGrouping(
     select: {
       name: true,
       slug: true,
+      businessId: true,
       storefront: { select: { slug: true } },
     },
   });
@@ -201,8 +202,14 @@ export async function previewGrouping(
 
   const primaryBranchSlug = store.slug
     ? (store.slug as PublicSlug)
-    : ((await previewSlug({ slug: null, name: store.name, storeExternalId: null }))
-        .resolvedSlug as PublicSlug);
+    : ((
+        await previewSlug({
+          slug: null,
+          name: store.name,
+          storeExternalId: null,
+          businessId: store.businessId,
+        })
+      ).resolvedSlug as PublicSlug);
 
   return {
     primaryBrandSlug: store.storefront.slug as PublicSlug,

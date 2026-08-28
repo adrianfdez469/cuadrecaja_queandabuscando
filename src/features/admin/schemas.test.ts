@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 // same isolated module graph Vitest gives each test file (see
 // `mutations.test.ts` for the same pattern).
 process.env.DATABASE_URL = "postgresql://localhost/test";
-process.env.SYNC_TOKEN = "t".repeat(32);
 process.env.SSO_JWT_SECRET = "s".repeat(32);
 process.env.ADMIN_SESSION_SECRET = "a".repeat(32);
 process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";

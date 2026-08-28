@@ -107,7 +107,7 @@ model Business {
   logoUrl          String?
   baseCurrencyCode String   @default("CUP")
   /// SHA-256 of the bearer token this business uses on /api/internal/*.
-  syncTokenHash    String?
+  syncTokenHash    String?  @unique
   active           Boolean  @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -118,6 +118,7 @@ model Business {
   aliases       ProductAlias[]
   exchangeRates ExchangeRate[]
   adminUsers    AdminUser[]
+  orders        Order[]
 
   @@index([active])
 }
@@ -480,6 +481,10 @@ model Order {
 
   storeId    String
   customerId String?
+  /// Denormalized from Store.businessId (F-018): lets /api/internal/orders
+  /// filter and index by tenant without a join. Backfilled from Store on
+  /// migration; set at checkout in createOrder.ts.
+  businessId String
 
   // Contact snapshot — a guest order must be self-sufficient.
   contactName     String
@@ -505,12 +510,14 @@ model Order {
   updatedAt DateTime @updatedAt
 
   store    Store       @relation(fields: [storeId], references: [id])
+  business Business    @relation(fields: [businessId], references: [id])
   customer Customer?   @relation(fields: [customerId], references: [id])
   items    OrderItem[]
 
   @@index([storeId, createdAt])
   @@index([status, id])
   @@index([customerId])
+  @@index([businessId, status, id])
 }
 
 model OrderItem {
