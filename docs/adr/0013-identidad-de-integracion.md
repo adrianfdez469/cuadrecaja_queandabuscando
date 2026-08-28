@@ -51,3 +51,9 @@ Sin él, paginar por negocio es
 
 El cursor del pull deja de ser global y pasa a ser **por negocio**. Cuadrecaja
 tiene que guardar un `ultimoPedidoVisto` por cada uno, no uno solo.
+
+Esta ADR sustituye el mecanismo de [ADR 0008](0008-bearer-token-baseline.md) —
+un secreto único de plataforma pasa a ser un token por negocio, resuelto
+contra `Business.syncTokenHash`— sin tocar su camino a HMAC ni sus
+disparadores: siguen siendo la siguiente etapa de autenticación, encima de
+esta identidad, no un sustituto de ella.

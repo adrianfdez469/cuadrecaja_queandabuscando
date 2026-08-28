@@ -1,20 +1,29 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 2** · 26 de agosto de 2026
+**Versión 3** · 27 de agosto de 2026
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
 existe y está verificado contra los casos de abajo.
 
-## Cambios respecto a la v1
+## Cambios respecto a la v2
 
-**Todo es aditivo.** Ningún campo que la v1 ya definía cambia de nombre, de
-tipo ni de significado, y un lector que hoy solo conoce la v1 sigue
-funcionando sin tocar una línea. Lo único nuevo es § ③④ Pedidos: cuatro
-campos que F-010 añade porque ahora el pedido puede nacer con un producto
-priceado en una moneda distinta a la del pedido, y el POS puede querer saber
-cuál era esa moneda original además del importe ya convertido. Adoptarlos es
-opcional y a su propio ritmo — **no hace falta ningún cambio en cuadrecaja**
-para seguir funcionando con esta versión.
+**Esta versión NO es aditiva en autenticación.** Todo lo demás (formato de los
+`payload`, los cuatro campos de pedidos que F-010 añadió) sigue siendo lo que
+la v2 ya describía. Lo que cambia:
+
+- **El token deja de ser único y global.** Cada negocio tiene el suyo, emitido
+  por queandabuscando; ver § Autenticación. HD5: **en cuadrecaja no hay nada
+  desarrollado de esta integración todavía**, así que este cambio se
+  documenta y no se negocia con nadie — no hay ningún consumidor vivo al que
+  avisar ni migrar sin cortar.
+- **El cursor del pull pasa a ser por negocio** (§ ③④ Pedidos): cuadrecaja
+  tiene que guardar un `ultimoPedidoVisto` por cada uno, no uno solo.
+- **Tres códigos de error nuevos** que el POS no había visto nunca: negocio
+  inactivo, `businessId` que no corresponde al token, y recurso de otro
+  negocio (§ Vocabulario de errores).
+- Recoge además, en un solo anuncio, dos cosas que ya estaban implementadas y
+  nunca se habían comunicado: `unpublishReason` en el `payload` de `STORE` y
+  el endpoint ⑥ de disponibilidad de slug (ambos de la propuesta v3 anterior).
 
 ---
 
@@ -38,27 +47,38 @@ ese runtime. No depende de que nadie recuerde una convención.
 │               ───────┼── ④ POST orders/status ──▶                    │
 │               ───────┼── ⑤ GET  reconciliation ─▶                    │
 └──────────────────────┘                        └──────────────────────┘
-   tiene: DB_POS + SYNC_TOKEN                     tiene: DB_TIENDA + SYNC_TOKEN
+   tiene: DB_POS + su token por negocio            tiene: DB_TIENDA
    NO tiene DB_TIENDA                             NO tiene DB_POS
 ```
 
 ## Autenticación
 
-Bearer token largo y aleatorio en `Authorization`, comparado en **tiempo
-constante**. La misma variable (`SYNC_TOKEN`) en los dos proyectos.
+**El token es por negocio, no un secreto único de plataforma (v3).**
+queandabuscando lo acuña, entrega el valor en claro **una sola vez** y guarda
+solo su SHA-256. Bearer largo y aleatorio en `Authorization`:
 
 ```
-Authorization: Bearer <token>
+Authorization: Bearer <token del negocio>
 ```
+
+Rotarlo (re-acuñarlo) invalida al instante el valor viejo de ESE negocio y no
+afecta a ningún otro. No hay ninguna variable de entorno compartida entre los
+dos proyectos: cada negocio guarda su propio token en su propia
+configuración, del lado de cuadrecaja.
 
 `/api/internal/*` queda fuera del rate limiting público y excluido de
-`robots.txt`. Sin `SYNC_TOKEN` configurado el servidor responde **503**, nunca
-200: un token ausente jamás significa «deja pasar todo».
+`robots.txt`. Si **ningún** negocio tiene un token acuñado todavía, el
+servidor responde **503**, nunca 200: un token ausente jamás significa «deja
+pasar todo» — es la misma invariante que la v2 ya tenía, con un sujeto
+distinto (antes «no hay ninguna variable global configurada», ahora «ningún
+negocio tiene token»).
 
 El siguiente paso es firma HMAC-SHA256 sobre `timestamp + "." + body`, con
 rechazo si la deriva supera 5 minutos. Ver [ADR 0008](adr/0008-bearer-token-baseline.md)
-para el disparador. La verificación está aislada en `src/lib/syncAuth.ts`, así
-que el cambio no toca ninguna ruta.
+para el disparador — el paso a HMAC no se adelanta ni se retrasa por este
+cambio. La verificación está aislada en `src/lib/syncAuth.ts` y la resolución
+del negocio en `src/features/sync/server/caller.ts`, así que el cambio no
+toca ninguna ruta.
 
 ---
 
@@ -72,6 +92,25 @@ que el cambio no toca ninguna ruta.
 | `POST` | `/api/internal/orders/status`                          | `{ orderId, status, reason? }`    | 200 `{ ok: true }`                                                               |
 | `GET`  | `/api/internal/reconciliation?storeId=`                | —                                 | 200 `{ products, hash }`                                                         |
 | `GET`  | `/api/internal/slug-availability?slug=&name=&storeId=` | —                                 | 200 `{ candidate, available, reason, resolvedSlug, url, storeKnown, reserving }` |
+
+### Vocabulario de errores (v3)
+
+Válido para las seis rutas de arriba. Los tres primeros ya existían con otro
+nombre de variable; los tres últimos son nuevos en esta versión.
+
+| Código | Cuerpo                            | Cuándo                                                                                                                        |
+| ------ | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `503`  | `{"error":"SYNC_NOT_CONFIGURED"}` | Ningún negocio tiene un token acuñado todavía                                                                                 |
+| `401`  | `{"error":"UNAUTHORIZED"}`        | Sin cabecera, esquema distinto de `Bearer`, token vacío/corto, o token que no resuelve ningún negocio                         |
+| `403`  | `{"error":"BUSINESS_INACTIVE"}`   | **Nuevo.** El token es válido pero ese negocio está dado de baja                                                              |
+| `403`  | `{"error":"BUSINESS_MISMATCH"}`   | **Nuevo.** El `businessId` del cuerpo (① o ②) no es el del negocio autenticado — el lote entero se rechaza, no se aplica nada |
+| `404`  | `{"error":"UNKNOWN_ORDER"}`       | **Nuevo en su causa:** el `orderId` no existe **o pertenece a otro negocio** — el mismo código en los dos casos, a propósito  |
+| `404`  | `{"error":"UNKNOWN_STORE"}`       | **Nuevo en su causa:** el `storeId` de ⑤ no existe **o pertenece a otro negocio**                                             |
+
+Un recurso de otro negocio nunca responde distinto de uno inexistente: ni
+`/orders/status`, ni `/reconciliation`, ni `/slug-availability` (que además
+responde `storeKnown: false`, nunca un error) sirven para averiguar si un
+`Tienda.id` o un pedido existen en OTRO negocio.
 
 ---
 
@@ -109,6 +148,14 @@ El acuse es **por id**, nunca por lote.
 
 Los nombres van en **inglés** aunque el schema del POS esté en español, para que
 ninguno de los dos lados traduzca al leer.
+
+**`businessId` en la raíz (v3): redundante y comprobado, ya no autoritativo.**
+La identidad del negocio sale del token (§ Autenticación); este campo se
+sigue enviando en el mismo formato de siempre, pero ahora solo se usa para
+comprobar que coincide con el del token autenticado. Si no coincide —en la
+raíz o en el `payload` de cualquier evento que lleve `businessId`
+(`STORE`, `CATEGORY`, `PRODUCT`, `EXCHANGE_RATE`; `CURRENCY` no lo lleva)—
+el lote entero se rechaza con `403 BUSINESS_MISMATCH` y no se escribe nada.
 
 ```jsonc
 {
@@ -203,11 +250,11 @@ con el único campo nuevo de la v3 marcado aparte.
 columna en la fila (o la dejan como está en un `UPDATE`), igual que en
 `PRODUCT`.
 
-##### Propuesta v3 — `unpublishReason`, aditiva, sin enviar todavía
+##### Novedades de esta versión — `unpublishReason` y disponibilidad de slug
 
-Un solo campo nuevo, opcional. **No hace falta ningún cambio en cuadrecaja**:
-omitirlo deja el comportamiento de hoy exactamente igual, y un lector que
-solo conoce la v2 sigue funcionando sin tocar una línea.
+Un solo campo nuevo, opcional, aditivo. **No hace falta ningún cambio en
+cuadrecaja**: omitirlo deja el comportamiento de hoy exactamente igual, y un
+lector que solo conoce la v2 sigue funcionando sin tocar una línea.
 
 | Campo             | Tipo    | Notas                                                                                                                                                                              |
 | ----------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -235,14 +282,14 @@ de esta propuesta: la sección `payload de STORE` de arriba documenta también
 lo que la v2 ya envía y nunca se comunicó — conviene que este anuncio lleve
 los dos avisos juntos, no solo el campo nuevo.
 
-**F-017 (Storefront), sumado al mismo anuncio y también sin enviar todavía.**
-`slug` en el `payload` de `STORE` sigue siendo «solo se usa al CREAR» —ahora
-para el slug de la **marca**, no de la sucursal— y sigue sin poder fallar el
-evento nunca: si el valor está tomado o es una palabra reservada,
-queandabuscando lo convierte en el siguiente libre en silencio. El endpoint
-⑥ de abajo es la forma de saber, antes de publicar, en qué se va a convertir.
+**F-017 (Storefront), sumado al mismo anuncio.** `slug` en el `payload` de
+`STORE` sigue siendo «solo se usa al CREAR» —ahora para el slug de la
+**marca**, no de la sucursal— y sigue sin poder fallar el evento nunca: si el
+valor está tomado o es una palabra reservada, queandabuscando lo convierte en
+el siguiente libre en silencio. El endpoint ⑥ de abajo es la forma de saber,
+antes de publicar, en qué se va a convertir.
 
-##### ⑥ Disponibilidad de slug (v3, aditiva)
+##### ⑥ Disponibilidad de slug (aditiva)
 
 ```
 GET /api/internal/slug-availability?slug=<candidato>&name=<nombre>&storeId=<Tienda.id>
@@ -254,6 +301,13 @@ reserva: **no reserva** nada (no aparta el valor) y **no garantiza** nada
 (entre la consulta y la publicación otro puede quedarse el valor). Al menos
 uno de `slug`/`name`; `storeId` es opcional (el `Tienda.id` de esta tienda,
 si ya se conoce) y solo decide `own` frente a `taken`.
+
+**El `storeId`, si se envía, tiene que ser de una tienda del negocio
+autenticado (v3).** Uno de otro negocio se trata como si no se hubiera
+enviado: `storeKnown: false` y `reason` nunca `"own"` — nunca un error, y
+nunca la forma de averiguar si un `Tienda.id` ajeno existe en otro negocio.
+El resto de la respuesta (`candidate`/`available`/`resolvedSlug`/`url`) no se
+acota: el espacio de slugs es global y público.
 
 ```jsonc
 {
@@ -338,6 +392,13 @@ Un `PRODUCT` con `operation: UPDATE` **nunca** toca `priceOverride`,
 **Nada de esto toca el camino de venta**, que en cuadrecaja ya hace 18–19
 queries y ya tuvo timeouts.
 
+El lote también lleva `businessId` en la raíz (`{ businessId, items[] }`), con
+la misma regla de ① (v3): redundante y comprobado contra el token, nunca
+autoritativo — un `businessId` que no coincide responde `403 BUSINESS_MISMATCH`
+sin aplicar nada del lote. `items[]` se identifica por `storeId`, no por
+negocio: un item de una tienda ajena simplemente no se confirma (§ Query
+convergente).
+
 ### Lo que viaja es un enum, no el entero
 
 ```
@@ -396,6 +457,20 @@ GET /api/internal/orders?since=<último id visto>&limit=100
 `nextCursor: null` significa «al día». El id es un `BIGINT` autoincremental, así
 que el cursor es monotónico. Un pedido devuelto pasa de `PENDING` a `PULLED`,
 y **no se borra**: la página de estado del cliente sigue funcionando.
+
+**El cursor es por negocio (v3).** `since` se interpreta solo contra los
+pedidos del negocio autenticado por el token — cuadrecaja tiene que guardar
+un `ultimoPedidoVisto` **por negocio**, no uno solo. Los ids siguen siendo un
+`BIGINT` global y creciente compartido por todos los negocios, así que la
+secuencia que ve un negocio concreto tiene huecos (los ids de otros negocios
+intercalados): eso es correcto y **no** indica que se perdió ningún pedido —
+el POS no debe asumir continuidad en los ids que recibe.
+
+`POST /api/internal/orders/status` y `GET /api/internal/reconciliation` (⑤,
+más abajo) siguen la misma regla: un `orderId`/`storeId` de otro negocio
+responde exactamente igual que uno inexistente (`404`, § Vocabulario de
+errores) — nunca un error distinto que confirme que el recurso existe en otro
+lado.
 
 Los campos que ya conocías siguen siendo exactamente lo que eran: `unitPrice`,
 `currencyCode`, `lineTotal`, `subtotal`, `discountTotal`, `deliveryFee` y
@@ -486,6 +561,11 @@ la v2.
 Sin esto no hay forma de saber que la sincronización se rompió: los datos
 simplemente se van quedando viejos sin que nada falle.
 
+**El `storeId` de la query tiene que ser de una tienda del negocio autenticado
+(v3).** Uno de otro negocio responde `404 UNKNOWN_STORE`, igual que uno
+inexistente (§ Vocabulario de errores) — este endpoint no sirve para
+averiguar si un `Tienda.id` ajeno existe en otro negocio.
+
 Ambos lados calculan el mismo hash sobre los mismos campos —los que el sync
 posee, excluyendo los del panel, que legítimamente difieren:
 
@@ -554,20 +634,22 @@ Más: el índice parcial de divergencia con `CREATE INDEX CONCURRENTLY`, el cron
 
 ## Modos de falla
 
-| Falla                       | Qué le pasa al usuario                                        | Recuperación                                                    |
-| --------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------- |
-| La tienda está caída        | Nada: el POS sigue vendiendo                                  | La outbox no se drena, `intentos++`. Se recupera solo           |
-| El POS está caído           | La tienda sirve el último snapshot y **acepta pedidos igual** | Los pedidos esperan a que el POS vuelva a hacer pull            |
-| El cron no corre            | Precios y disponibilidad se atrasan                           | La reconciliación lo detecta. Alerta a los 30 min               |
-| Evento con payload inválido | Ese producto queda viejo; el resto fluye                      | `intentos > 5` → DLQ + alerta                                   |
-| Se perdió `dispPublicada`   | Resincroniza todo el stock una vez                            | Idempotente, sin intervención                                   |
-| El token se filtró          | Alguien podría escribir catálogo falso                        | Rotar `SYNC_TOKEN` en ambos proyectos. Motivo para pasar a HMAC |
+| Falla                            | Qué le pasa al usuario                                                      | Recuperación                                                                                                     |
+| -------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| La tienda está caída             | Nada: el POS sigue vendiendo                                                | La outbox no se drena, `intentos++`. Se recupera solo                                                            |
+| El POS está caído                | La tienda sirve el último snapshot y **acepta pedidos igual**               | Los pedidos esperan a que el POS vuelva a hacer pull                                                             |
+| El cron no corre                 | Precios y disponibilidad se atrasan                                         | La reconciliación lo detecta. Alerta a los 30 min                                                                |
+| Evento con payload inválido      | Ese producto queda viejo; el resto fluye                                    | `intentos > 5` → DLQ + alerta                                                                                    |
+| Se perdió `dispPublicada`        | Resincroniza todo el stock una vez                                          | Idempotente, sin intervención                                                                                    |
+| El token de un negocio se filtró | Alguien podría escribir catálogo falso a nombre de ESE negocio, ninguno más | Re-acuñar el token de ese negocio (invalida el viejo al instante, no toca a los demás). Motivo para pasar a HMAC |
 
 ---
 
 ## Verificación
 
-Con el servidor local levantado:
+Con el servidor local levantado y el token de `seed-negocio-1` acuñado
+(`npm run mint:token -- seed-negocio-1`) exportado como `QAB_BEARER_TOKEN` — o
+pasado con `--token=` en cada script:
 
 ```bash
 node scripts/send-catalog-batch.mjs --repeat        # processed
@@ -576,4 +658,5 @@ node scripts/send-catalog-batch.mjs --bad-token     # 401
 node scripts/send-catalog-batch.mjs --unknown-store # skipped_not_published
 node scripts/send-catalog-batch.mjs --stale         # stale
 node scripts/send-availability-batch.mjs OUT_OF_STOCK
+node scripts/send-catalog-batch.mjs --token=<otro-token-de-otro-negocio>  # 403 BUSINESS_MISMATCH
 ```
