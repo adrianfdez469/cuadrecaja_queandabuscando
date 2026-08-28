@@ -1,14 +1,15 @@
 import { Prisma } from "@/generated/prisma/client";
 import type { PrismaClient } from "@/generated/prisma/client";
-import {
-  MARKETPLACE_BACKFILL_BATCH_SIZE,
-  MARKETPLACE_SEARCH_TS_CONFIG,
-} from "@/constants/marketplace";
+import { MARKETPLACE_BACKFILL_BATCH_SIZE } from "@/constants/marketplace";
+import { canonicalSearchVectorOf, searchQueryOf } from "@/features/search/server/expressions";
 
 /**
  * The ONE place in the repo that writes `CanonicalProduct.searchVector`
- * (R1, R2) and the one place that composes `to_tsvector(...)` (guard G2,
- * `src/features/marketplace/server/boundaries.test.ts`).
+ * (R1, R2). The pair of SQL expressions this used to compose directly moved
+ * to `src/features/search/server/expressions.ts` (F-021 architecture.md
+ * § I4): this module now IMPORTS them instead of defining them, and is no
+ * longer the file guard G2 (`src/features/marketplace/server/
+ * boundaries.test.ts`) points at.
  *
  * `searchVector` is `Unsupported("tsvector")`: Prisma's typed API cannot
  * read or write it, so this is raw SQL, and it is composed only with
@@ -21,16 +22,10 @@ import {
  *  `scripts/backfill-search-vector.ts` construct satisfy it. */
 export type SearchIndexWriter = Pick<PrismaClient, "$executeRaw">;
 
-/** THE write expression (R2). Its only caller inside this module is
- *  `writeSearchDocument`; nothing outside this file may repeat it (G2). */
-export const searchVectorOf = (document: string): Prisma.Sql =>
-  Prisma.sql`to_tsvector(${MARKETPLACE_SEARCH_TS_CONFIG}::regconfig, unaccent(${document}))`;
-
-/** THE query expression (R2, R3). Its twin: if one changes, so must
- *  the other. `plainto_tsquery` never throws on a person's text — that is
- *  what R3/E17/E18 require and `to_tsquery` cannot give. */
-export const searchQueryOf = (term: string): Prisma.Sql =>
-  Prisma.sql`plainto_tsquery(${MARKETPLACE_SEARCH_TS_CONFIG}::regconfig, unaccent(${term}))`;
+/** Re-exported so this module's own callers (`search.ts`, this file,
+ *  `dbFixtures.ts`) do not have to know the expression moved (F-021 I7: this
+ *  file is not one of the ones that had to change its imports). */
+export { searchQueryOf };
 
 /**
  * W1 (architecture.md § SQL): both columns, one round trip, so the pair
@@ -51,7 +46,7 @@ export async function writeSearchDocument(
   return db.$executeRaw(Prisma.sql`
     UPDATE "CanonicalProduct"
        SET "searchDocument" = ${document},
-           "searchVector"   = ${searchVectorOf(document)},
+           "searchVector"   = ${canonicalSearchVectorOf(document)},
            "updatedAt"      = now()
      WHERE "id" = ${canonicalProductId}
        AND ("searchDocument" <> ${document} OR "searchVector" IS NULL)
@@ -77,7 +72,7 @@ export async function backfillSearchVectors(
   for (;;) {
     const affected = await db.$executeRaw(Prisma.sql`
       UPDATE "CanonicalProduct"
-         SET "searchVector" = to_tsvector(${MARKETPLACE_SEARCH_TS_CONFIG}::regconfig, unaccent("searchDocument"))
+         SET "searchVector" = ${canonicalSearchVectorOf(Prisma.sql`"searchDocument"`)}
        WHERE "id" IN (
                SELECT "id"
                  FROM "CanonicalProduct"

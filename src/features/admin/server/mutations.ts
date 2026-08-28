@@ -5,6 +5,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { extensionForMime } from "@/lib/imageType";
 import type { AllowedImageMime } from "@/constants/media";
 import { uploadStoreObject } from "@/lib/supabase/storage";
+import { reindexStoreProduct } from "@/features/catalog/server/searchIndex";
 import {
   expandBrandTouch,
   regroupStoreIntoBrand,
@@ -199,8 +200,8 @@ export async function saveProduct(
   // Inlined, not a separately typed `const data`, so the literal object
   // `boundaries.test.ts` greps for (a `data` property with an inline object)
   // is exactly what runs, not a variable reference to one built elsewhere.
-  const updated = await commit(canonicalOfStore(existing.store), () =>
-    prisma.storeProduct.update({
+  const updated = await commit(canonicalOfStore(existing.store), async () => {
+    const row = await prisma.storeProduct.update({
       where: { id: existing.id },
       data: {
         description: body.description,
@@ -213,8 +214,14 @@ export async function saveProduct(
         featured: body.featured,
       } satisfies PanelProductWrite,
       select: PRODUCT_ROW_SELECT,
-    }),
-  );
+    });
+    // F-021 (R3, E8): the panel owns `description`, which feeds this
+    // offer's own derived search index. Recomputed by reading the row's
+    // current state, never by passing text — the panel cannot overwrite
+    // `localName` because it never touches it (architecture.md § Decisión).
+    await reindexStoreProduct(prisma, row.id);
+    return row;
+  });
 
   return { kind: "saved", value: toAdminProductRow(updated) };
 }

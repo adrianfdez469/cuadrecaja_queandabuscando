@@ -241,13 +241,14 @@ model Store {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  business    Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  storefront  Storefront         @relation(fields: [storefrontId], references: [id], onDelete: Cascade)
-  slugEntry   Slug?
-  products    StoreProduct[]
-  promotions  Promotion[]
-  orders      Order[]
-  adminAccess AdminStoreAccess[]
+  business      Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  storefront    Storefront         @relation(fields: [storefrontId], references: [id], onDelete: Cascade)
+  slugEntry     Slug?
+  products      StoreProduct[]
+  promotions    Promotion[]
+  orders        Order[]
+  adminAccess   AdminStoreAccess[]
+  searchQueries StoreSearchQuery[]
 
   @@index([businessId])
   @@index([storefrontId])
@@ -390,6 +391,17 @@ model StoreProduct {
   visible               Boolean  @default(true)
   featured              Boolean  @default(false)
 
+  // --- derived search index (F-021): owned by NEITHER side ---
+  /// Concatenated, ALREADY UNACCENTED searchable text:
+  /// localName · this business's aliases for the canonical · description.
+  /// Never written by the sync's or the panel's typed `data`: both of them
+  /// call the reindexer, which recomputes it from the row's current state.
+  /// That is what makes ADR 0007's ownership hold in both directions.
+  searchDocument String @default("")
+  /// Weighted tsvector: A = localName, B = aliases, C = description.
+  /// Unsupported: written with raw SQL (ADR 0019). GIN index in the migration.
+  searchVector   Unsupported("tsvector")?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -404,6 +416,24 @@ model StoreProduct {
   @@index([storeId, deletedAt, visible])
   @@index([canonicalProductId])
   @@index([localCategoryId])
+}
+
+/// F-021 (R4, R5): one row per search that reached the database. Three
+/// columns and the instant, on purpose: no IP, no user agent, no person.
+/// A query that never reached the database (E10) leaves nothing here.
+/// Retention/anonymisation is deliberately out of this feature's scope.
+model StoreSearchQuery {
+  id          String   @id @default(uuid())
+  storeId     String
+  /// Already normalized (R9), never as it arrived.
+  term        String
+  /// Total of the three layers, not the page.
+  resultCount Int
+  createdAt   DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, createdAt])
 }
 
 // ---------------------------------------------------------------------------

@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { clampSearchLimit, clampSearchOffset, normalizeSearchTerm } from "./searchTerm";
+import {
+  clampSearchLimit,
+  clampSearchOffset,
+  clampSearchPage,
+  normalizeSearchTerm,
+} from "./searchTerm";
 import {
   MARKETPLACE_SEARCH_LIMIT_DEFAULT,
   MARKETPLACE_SEARCH_LIMIT_MAX,
   MARKETPLACE_SEARCH_LIMIT_MIN,
-  MARKETPLACE_SEARCH_TERM_MAX_LENGTH,
 } from "@/constants/marketplace";
+import { SEARCH_TERM_MAX_LENGTH } from "@/constants/search";
+import { STORE_SEARCH_MAX_PAGE } from "@/constants/storeSearch";
 
 /**
  * Unit coverage for stage 1 of F-015 (plan.md): no database, no Prisma. E15
@@ -50,7 +56,7 @@ describe("normalizeSearchTerm()", () => {
     const raw = "a".repeat(10_000);
     const result = normalizeSearchTerm(raw);
     expect(result).not.toBeNull();
-    expect(result?.length).toBe(MARKETPLACE_SEARCH_TERM_MAX_LENGTH);
+    expect(result?.length).toBe(SEARCH_TERM_MAX_LENGTH);
   });
 
   it("trims the ends and collapses internal whitespace runs to one space", () => {
@@ -60,7 +66,7 @@ describe("normalizeSearchTerm()", () => {
   it("returns null when truncation leaves nothing but punctuation", () => {
     // 120 dots followed by a letter: the letter falls outside the truncated
     // window, so what survives has no letter or digit.
-    const raw = ".".repeat(MARKETPLACE_SEARCH_TERM_MAX_LENGTH) + "a";
+    const raw = ".".repeat(SEARCH_TERM_MAX_LENGTH) + "a";
     expect(normalizeSearchTerm(raw)).toBeNull();
   });
 });
@@ -103,5 +109,35 @@ describe("clampSearchOffset()", () => {
 
   it("passes through a large offset unchanged", () => {
     expect(clampSearchOffset(10_000)).toBe(10_000);
+  });
+});
+
+describe("clampSearchPage()", () => {
+  it("defaults to 1 when absent", () => {
+    expect(clampSearchPage(undefined)).toBe(1);
+  });
+
+  it("clamps 0 up to 1", () => {
+    expect(clampSearchPage(0)).toBe(1);
+  });
+
+  it("clamps a negative page up to 1", () => {
+    expect(clampSearchPage(-5)).toBe(1);
+  });
+
+  it("defaults on a non-finite value", () => {
+    expect(clampSearchPage(Number.NaN)).toBe(1);
+  });
+
+  it("clamps an enormous page down to the maximum", () => {
+    expect(clampSearchPage(1e9)).toBe(STORE_SEARCH_MAX_PAGE);
+  });
+
+  it("truncates a fractional value", () => {
+    expect(clampSearchPage(2.9)).toBe(2);
+  });
+
+  it("passes a page within range through unchanged", () => {
+    expect(clampSearchPage(5)).toBe(5);
   });
 });

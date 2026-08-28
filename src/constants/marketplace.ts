@@ -1,20 +1,11 @@
 /**
- * Marketplace search (F-015): the dictionary, the term/pagination limits,
- * and the backfill batch size (AGENTS.md § Prohibiciones: no magic numbers or
- * strings).
+ * Marketplace search (F-015): the pagination limits and the backfill batch
+ * size — what is genuinely the marketplace's own (AGENTS.md § Prohibiciones:
+ * no magic numbers or strings). The dictionary and the term length cap moved
+ * to `src/constants/search.ts` (F-021 architecture.md § I7): they are shared
+ * with the store search, and a name with `MARKETPLACE_` on a constant the
+ * store search also needs was the wrong dependency to keep.
  */
-
-/** The Postgres text search dictionary. Lives here and not as a literal in
- *  two places of SQL: `src/features/marketplace/server/searchVector.ts`
- *  imports it, and `prisma/migrations/*_backfill_search_vector/migration.sql`
- *  cannot import a TypeScript constant so it repeats the literal — the guard
- *  (`src/features/marketplace/server/boundaries.test.ts`, G3) compares the
- *  two so they cannot drift apart silently. */
-export const MARKETPLACE_SEARCH_TS_CONFIG = "spanish";
-
-/** R7: a term longer than this is not a search. It gets truncated, not
- *  rejected. The longest product name in the seed has 25 characters. */
-export const MARKETPLACE_SEARCH_TERM_MAX_LENGTH = 120;
 
 export const MARKETPLACE_SEARCH_LIMIT_DEFAULT = 20;
 export const MARKETPLACE_SEARCH_LIMIT_MIN = 1;

@@ -5,6 +5,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { buildSearchDocument, normalizeBarcodes } from "../src/lib/canonical";
 import { RESERVED_SLUGS, slugify } from "../src/lib/slug";
 import { writeSearchDocument } from "../src/features/marketplace/server/searchVector";
+import { reindexStoreProduct } from "../src/features/catalog/server/searchIndex";
 import {
   countCanonicalBarcodes,
   recordCanonicalBarcodes,
@@ -61,6 +62,18 @@ type SeedProduct = {
 };
 
 const CATEGORIES = ["Bebidas", "Alimentos", "Aseo", "Panadería"];
+
+/**
+ * F-021 (spec.md SP3, architecture.md § "El delta del seed"): a minimal
+ * global taxonomy that mirrors the four local categories the seed already
+ * creates, one-to-one by name/slug. Nothing here is a production
+ * classification pipeline — this exists ONLY so the third search layer
+ * (category expansion) has data in development, and so criterion 2 is
+ * verifiable. `LocalCategory.globalCategoryId` gets filled from this same
+ * list too, which is what turns R17's cascade into three usable steps
+ * without a second seed to maintain.
+ */
+const GLOBAL_CATEGORIES = CATEGORIES;
 
 const DEMO_PRODUCTS: SeedProduct[] = [
   {
@@ -298,8 +311,26 @@ async function main() {
     }
   }
 
+  // F-021 (SP3): one GlobalCategory per name in GLOBAL_CATEGORIES, upserted
+  // by `slug` (already `@unique`) BEFORE the LocalCategory loop below, so
+  // each local row can be created with its `globalCategoryId` already
+  // filled — R17's cascade needs both to exist from the very first seed.
+  const globalCategories = new Map<string, string>();
+  for (const name of GLOBAL_CATEGORIES) {
+    const globalCategory = await prisma.globalCategory.upsert({
+      where: { slug: slugify(name) },
+      create: { slug: slugify(name), name },
+      update: { name },
+    });
+    globalCategories.set(name, globalCategory.id);
+  }
+
   const categories = new Map<string, string>();
   for (const name of CATEGORIES) {
+    // F-021: rellena LocalCategory.globalCategoryId desde la misma lista —
+    // no lo lee la consulta de F-021 (R17 solo mira el canónico), pero deja
+    // la taxonomía coherente para el día que exista un escalón intermedio.
+    const globalCategoryId = globalCategories.get(name) ?? null;
     const category = await prisma.localCategory.upsert({
       where: {
         businessId_externalId: { businessId: business.id, externalId: `seed-cat-${slugify(name)}` },
@@ -309,8 +340,9 @@ async function main() {
         externalId: `seed-cat-${slugify(name)}`,
         name,
         slug: slugify(name),
+        globalCategoryId,
       },
-      update: { name },
+      update: { name, globalCategoryId },
     });
     categories.set(name, category.id);
   }
@@ -332,6 +364,7 @@ async function main() {
     deliveryFee: null,
     products: DEMO_PRODUCTS,
     categories,
+    globalCategories,
   });
 
   await seedStore({
@@ -352,6 +385,7 @@ async function main() {
     deliveryFee: "500",
     products: SECOND_STORE_PRODUCTS,
     categories,
+    globalCategories,
   });
 
   // HD12/F-011 fixture: a third store, deliberately never opened to the
@@ -390,6 +424,7 @@ async function main() {
     deliveryFee: null,
     products: [DEMO_PRODUCTS[0], DEMO_PRODUCTS[1]],
     categories,
+    globalCategories,
   });
 
   // F-017 (criterios 2 y 6, etapa 2): dos tiendas de un solo uso, del mismo
@@ -413,6 +448,7 @@ async function main() {
     deliveryFee: null,
     products: [DEMO_PRODUCTS[0], DEMO_PRODUCTS[4]],
     categories,
+    globalCategories,
   });
 
   await seedStore({
@@ -430,6 +466,7 @@ async function main() {
     deliveryFee: null,
     products: [DEMO_PRODUCTS[2], DEMO_PRODUCTS[5]],
     categories,
+    globalCategories,
   });
 
   // F-011 tanda 3 (HD18): a brand of THREE branches, sembrada YA agrupada —
@@ -518,6 +555,11 @@ async function main() {
     deliveryFee: null,
     products: OTHER_BUSINESS_PRODUCTS,
     categories: otherCategories,
+    // GlobalCategory is a platform-wide taxonomy (no businessId column), so
+    // the SAME map from the first business is reused here — "Otro negocio"
+    // just never matches any of its four names, and stays uncategorised
+    // globally, same as any orphan canonical would in production.
+    globalCategories,
   });
 
   // HD4/E23/E26/E27: acuña solo si el negocio todavía no tiene hash, para
@@ -671,8 +713,12 @@ async function seedStore(input: {
   deliveryFee: string | null;
   products: SeedProduct[];
   categories: Map<string, string>;
+  /** F-021 (SP3): name -> GlobalCategory id, so `upsertCanonical` can assign
+   *  `globalCategoryId` to the canonicals that have an `ean`. */
+  globalCategories: Map<string, string>;
 }) {
-  const { products, categories, themeTokens, slug, ownSlug, ...storeFields } = input;
+  const { products, categories, globalCategories, themeTokens, slug, ownSlug, ...storeFields } =
+    input;
 
   const storefrontId = await seedStorefront({
     businessId: input.businessId,
@@ -729,9 +775,9 @@ async function seedStore(input: {
   }
 
   for (const [index, product] of products.entries()) {
-    const canonical = await upsertCanonical(product, input.businessId);
+    const canonical = await upsertCanonical(product, input.businessId, globalCategories);
 
-    await prisma.storeProduct.upsert({
+    const storeProduct = await prisma.storeProduct.upsert({
       where: {
         storeId_externalId: {
           storeId: store.id,
@@ -761,6 +807,11 @@ async function seedStore(input: {
         sourceUpdatedAt: now,
       },
     });
+
+    // F-021: a freshly-seeded StoreProduct is buscable from its first row —
+    // same reasoning `upsertCanonical`'s own `writeSearchDocument` call
+    // already applies to the canonical (R3, criterio 6/10's precondition).
+    await reindexStoreProduct(prisma, storeProduct.id);
   }
 }
 
@@ -870,12 +921,24 @@ async function ensureSyncToken(business: { id: string; externalId: string }): Pr
   console.log(token);
 }
 
-async function upsertCanonical(product: SeedProduct, businessId: string): Promise<string> {
+async function upsertCanonical(
+  product: SeedProduct,
+  businessId: string,
+  globalCategories: Map<string, string>,
+): Promise<string> {
   const existing = product.ean
     ? await prisma.canonicalProduct.findUnique({ where: { ean: product.ean } })
     : await prisma.canonicalProduct.findFirst({
         where: { name: product.name, isExclusive: true },
       });
+
+  // F-021 (SP3, architecture.md § "El delta del seed"): only a canonical
+  // WITH an ean gets a global category — an orphan (`isExclusive: true`) is
+  // outside the marketplace by definition, and the global taxonomy belongs
+  // to the marketplace. This also leaves "Jugo de mango 1 L" (no ean, in the
+  // seed's own Bebidas) as a real example of the OTHER half of R17's
+  // cascade: no global category, found through its LocalCategory instead.
+  const globalCategoryId = product.ean ? (globalCategories.get(product.category) ?? null) : null;
 
   const canonical =
     existing ??
@@ -885,8 +948,19 @@ async function upsertCanonical(product: SeedProduct, businessId: string): Promis
         name: product.name,
         // No barcode means no shared identity: exclusive to its own store.
         isExclusive: !product.ean,
+        globalCategoryId,
       },
     }));
+
+  // Idempotent, and re-applied even when `existing` already had a row: a
+  // re-seed after this feature's own change must not leave a stale
+  // `globalCategoryId` on a canonical the seed already created before F-021.
+  if (canonical.globalCategoryId !== globalCategoryId) {
+    await prisma.canonicalProduct.update({
+      where: { id: canonical.id },
+      data: { globalCategoryId },
+    });
+  }
 
   await prisma.productAlias.upsert({
     where: {

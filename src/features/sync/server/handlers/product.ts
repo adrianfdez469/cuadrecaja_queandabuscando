@@ -3,6 +3,7 @@ import { buildSearchDocument, resolveCanonicalIdentity } from "@/lib/canonical";
 import { uniqueSlug } from "@/lib/slug";
 import { canonicalSlug } from "@/lib/publicSlug";
 import { writeSearchDocument } from "@/features/marketplace/server/searchVector";
+import { reindexStoreProductsOfCanonical } from "@/features/catalog/server/searchIndex";
 import { recordCanonicalBarcodes } from "../canonicalBarcodes";
 import type { ProductPayload } from "../../schemas";
 import { SKIPPED, STALE, type HandlerOutcome } from "./types";
@@ -16,6 +17,7 @@ import { SKIPPED, STALE, type HandlerOutcome } from "./types";
  *   4. record every valid barcode against the resolved canonical (F-024)
  *   5. upsert ProductAlias, useCount++
  *   6. if the alias is new, recompute the canonical's searchDocument
+ *   7. recompute this business's OFFERS' own search index (F-021)
  *
  * Step 6 is the one that is easy to forget and degrades search silently, so it
  * lives here as an explicit effect rather than as the caller's responsibility.
@@ -24,6 +26,16 @@ import { SKIPPED, STALE, type HandlerOutcome } from "./types";
  * `writeSearchDocument` (`@/features/marketplace/server/searchVector`), which
  * writes `searchDocument` AND `searchVector` in the same UPDATE — there is no
  * separate reindex pass, and no other place in the repo writes either column.
+ *
+ * Step 7 (F-021, R3, E9): the sync owns `StoreProduct.localName`, which is
+ * the main source of a StoreProduct's OWN search index — a derived column
+ * neither side writes directly (`src/features/catalog/server/
+ * searchIndex.ts`). `reindexStoreProductsOfCanonical` runs after
+ * `recordAlias` because a new alias also changes the document, and it is
+ * scoped by BUSINESS, not by this one offer, so every sibling offer that
+ * just inherited the alias gets recomputed too (R2). Never reached on the
+ * STALE or soft-delete paths, which both return before identity is even
+ * resolved.
  *
  * F-024 (R10): step 4 goes AFTER the StoreProduct write and BEFORE the alias,
  * never before the stale-write guard and never on the DELETE/unpublish path
@@ -144,6 +156,12 @@ export async function handleProduct(
   await recordCanonicalBarcodes(prisma, canonicalId, barcodes);
 
   await recordAlias(canonicalId, payload.localName, store.businessId);
+
+  // F-021 (R3, E9): the sync owns `localName`, so it recomputes the search
+  // index of every offer of this canonical for this business — never
+  // reached on the STALE or soft-delete paths above, both of which return
+  // before identity is even resolved.
+  await reindexStoreProductsOfCanonical(prisma, canonicalId, store.businessId);
 
   return {
     status: "processed",

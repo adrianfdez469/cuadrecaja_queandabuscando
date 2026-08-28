@@ -1,16 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { MARKETPLACE_SEARCH_TS_CONFIG } from "@/constants/marketplace";
+import { SEARCH_DOCUMENT_SEPARATOR, SEARCH_TS_CONFIG } from "@/constants/search";
 
 /**
  * The guard against C10's silent degradation (spec.md § La guarda de C10,
  * architecture.md § Componentes, step 6): reads the source from disk, no
  * base and no mocks, at the style of `src/features/admin/server/
  * boundaries.test.ts` and `src/features/storefront/server/
- * boundaries.test.ts`. Five asserts, G1-G5, each with its own
- * anti-vacuity — the same technique those two files use for `data: { … }`
- * write blocks and `prisma.<model>.<method>(...)` calls respectively.
+ * boundaries.test.ts`. G1-G5 came from F-015; G6-G7 are F-021's own
+ * additions (architecture.md § I4) — each with its own anti-vacuity, the
+ * same technique those two sibling files use for `data: { … }` write
+ * blocks and `prisma.<model>.<method>(...)` calls respectively.
  *
  * Scanned files exclude `*.test.ts`/`*.test.tsx` and `src/generated/**`
  * (AGENTS.md: generated, not linted, not our code) — otherwise this very
@@ -21,8 +22,22 @@ import { MARKETPLACE_SEARCH_TS_CONFIG } from "@/constants/marketplace";
 const ROOT = process.cwd();
 const SRC_DIR = join(ROOT, "src");
 const SEED_FILE = join(ROOT, "prisma/seed.ts");
-const WRITER_FILE = join(ROOT, "src/features/marketplace/server/searchVector.ts");
+/** F-021 architecture.md § I4: the one compositor of `to_tsvector(` — what
+ *  used to be `WRITER_FILE` is now split into the compositor and the two
+ *  writers below (one per table), since a document's compositor and its
+ *  writer are no longer the same file. */
+const EXPRESSIONS_FILE = join(ROOT, "src/features/search/server/expressions.ts");
+/** The writer of `CanonicalProduct.searchDocument`/`searchVector` (F-015). */
+const CANONICAL_WRITER_FILE = join(ROOT, "src/features/marketplace/server/searchVector.ts");
+/** The writer of `StoreProduct.searchDocument`/`searchVector` (F-021). */
+const STORE_WRITER_FILE = join(ROOT, "src/features/catalog/server/searchIndex.ts");
 const QUERY_FILE = join(ROOT, "src/features/marketplace/server/search.ts");
+/** F-021: the twin of `QUERY_FILE` for the store's own three-layer read. */
+const STORE_QUERY_FILE = join(ROOT, "src/features/catalog/server/search.ts");
+/** F-021: the hand-edited migration that backfills `StoreProduct`'s search
+ *  index for rows that existed before the columns did (architecture.md
+ *  § "El procedimiento, que es donde muerde I8", point 4). */
+const STORE_SEARCH_MIGRATION_SUFFIX = "_store_product_search";
 const VITEST_CONFIG = join(ROOT, "vitest.config.mts");
 const EXCLUDED_DIRS = [join(ROOT, "src/generated")];
 
@@ -94,25 +109,29 @@ describe("marketplace search boundaries (F-015, C10)", () => {
     expect(totalBlocks).toBeGreaterThan(0);
   });
 
-  it('only the writer assigns the raw "searchDocument" column (G1, half b)', () => {
+  it('only the two writers assign the raw "searchDocument" column, one per table (G1, half b)', () => {
+    const writers = [CANONICAL_WRITER_FILE, STORE_WRITER_FILE];
     const offenders = files.filter((file) => {
-      if (file === WRITER_FILE) return false;
+      if (writers.includes(file)) return false;
       return readFileSync(file, "utf8").includes('"searchDocument" =');
     });
     expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
-    // Not vacuous: the writer itself does contain it — proves the needle
-    // is real, not a typo that would make the check pass on anything.
-    expect(readFileSync(WRITER_FILE, "utf8")).toContain('"searchDocument" =');
+    // Not vacuous, and per writer: each one really does contain it — proves
+    // the needle is real, not a typo that would make the check pass on
+    // anything, and that F-021 did not silently drop the store's own writer.
+    for (const writer of writers) {
+      expect(readFileSync(writer, "utf8")).toContain('"searchDocument" =');
+    }
   });
 
-  it("exactly one file under src/ composes to_tsvector(...), and it is the writer (G2)", () => {
+  it("exactly one file under src/ composes to_tsvector(...), and it is the shared expressions module (G2)", () => {
     const matches = files.filter(
       (file) => file.startsWith(SRC_DIR) && readFileSync(file, "utf8").includes(TO_TSVECTOR_CALL),
     );
-    expect(matches).toEqual([WRITER_FILE]);
+    expect(matches).toEqual([EXPRESSIONS_FILE]);
   });
 
-  it("the hand-written backfill migration uses the dictionary constant's own value (G3)", () => {
+  it("the hand-written canonical backfill migration uses the dictionary constant's own value (G3)", () => {
     const migrationsDir = join(ROOT, "prisma/migrations");
     const migrationDirs = readdirSync(migrationsDir).filter((name) =>
       name.endsWith("_backfill_search_vector"),
@@ -120,17 +139,48 @@ describe("marketplace search boundaries (F-015, C10)", () => {
     // Not vacuous: the migration folder has to exist and be found.
     expect(migrationDirs.length).toBeGreaterThan(0);
 
-    const needle = `to_tsvector('${MARKETPLACE_SEARCH_TS_CONFIG}', unaccent(`;
+    const needle = `to_tsvector('${SEARCH_TS_CONFIG}', unaccent(`;
     for (const dir of migrationDirs) {
       const sql = readFileSync(join(migrationsDir, dir, "migration.sql"), "utf8");
       expect(sql).toContain(needle);
     }
   });
 
-  it('the query module predicates against the "searchVector" column, not a recomputed expression (G4)', () => {
+  it('the marketplace query module predicates against the "searchVector" column, not a recomputed expression (G4)', () => {
     const source = readFileSync(QUERY_FILE, "utf8");
     expect(/"searchVector"\s*@@/.test(source)).toBe(true);
     expect(source.includes(TO_TSVECTOR_CALL)).toBe(false);
+  });
+
+  /** F-021 (architecture.md R12): the store search's own twin of G4. A
+   *  `to_tsvector(...) @@ …` here would leave `StoreProduct`'s GIN index
+   *  unused — exactly what criterion 8 exists to catch. */
+  it('the store search module predicates against the "searchVector" column, not a recomputed expression (G6)', () => {
+    const source = readFileSync(STORE_QUERY_FILE, "utf8");
+    expect(/"searchVector"\s*@@/.test(source)).toBe(true);
+    expect(source.includes(TO_TSVECTOR_CALL)).toBe(false);
+  });
+
+  /** F-021 (architecture.md § SEARCH_DOCUMENT_SEPARATOR comment): the
+   *  hand-written backfill inside the F-021 migration cannot import
+   *  `SEARCH_TS_CONFIG`/`SEARCH_DOCUMENT_SEPARATOR` (a `.sql` file has no
+   *  imports), so it repeats both literals — this compares them against the
+   *  constants' own values so the two cannot drift apart silently (G3's
+   *  sibling, for the store's migration). */
+  it("the hand-written StoreProduct search migration uses the shared dictionary and separator literals (G7)", () => {
+    const migrationsDir = join(ROOT, "prisma/migrations");
+    const migrationDirs = readdirSync(migrationsDir).filter((name) =>
+      name.endsWith(STORE_SEARCH_MIGRATION_SUFFIX),
+    );
+    // Not vacuous: the migration folder has to exist and be found.
+    expect(migrationDirs.length).toBeGreaterThan(0);
+
+    const dictionaryNeedle = `to_tsvector('${SEARCH_TS_CONFIG}'`;
+    for (const dir of migrationDirs) {
+      const sql = readFileSync(join(migrationsDir, dir, "migration.sql"), "utf8");
+      expect(sql).toContain(dictionaryNeedle);
+      expect(sql).toContain(SEARCH_DOCUMENT_SEPARATOR);
+    }
   });
 
   /**

@@ -16,6 +16,7 @@ import { Container } from "@/components/ui/Container";
 import { AddToCartButton } from "@/features/cart/components/AddToCartButton";
 import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
 import { BranchBar } from "@/components/store/BranchBar";
+import { StoreSearchBox } from "@/components/store/StoreSearchBox";
 
 /**
  * Pre-render the catalogue of every published store. Like the store page, this
@@ -141,6 +142,9 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
         branchCount={resolution.branchCount}
         isOpen
       />
+      <Container className="pt-6">
+        <StoreSearchBox storeSlug={store.canonicalSlug} storeName={store.name} />
+      </Container>
       <Container className="grid gap-8 py-8 md:grid-cols-2">
         <div className="bg-surface-muted relative aspect-square overflow-hidden rounded-lg">
           {image ? (

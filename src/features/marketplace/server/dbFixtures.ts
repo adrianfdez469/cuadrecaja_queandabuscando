@@ -1,8 +1,12 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Availability, OrderStatus, StoreStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { buildSearchDocument, normalizeBarcodes } from "@/lib/canonical";
 import { writeSearchDocument } from "./searchVector";
+import {
+  reindexStoreProduct,
+  reindexStoreProductsOfStore,
+} from "@/features/catalog/server/searchIndex";
 import { recordCanonicalBarcodes } from "@/features/sync/server/canonicalBarcodes";
 import { mintSyncToken } from "@/lib/syncAuth";
 
@@ -19,6 +23,12 @@ import { mintSyncToken } from "@/lib/syncAuth";
  * SAME term (`"cafe qab_f015_ab12"`), so `plainto_tsquery`'s implicit AND can
  * only match this run's own row — exact even on a shared, pre-populated
  * table, including order and pagination assertions (E12, E21).
+ *
+ * F-021 (architecture.md § Riesgos y plan B): this module is now shared by
+ * THREE features' `db` tests (F-015, F-018, F-021) and keeps the
+ * `qab_f015_` prefix on purpose — renaming it to something feature-neutral
+ * is a cleanup that does not fit this feature's scope, and is written down
+ * rather than done silently.
  */
 
 const TOKEN_PREFIX = "qab_f015_";
@@ -53,6 +63,8 @@ export function deriveEan(token: string, salt = 0): string {
 export type FixtureCanonical = { id: string; ean: string; name: string };
 export type FixtureStore = { id: string; externalId: string };
 export type FixtureOrder = { id: bigint };
+export type FixtureLocalCategory = { id: string; name: string };
+export type FixtureGlobalCategory = { id: string; slug: string; name: string };
 
 export type FixtureSession = {
   token: string;
@@ -82,10 +94,17 @@ export type FixtureSession = {
     aliases?: readonly string[];
     isExclusive?: boolean;
     extraEans?: readonly string[];
+    /** F-021 (SP3, R17): only ever assigned in the fixture explicitly —
+     *  mirrors the seed's own rule that a canonical without an `ean` never
+     *  gets one either, though the fixture leaves that choice to the caller. */
+    globalCategoryId?: string | null;
   }): Promise<FixtureCanonical>;
   /** Creates a `StoreProduct` offer. Defaults to a live one (AVAILABLE,
    *  visible, not deleted) so tests only have to override what they mean
-   *  to break. */
+   *  to break. F-021: reindexes the offer's own search columns through the
+   *  SAME writer the panel/sync use (`reindexStoreProduct` — never a raw
+   *  `data: { searchDocument }`), so a freshly-created fixture is
+   *  immediately findable by `searchStoreProducts`. */
   createOffer(
     storeId: string,
     canonicalProductId: string,
@@ -94,12 +113,24 @@ export type FixtureSession = {
       visible?: boolean;
       deletedAt?: Date | null;
       localName?: string;
+      description?: string | null;
+      localCategoryId?: string | null;
     },
   ): Promise<{ id: string }>;
   /** Registers a `CanonicalProduct` id this session did not create directly
    *  (e.g. one `handleProduct` created through the by-EAN path in
    *  `product.db.test.ts`), so `cleanup()` removes it too. Idempotent. */
   trackCanonical(id: string): void;
+  /** F-021 (R17, E2b): creates a `LocalCategory` scoped to this session's
+   *  own business, optionally under a `GlobalCategory` (the cascade's first
+   *  half) or with none (its second half, `LocalCategory` alone). */
+  createLocalCategory(opts?: {
+    name?: string;
+    globalCategoryId?: string | null;
+  }): Promise<FixtureLocalCategory>;
+  /** F-021 (R17, criterio 2): creates a `GlobalCategory` — a platform-wide
+   *  row, not scoped to any business — with a token-unique `slug`. */
+  createGlobalCategory(opts?: { name?: string }): Promise<FixtureGlobalCategory>;
   /** F-018 (E9-E11): creates a real `Order` owned by this session's
    *  business/store, with the columns `pullOrders`/`setOrderStatus` read.
    *  `code`/`idempotencyKey` carry the session's token, which is unique, so
@@ -111,6 +142,23 @@ export type FixtureSession = {
    *  `Order_businessId_status_id_idx` without touching `enable_seqscan`.
    *  Returns the filler business/store ids so the caller can clean them up. */
   createFillerOrders(n: number): Promise<{ businessId: string; storeId: string }>;
+  /** F-021 (SP4, criterio 8): bulk-inserts `n` `StoreProduct` offers, each
+   *  with its OWN throwaway canonical (`StoreProduct`'s own
+   *  `@@unique([storeId, canonicalProductId])` means one store can never
+   *  hold two offers of the same canonical, so `n` rows confined to one
+   *  store cannot share one), reindexed with a SINGLE call to
+   *  `reindexStoreProductsOfStore` rather than once per row. `target`
+   *  absent inserts into a throwaway (filler) business/store — the SAME one
+   *  `createFillerOrders` uses — so `storeId` stays selective; `target`
+   *  present inserts into a store this session already owns, so the
+   *  session's OWN store also gets enough rows for `storeId = $4` to have
+   *  to skip past them, not just filter them out cheaply. Every filler
+   *  `localName` carries the session's token (ADR 0019 (d)), so it can
+   *  never match another execution's own search term. */
+  createFillerOffers(
+    n: number,
+    target?: { storeId: string; businessId: string },
+  ): Promise<{ businessId: string; storeId: string }>;
   /** Deletes everything this session created, in the order
    *  architecture.md § Pruebas contra Postgres real spells out:
    *  StoreProduct -> Order -> CanonicalProduct (ProductAlias cascades) ->
@@ -124,10 +172,15 @@ export async function createFixtureSession(): Promise<FixtureSession> {
   const storeIds = new Set<string>();
   const canonicalIds = new Set<string>();
   const orderIds = new Set<bigint>();
+  const localCategoryIds = new Set<string>();
+  const globalCategoryIds = new Set<string>();
   let storeSalt = 0;
   let canonicalSalt = 0;
   let orderSalt = 0;
   let fillerOrderSalt = 0;
+  let localCategorySalt = 0;
+  let globalCategorySalt = 0;
+  let fillerCanonicalSalt = 0;
   let filler: { businessId: string; storeId: string } | null = null;
 
   const businessExternalId = `${token}-business`;
@@ -180,11 +233,17 @@ export async function createFixtureSession(): Promise<FixtureSession> {
     aliases?: readonly string[];
     isExclusive?: boolean;
     extraEans?: readonly string[];
+    globalCategoryId?: string | null;
   }): Promise<FixtureCanonical> {
     canonicalSalt += 1;
     const ean = deriveEan(token, canonicalSalt);
     const canonical = await prisma.canonicalProduct.create({
-      data: { ean, name: opts.name, isExclusive: opts.isExclusive ?? false },
+      data: {
+        ean,
+        name: opts.name,
+        isExclusive: opts.isExclusive ?? false,
+        globalCategoryId: opts.globalCategoryId ?? null,
+      },
       select: { id: true },
     });
     canonicalIds.add(canonical.id);
@@ -213,16 +272,20 @@ export async function createFixtureSession(): Promise<FixtureSession> {
       visible?: boolean;
       deletedAt?: Date | null;
       localName?: string;
+      description?: string | null;
+      localCategoryId?: string | null;
     } = {},
   ): Promise<{ id: string }> {
     const suffix = `${storeId}-${canonicalProductId}`;
-    return prisma.storeProduct.create({
+    const offer = await prisma.storeProduct.create({
       data: {
         storeId,
         canonicalProductId,
         externalId: `${token}-offer-${suffix}`,
         slug: `${token}-offer-${suffix}`.toLowerCase(),
         localName: overrides.localName ?? `F-015 fixture offer ${token}`,
+        description: overrides.description ?? null,
+        localCategoryId: overrides.localCategoryId ?? null,
         syncedPrice: "1.00",
         syncedPriceCurrency: "CUP",
         availability: overrides.availability ?? Availability.AVAILABLE,
@@ -232,6 +295,12 @@ export async function createFixtureSession(): Promise<FixtureSession> {
       },
       select: { id: true },
     });
+    // F-021: the SAME writer the panel/sync use (never a raw
+    // `data: { searchDocument }`) — a fixture offer is immediately
+    // findable by `searchStoreProducts`, same as `createCanonical` above
+    // already does for the marketplace search.
+    await reindexStoreProduct(prisma, offer.id);
+    return offer;
   }
 
   function trackCanonical(id: string): void {
@@ -265,16 +334,20 @@ export async function createFixtureSession(): Promise<FixtureSession> {
     return order;
   }
 
-  async function createFillerOrders(n: number): Promise<{ businessId: string; storeId: string }> {
+  /** Lazily creates the throwaway (never this session's own) business/store
+   *  both `createFillerOrders` (F-018) and `createFillerOffers` (F-021)
+   *  fill — one filler tenant per session, however many times either is
+   *  called. */
+  async function ensureFillerTenant(): Promise<{ businessId: string; storeId: string }> {
     if (!filler) {
       const fillerBusiness = await prisma.business.create({
-        data: { externalId: `${token}-filler-business`, name: `F-018 filler ${token}` },
+        data: { externalId: `${token}-filler-business`, name: `F-018/F-021 filler ${token}` },
         select: { id: true },
       });
       const fillerStorefront = await prisma.storefront.create({
         data: {
           businessId: fillerBusiness.id,
-          name: `F-018 filler ${token}`,
+          name: `F-018/F-021 filler ${token}`,
           slug: `${token}-filler-storefront`,
         },
         select: { id: true },
@@ -285,21 +358,26 @@ export async function createFixtureSession(): Promise<FixtureSession> {
           storefrontId: fillerStorefront.id,
           externalId: `${token}-filler-store`,
           slug: `${token}-filler-store`,
-          name: `F-018 filler store ${token}`,
+          name: `F-018/F-021 filler store ${token}`,
           status: StoreStatus.PUBLISHED,
         },
         select: { id: true },
       });
       filler = { businessId: fillerBusiness.id, storeId: fillerStore.id };
     }
+    return filler;
+  }
+
+  async function createFillerOrders(n: number): Promise<{ businessId: string; storeId: string }> {
+    const target = await ensureFillerTenant();
 
     const rows = Array.from({ length: n }, () => {
       fillerOrderSalt += 1;
       return { salt: fillerOrderSalt };
     }).map(({ salt }) => ({
       code: `${token}-filler-order-${salt}`,
-      storeId: filler!.storeId,
-      businessId: filler!.businessId,
+      storeId: target.storeId,
+      businessId: target.businessId,
       contactName: `F-018 filler ${token}`,
       contactPhone: "+5350000000",
       status: OrderStatus.PENDING,
@@ -312,7 +390,93 @@ export async function createFixtureSession(): Promise<FixtureSession> {
     }));
     await prisma.order.createMany({ data: rows });
 
-    return filler;
+    return target;
+  }
+
+  async function createLocalCategory(
+    opts: { name?: string; globalCategoryId?: string | null } = {},
+  ): Promise<FixtureLocalCategory> {
+    localCategorySalt += 1;
+    const name = opts.name ?? `F-021 fixture category ${token}-${localCategorySalt}`;
+    const category = await prisma.localCategory.create({
+      data: {
+        businessId: business.id,
+        externalId: `${token}-local-category-${localCategorySalt}`,
+        name,
+        slug: `${token}-local-category-${localCategorySalt}`,
+        globalCategoryId: opts.globalCategoryId ?? null,
+      },
+      select: { id: true, name: true },
+    });
+    localCategoryIds.add(category.id);
+    return category;
+  }
+
+  async function createGlobalCategory(
+    opts: { name?: string } = {},
+  ): Promise<FixtureGlobalCategory> {
+    globalCategorySalt += 1;
+    const name = opts.name ?? `F-021 fixture global category ${token}-${globalCategorySalt}`;
+    const category = await prisma.globalCategory.create({
+      data: { slug: `${token}-global-category-${globalCategorySalt}`, name },
+      select: { id: true, slug: true, name: true },
+    });
+    globalCategoryIds.add(category.id);
+    return category;
+  }
+
+  async function createFillerOffers(
+    n: number,
+    target?: { storeId: string; businessId: string },
+  ): Promise<{ businessId: string; storeId: string }> {
+    const tenant = target ?? (await ensureFillerTenant());
+
+    fillerCanonicalSalt += 1;
+    const batchSalt = fillerCanonicalSalt;
+
+    // Each row gets its OWN throwaway canonical (id generated client-side
+    // so `createMany` can be used for both tables without a round trip to
+    // read back generated ids): `StoreProduct`'s own
+    // `@@unique([storeId, canonicalProductId])` means `n` offers confined
+    // to ONE store cannot all point at the same canonical.
+    const canonicalRows = Array.from({ length: n }, (_, i) => ({
+      id: randomUUID(),
+      // Offset well past `createCanonical`'s own salt range so the two
+      // never derive the same `ean` inside one session, and multiplied so
+      // two different `createFillerOffers` calls in the same session never
+      // collide with each other either.
+      ean: deriveEan(token, 5000 + batchSalt * 100_000 + i),
+      name: `F-021 filler canonical ${token} ${batchSalt}-${i}`,
+      isExclusive: false,
+    }));
+    if (canonicalRows.length > 0) {
+      await prisma.canonicalProduct.createMany({ data: canonicalRows });
+    }
+    for (const row of canonicalRows) canonicalIds.add(row.id);
+
+    const offerRows = canonicalRows.map((canonical, i) => ({
+      storeId: tenant.storeId,
+      canonicalProductId: canonical.id,
+      externalId: `${token}-filler-offer-${batchSalt}-${i}`,
+      slug: `${token}-filler-offer-${batchSalt}-${i}`.toLowerCase(),
+      localName: `F-021 filler offer ${token} ${i}`,
+      syncedPrice: "1.00",
+      syncedPriceCurrency: "CUP",
+      availability: Availability.AVAILABLE,
+      visible: true,
+      sourceUpdatedAt: new Date(),
+    }));
+    if (offerRows.length > 0) {
+      await prisma.storeProduct.createMany({ data: offerRows });
+    }
+
+    // ONE round trip reindexes every filler row just inserted, whatever
+    // canonical each one uses — the store-scoped variant, not `n`
+    // individual `reindexStoreProduct` calls (architecture.md § "El
+    // fixture de volumen del criterio 8").
+    await reindexStoreProductsOfStore(prisma, tenant.storeId);
+
+    return { businessId: tenant.businessId, storeId: tenant.storeId };
   }
 
   async function cleanup(): Promise<void> {
@@ -336,6 +500,16 @@ export async function createFixtureSession(): Promise<FixtureSession> {
     if (canonicalIdList.length > 0) {
       // ProductAlias cascades (onDelete: Cascade on its own relation).
       await prisma.canonicalProduct.deleteMany({ where: { id: { in: canonicalIdList } } });
+    }
+    // F-021: explicit, even though `LocalCategory`'s own FK to `Business`
+    // cascades — `GlobalCategory` has NO business relation at all, so it
+    // needs its own delete, and it has to come after every `CanonicalProduct`/
+    // `LocalCategory` row that could still reference it (both do, above).
+    if (localCategoryIds.size > 0) {
+      await prisma.localCategory.deleteMany({ where: { id: { in: [...localCategoryIds] } } });
+    }
+    if (globalCategoryIds.size > 0) {
+      await prisma.globalCategory.deleteMany({ where: { id: { in: [...globalCategoryIds] } } });
     }
     if (storeIdList.length > 0) {
       await prisma.store.deleteMany({ where: { id: { in: storeIdList } } });
@@ -361,8 +535,11 @@ export async function createFixtureSession(): Promise<FixtureSession> {
     createCanonical,
     createOffer,
     trackCanonical,
+    createLocalCategory,
+    createGlobalCategory,
     createOrder,
     createFillerOrders,
+    createFillerOffers,
     cleanup,
   };
 }
@@ -372,6 +549,14 @@ export async function createFixtureSession(): Promise<FixtureSession> {
  * ran — identified by the same token prefix, and old enough (10 minutes)
  * not to touch a run in flight in parallel. Same deletion order as
  * `cleanup()`.
+ *
+ * Does NOT sweep `GlobalCategory` (F-021's `createGlobalCategory`):
+ * `GlobalCategory` has no `createdAt` column, so this function's
+ * age-based staleness check has nothing to compare against for it, and
+ * guessing would risk deleting a fixture a run in flight still owns. A
+ * leaked row from a test that crashed before its own `cleanup()` ran stays
+ * as a bounded, low-volume cost — every session that finishes normally
+ * still removes exactly the `GlobalCategory` rows it created.
  */
 export async function sweepStaleFixtures(): Promise<void> {
   const staleBefore = new Date(Date.now() - STALE_AFTER_MS);
