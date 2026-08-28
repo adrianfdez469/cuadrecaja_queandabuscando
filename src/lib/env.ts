@@ -7,7 +7,6 @@ import { z } from "zod";
  */
 const serverSchema = z.object({
   DATABASE_URL: z.string().min(1),
-  SYNC_TOKEN: z.string().min(32, "SYNC_TOKEN must be at least 32 chars"),
   SSO_JWT_SECRET: z.string().min(32, "SSO_JWT_SECRET must be at least 32 chars"),
   ADMIN_SESSION_SECRET: z.string().min(32, "ADMIN_SESSION_SECRET must be at least 32 chars"),
   CRON_SECRET: z.string().min(16).optional(),
