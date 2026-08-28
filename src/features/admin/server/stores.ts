@@ -21,6 +21,11 @@ const STOREFRONT_SELECT = {
   id: true,
   slug: true,
   name: true,
+  // F-011 tanda 3 (B14): one more column of a `select` the hub already
+  // runs — zero new queries. Read by `ThemeSwatches` for the hub's "Colores
+  // de tu marca" card; the branding editor itself reads it fresh through
+  // `loadBrandingTarget`, never through this cached-per-request value.
+  themeTokens: true,
   stores: { where: { status: { not: "DRAFT" as const } }, select: { id: true } },
 } as const;
 
@@ -67,6 +72,9 @@ export type ManagedStoreDetail = AdminStoreListItem & {
   branchCount: number;
   brandSlug: PublicSlug;
   brandName: string;
+  /** F-011 tanda 3 (B14): as stored, unvalidated — the hub's card only reads
+   *  it through `ThemeSwatches`, which already parses defensively. */
+  brandThemeTokens: unknown;
 };
 
 async function findManagedStore(storeId: AuthorizedStoreId): Promise<ManagedStoreDetail | null> {
@@ -105,6 +113,7 @@ async function findManagedStore(storeId: AuthorizedStoreId): Promise<ManagedStor
     branchCount: storefront.stores.length,
     brandSlug: storefront.slug as PublicSlug,
     brandName: storefront.name,
+    brandThemeTokens: storefront.themeTokens,
   };
 }
 

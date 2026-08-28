@@ -40,31 +40,60 @@ const CUSTOM_PROPERTY: Record<keyof Omit<ThemeTokens, "radius">, string> = {
 };
 
 /**
+ * F-011 tanda 3: the ONE place that turns whatever is stored in
+ * `Storefront.themeTokens` (unvalidated — a manual edit, or a row saved
+ * before a schema change) into a `ThemeTokens` a caller can render or edit.
+ * An invalid value parses to `{}`, never a partial object and never a throw
+ * — both the hub's card and the branding editor call this, so a change in
+ * how an invalid value is handled cannot land in one and not the other.
+ */
+export function parseThemeTokens(raw: unknown): ThemeTokens {
+  const parsed = themeTokensSchema.safeParse(raw ?? {});
+  return parsed.success ? parsed.data : {};
+}
+
+/**
+ * F-011 tanda 3, paso 19: the SAME custom properties `renderStoreTheme`
+ * serializes into a `<style>` tag, as a plain object instead — so
+ * `StorefrontPreview` can apply them to a `style` attribute (no `<style>`,
+ * no `data-store`, architecture.md § Tanda 3 § Componentes). Same
+ * `CUSTOM_PROPERTY`/`RADIUS_SCALE`, zero new logic: this is a pure
+ * extraction, and `renderStoreTheme` below is rewritten to build its
+ * declarations FROM this function's output, so the two can never drift.
+ *
+ * Invalid input parses to `{}` the same way `renderStoreTheme` already
+ * treats it, and yields an empty object — never a partial one.
+ */
+export function themeCustomProperties(raw: unknown): Record<string, string> {
+  const tokens = parseThemeTokens(raw);
+  const properties: Record<string, string> = {};
+
+  for (const [key, property] of Object.entries(CUSTOM_PROPERTY)) {
+    const value = tokens[key as keyof typeof CUSTOM_PROPERTY];
+    if (value) properties[property] = value;
+  }
+
+  if (tokens.radius) {
+    const scale = RADIUS_SCALE[tokens.radius];
+    properties["--radius-sm"] = scale.sm;
+    properties["--radius-md"] = scale.md;
+    properties["--radius-lg"] = scale.lg;
+  }
+
+  return properties;
+}
+
+/**
  * Render a store's overrides as a scoped CSS rule.
  *
  * Returns an empty string when there is nothing to override, so the caller can
  * skip the <style> tag entirely rather than shipping an empty one on every page.
  */
 export function renderStoreTheme(slug: string, raw: unknown): string {
-  const parsed = themeTokensSchema.safeParse(raw ?? {});
-  if (!parsed.success) return "";
-
-  const tokens = parsed.data;
-  const declarations: string[] = [];
-
-  for (const [key, property] of Object.entries(CUSTOM_PROPERTY)) {
-    const value = tokens[key as keyof typeof CUSTOM_PROPERTY];
-    if (value) declarations.push(`${property}:${value}`);
-  }
-
-  if (tokens.radius) {
-    const scale = RADIUS_SCALE[tokens.radius];
-    declarations.push(
-      `--radius-sm:${scale.sm}`,
-      `--radius-md:${scale.md}`,
-      `--radius-lg:${scale.lg}`,
-    );
-  }
+  const properties = themeCustomProperties(raw);
+  const declarations = Object.entries(properties).map(
+    ([property, value]) => `${property}:${value}`,
+  );
 
   if (declarations.length === 0) return "";
 

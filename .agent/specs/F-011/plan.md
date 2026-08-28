@@ -1,10 +1,15 @@
 ---
 feature: F-011
 agente: orquestador
-actualizado: 2026-08-26T19:26:47Z
+actualizado: 2026-08-28T02:44:37Z
 estado: listo
 aprobado: sí
 ---
+
+> El plan de la **tanda 1** (pasos 1–18, más abajo) ya está construido, verificado
+> y firmado — no se toca ni se re-firma. Este documento vuelve a `estado: borrador`
+> solo para añadir la **tanda 3** (pasos 19–34, al final), sobre `Storefront`
+> (F-017), que HD6 dejó bloqueada. La firma nueva cubre solo esos dieciséis pasos.
 
 ## Qué se va a construir
 
@@ -203,10 +208,189 @@ plan se pueda leer sin el hilo del chat:
 - **HD14 — Seis motivos fijos más texto libre opcional**, obligatorio con «Otro».
   En la base se guarda el código, nunca la frase.
 
-## Aprobación
-
-<!-- Lo escribe `bash .agent/sdd.sh approve F-011 '<lo que dijo el humano>'`.
-     No se edita a mano, y esta sección se queda al final del archivo: la firma
-     se añade al pie. -->
+## Aprobación (tanda 1)
 
 - 2026-08-26T19:26:47Z — aprobado por el humano: «Me vale»
+
+---
+
+# Tanda 3 — el editor de branding sobre `Storefront`
+
+**Capítulo añadido el 2026-08-28.** Cierra el quinto y último `acceptance_criteria`
+de F-011 («Guardar branding inválido es rechazado por `themeTokensSchema` y no
+llega a la base»), bloqueado por HD6 hasta que existiera `Storefront` (F-017, ya
+`passes: true`). Se apoya en `.agent/specs/F-011/spec.md` § «Tanda 3» (`estado:
+listo`), `.agent/specs/F-011/architecture.md` § «Tanda 3» (`estado: listo`) y
+`.agent/specs/F-011/design.md` § «Tanda 3» (`estado: listo`). No reabre, no
+reescribe y no re-verifica los pasos 1–18: los criterios 1–4 siguen en `main`,
+verificados.
+
+## Qué se va a construir
+
+Un admin que administra **todas** las sucursales renderizables de su marca entra
+a `/admin/tiendas/{storeId}/marca`, elige una paleta o ajusta los cinco tokens a
+mano, mira una maqueta en vivo del catálogo de su cliente y guarda: el color
+cambia **en el acto**, en todas sus sucursales y en la página que las lista, sin
+esperar la hora de caché. Un branding inválido —un color que el navegador no
+entiende, una clave que no existe— se rechaza con un error por campo y **no
+llega a la base**. Un admin al que le falta aunque sea una sucursal de la marca
+ve la misma pantalla **sin ningún campo**, con el nombre y la ciudad de lo que le
+falta, nunca un formulario a medio llenar.
+
+Lo que **no** cambia: los cuatro criterios ya construidos (listado, 403, los seis
+campos de producto, imágenes), la tienda pública, y el contrato con cuadrecaja.
+
+## Pasos
+
+Dieciséis pasos, en el orden en que se ejecutan: dominio puro (19–22), embudo de
+escritura (23–24), HTTP (25), constantes y pantalla (26–29), deuda menor aprobada
+(30), fixture y sensor (31–33), cierre (34). **Sin migración de `prisma/schema.prisma`
+y sin ninguno de los dos comandos que `AGENTS.md` prohíbe.**
+
+| Nº  | Qué se hace                                                                                                                                                                                                                                                                                                                                        | Archivos                                                                                                                 | Criterio                          | Cómo se verifica                                                                                                                                                                                                                                   |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 19  | Extraer `themeCustomProperties()` de `renderStoreTheme`, mismo `CUSTOM_PROPERTY`/`RADIUS_SCALE`, como objeto — **cero cambio de salida**                                                                                                                                                                                                           | ~ `src/features/theming/storeTheme.ts`                                                                                   | 13 (no regresión)                 | Test de igualdad de cadena **antes** del refactor sobre los casos que ya cubre `storeTheme.test.ts`; `npm run check:theme` → 0                                                                                                                     |
+| 20  | `authorizeBrandCoverage` + `AuthorizedStorefrontId` + `CoverageBranch` + `BrandCoverageResult`: puro, 0 consultas, reutiliza `canManageStore`; `missing` sin `storeId`                                                                                                                                                                             | ~ `src/features/admin/authorization.ts`                                                                                  | 22 `[nuevo]`                      | `+ authorization.test.ts`: todas en sesión → `ok`; falta una → `FORBIDDEN` con esa sucursal en `missing` sin `storeId`; lista vacía → `ok`; no depende del orden                                                                                   |
+| 21  | `expandBrandRevalidation` + `BrandRevalidationSet`: gemela de `expandBrandTouch`, sin cast, con `canonicalSlug()`                                                                                                                                                                                                                                  | ~ `src/features/storefront/server/registry.ts`                                                                           | 17 `[nuevo]`                      | `+` test: un miembro sin slug propio → `[brandSlug]`; tres miembros → los tres slugs propios; un miembro sin slug dentro de una marca de varios → lanza                                                                                            |
+| 22  | `loadBrandingTarget`: la lectura única (R43) — marca, `themeTokens`, sucursales renderizables con `status` (B13)                                                                                                                                                                                                                                   | + `src/features/admin/server/branding.ts`                                                                                | 5, 22 `[nuevo]`                   | Test de tipos + integración: filtra `status != DRAFT`; `null` si la tienda desapareció                                                                                                                                                             |
+| 23  | `brandingBodySchema` re-exporta `themeTokensSchema` (ninguna clave redefinida); tipos de cable `AdminBrandingRow`/`BrandingBody`                                                                                                                                                                                                                   | + en `src/features/admin/schemas.ts`; + en `src/features/admin/types.ts`                                                 | 5, 16 `[nuevo]`                   | `+ schemas.test.ts`: `expect(brandingBodySchema).toBe(themeTokensSchema)`; `grep` sin `brandContrast`/`accentContrast`/`radius` en `schemas.ts`                                                                                                    |
+| 24  | `saveBrandTheme` + `commitBrand` (lista blanca `PanelStorefrontWrite = Pick<…, "themeTokens">`, revalida marca + todas las sucursales, nunca `revalidateSlugs`); `boundaries.test.ts` gana `"slug"` en `FORBIDDEN_WRITE_COLUMNS`                                                                                                                   | ~ `src/features/admin/server/mutations.ts`; ~ `src/features/admin/server/boundaries.test.ts`                             | 5, 17 `[nuevo]`                   | `+ mutations.test.ts` (mock `@/lib/cache`): `revalidateStores` con **todos** los canónicos, `revalidateStorefronts` con el slug de marca, **nunca** `revalidateSlugs`; `R34` por construcción (`themeTokensSchema.parse({})` → `{}`, nunca `null`) |
+| 25  | Endpoint `PUT`/`PATCH` `/api/admin/stores/{storeId}/branding`: guard (401/403 sin consulta) → lectura → `authorizeBrandCoverage` → 403 **antes** que 400 → cuerpo → mutación; mismo `forbidden()` para los dos 403 (R44)                                                                                                                           | + `src/app/api/admin/stores/[storeId]/branding/route.ts`                                                                 | 5, 22 `[nuevo]`                   | `curl` de la tabla de errores completa: 200/400×3/401/403×2/404/500, con `.issues[].path` no vacío en el 400                                                                                                                                       |
+| 26  | `src/constants/branding.ts`: seis paletas literales (DP13, con nota de que se espera un sistema de diseño propio más adelante), atajos `Claro`/`Oscuro`, dos nombres de producto de ejemplo                                                                                                                                                        | + `src/constants/branding.ts`                                                                                            | —                                 | `grep` sin cadenas mágicas equivalentes en los componentes que las usan                                                                                                                                                                            |
+| 27  | Pantalla `/admin/tiendas/{storeId}/marca` (+ `loading.tsx`): cabecera con la frase según N sucursales, editor 12a con cobertura completa, bloqueado 12b sin campos con `authorizeBrandCoverage`, `dynamic = "force-dynamic"` literal, 404 de tienda ajena                                                                                          | + `src/app/admin/tiendas/[storeId]/marca/{page,loading}.tsx`                                                             | 5, 22 `[nuevo]`                   | V33–V37 de `design.md`: sin `En camino.`; cuatro `name` de campo y cero `name` en el `type="color"`; con cobertura parcial → 200 con `Te faltan estas sucursales` y sin ningún campo ni `id` ajeno; tienda ajena → 404                             |
+| 28  | `BrandingForm` (isla, único `"use client"`) + `ColorTokenField`, `BrandCoverageNotice`, `ThemeSwatches`, `StorefrontPreview` (sin directiva): chips de paleta, control de color compuesto, `RadioCard` de `radius`, maqueta con `themeCustomProperties()` en `style`, `fetch`, `issues` por campo, confirmación en línea para quitar, `<noscript>` | + `src/features/admin/components/{BrandingForm,ColorTokenField,BrandCoverageNotice,ThemeSwatches,StorefrontPreview}.tsx` | 5, 13, 19 `[nuevo]`, 20 `[nuevo]` | V38–V40, V42, V44 de `design.md`; `grep -rn "use client" src/components/ui/` vacío; `npm run build && check:bundle && check:theme` → 0                                                                                                             |
+| 29  | Tarjeta del hub «Colores de tu marca» (sustituye «Colores y contacto · En camino»): cuatro muestras + esquinas si hay branding (B14: `themeTokens` en `STOREFRONT_SELECT`), enlace a la pantalla nueva                                                                                                                                             | ~ `src/app/admin/tiendas/[storeId]/page.tsx`; ~ `src/features/admin/server/stores.ts`                                    | —                                 | V33: el hub ya no contiene `En camino.`; cero consultas nuevas (misma `select` del hub, una columna más)                                                                                                                                           |
+| 30  | `/sesion-cerrada` (DP12, aprobado): componente de servidor, cero JS, explica que se cerró la sesión y se vuelve a entrar desde Cuadre de Caja — arregla de paso el 401 de agrupar sucursales                                                                                                                                                       | + `src/app/sesion-cerrada/page.tsx`                                                                                      | —                                 | `curl` tras un 401 tanto en agrupar como en branding llega a 200 con el texto, no a 404; `src/lib/slug.test.ts` (ya existente) deja de estar huérfano                                                                                              |
+| 31  | Fixture HD18: `seedBrandWithBranches()` — marca `el-trebol`, tres sucursales (`PUBLISHED`, `SUSPENDED`, `DRAFT`), `themeTokens: null`, sin productos; no toca `seedStore`/`seedClosedStore` ni `bodega-uno`/`bodega-dos`                                                                                                                           | ~ `prisma/seed.ts`                                                                                                       | 23 `[nuevo]`                      | `npm run seed && npm run seed` → 0, la marca conserva sus tres sucursales la segunda vez                                                                                                                                                           |
+| 32  | Sección de branding en el sensor repetible: los tres cuerpos inválidos (400, DB intacta), camino feliz (200 + `--color-brand` en la vitrina), `{}` (200, sin `<style>`), `oklch(...)` conservado, 403 de cobertura parcial, 200 con cobertura de marca revalidando las tres URL                                                                    | ~ `.agent/specs/F-011/smoke.sh`                                                                                          | 5, 17, 19, 20, 22, 23 `[nuevo]`   | `bash .agent/verify.sh F-011 --smoke` → 0                                                                                                                                                                                                          |
+| 33  | `.agent/specs/F-011/visual.mjs`: 360/768/1280 px del editor con branding, bloqueado por cobertura, y modo oscuro, reutilizando la etapa `--visual` que construyó F-017                                                                                                                                                                             | + `.agent/specs/F-011/visual.mjs`                                                                                        | 21 `[nuevo]`                      | `bash .agent/verify.sh F-011 --visual` → 0; V39–V44 de `design.md`                                                                                                                                                                                 |
+| 34  | Cierre de la tanda: `tests.md` con veredicto por criterio (los cinco de `features.json` + los criterios `[nuevo]` de las tres tandas), progreso actualizado, lecciones fichadas, y la decisión de `passes` que solo toma el humano (SP5)                                                                                                           | ~ `tests.md`, `progress/F-011.md`, `.agent/playbook/`                                                                    | —                                 | `verify.sh F-011 --full` → 0 en sus nueve etapas; `verify.sh pending F-011` vacío                                                                                                                                                                  |
+
+## De dónde sale cada paso
+
+| Paso | De dónde sale                                                                                                 |
+| ---- | ------------------------------------------------------------------------------------------------------------- |
+| 19   | `architecture.md` § Componentes (`themeCustomProperties`); `design.md` § Cómo encaja con `architecture.md`    |
+| 20   | `architecture.md` § Decisión punto 2 y § Contratos → «Autorización»; `spec.md` HD16, R42                      |
+| 21   | `architecture.md` § Decisión punto 4 y § Contratos → «La proyección de revalidación»; `spec.md` R36, R37, I12 |
+| 22   | `architecture.md` § Decisión punto 3 y § Contratos → «La lectura única»; `spec.md` R43; `design.md` B13       |
+| 23   | `architecture.md` § Contratos → «El esquema»; `spec.md` R32, criterio 16                                      |
+| 24   | `architecture.md` § Contratos → «El embudo» y § Pruebas que exige; `spec.md` R33, R34, R35                    |
+| 25   | `architecture.md` § «El endpoint» y § Tabla de errores; `spec.md` E35–E42                                     |
+| 26   | `design.md` § 12a (i)/(ii)/(iv); DP13 (aprobada, con nota de reemplazo futuro)                                |
+| 27   | `design.md` § 12, 12a, 12b; `architecture.md` § Componentes (pantalla de marca)                               |
+| 28   | `design.md` § 12a, § Componentes de UI; `architecture.md` § Componentes (`BrandingForm`)                      |
+| 29   | `design.md` § 11; `design.md` B14                                                                             |
+| 30   | `design.md` DP12 (aprobada); `design.md` VE26                                                                 |
+| 31   | `architecture.md` § Modelo de datos y migraciones → «La fixture de HD18»                                      |
+| 32   | `architecture.md` § Fixtures y cómo se verifica                                                               |
+| 33   | `design.md` § Verificación (V39–V44); `architecture.md` § Componentes (`visual.mjs`)                          |
+| 34   | `.agent/README.md` § «Al completar un feature»; `spec.md` § «No decidido a propósito» (SP5)                   |
+
+Ningún paso sale de un documento que no exista.
+
+## Qué queda fuera
+
+- **El contacto de la marca** (`contactPhone`, `contactWhatsapp`, `contactEmail`).
+  HD17/SP2: fuera de esta tanda, deuda anotada en `spec.md` I15.
+- **Logo y portada de la marca** (`logoUrl`, `coverUrl`). HD19/SP4: fuera; F-023 va
+  a cambiar cómo se almacenan y sirven las imágenes.
+- **`Storefront.slug`.** Lo gobierna el registro de slugs (ADR 0018); cambiarlo es
+  otro feature.
+- **`Storefront.name`.** Nace del sync; renombrarla no lo pide ningún criterio.
+- **Validación de contraste en servidor.** HD8/R39: un branding ilegible se puede
+  guardar, con aviso en la maqueta, sin bloquear.
+- **Agrupar y desagrupar sucursales.** Ya construido (agrupar, F-017) o descartado
+  a propósito (desagrupar, ADR 0018 (f)).
+- **Publicar, cerrar y abrir la tienda al público.** Es de la sucursal y ya está
+  construido (tanda 1, HD10–HD15).
+- **Los criterios 1–4 y sus pantallas.** Verificados y en `main`; no se reabren.
+- **Un permiso nuevo por marca** (`AuthorizedStorefrontId` con endpoint propio por
+  `storefrontId`). Descartado en `architecture.md`: la marca se deriva de una
+  sucursal ya autorizada, nunca de la URL ni del cuerpo.
+
+## Riesgos y plan B
+
+- **Sin migración de schema y sin los comandos prohibidos por `AGENTS.md`**:
+  `Storefront.themeTokens` ya existe (F-017). Si en algún paso pareciera hacer
+  falta una migración, es señal de que algo se entendió mal — se para y se
+  pregunta.
+- **`ThemeTokens` (propiedades opcionales) puede no encajar en
+  `Prisma.InputJsonValue`.** Plan B: `as Prisma.InputJsonObject` en el `data`,
+  nunca `any` (ESLint lo prohíbe).
+- **La lectura nueva puede disparar el test de fronteras del storefront** si va
+  por `slug` en vez de por `id`, o si anida `storefront: { slug: true }` en vez
+  de `storefront: { select: … }`. Ya está previsto en el paso 22; si aun así
+  salta, el mensaje del test señala el archivo.
+- **Extraer `themeCustomProperties()` puede cambiar un carácter del `<style>`
+  público.** Plan B: el test de igualdad de cadena del paso 19 corre **antes**
+  del refactor, no después.
+- **La fixture de tres sucursales (paso 31) puede mover qué página mide
+  `check:bundle`.** Las tres páginas nuevas no llevan catálogo (más ligeras que
+  `tienda-demo`), así que la página peor medida no cambia; el smoke ya comprueba
+  cuál se midió (patrón del ciclo 2).
+- **`npm run seed` dos veces puede dejar la marca a medias.** Criterio 23 en el
+  sensor lo comprueba explícitamente; `seedStorefront()` ya es idempotente contra
+  el registro `Slug`.
+- **El techo de la cookie de sesión (~60–65 tiendas, límite de F-008) hace que una
+  marca con más de ~60 sucursales renderizables no tenga branding editable por
+  nadie.** Es consecuencia medida de HD16, no un bug de esta tanda; el arreglo es
+  de F-008.
+- **Revalidar una marca grande cuesta 2N+1 tags** (~1,5–3,5 s con 60 sucursales).
+  Si algún día hace falta, se mueve a un `after()` o a una cola — **nunca** se
+  revalida menos, porque eso reabre la ficha del playbook sobre revalidar solo lo
+  que se escribe.
+- **`check:harness` puede marcar en falso archivos "por crear" citados con ruta
+  abreviada.** Ya mordió en F-011 y F-017: las rutas nuevas van sin comillas
+  invertidas y con «(por crear)», como en la tabla de pasos de arriba.
+- **DP13 es un valor de paso, no definitivo**: el humano ya avisó que estos seis
+  hexadecimales se van a reemplazar cuando exista un sistema de diseño propio.
+  Cambiarlos después es editar `src/constants/branding.ts`; no toca ninguna
+  tienda ya guardada (los tokens se guardan como valor, no como referencia a la
+  paleta).
+
+## Coste
+
+- **Ciclos de agente**: 1 de implementación (los dieciséis pasos son un solo
+  camino de escritura sobre piezas que ya existen, sin migración) + 1 de pruebas,
+  más los reintentos del sensor. Es mucho más pequeño que la tanda 1 porque reusa
+  el embudo, el guard y la capa HTTP enteros.
+- **Se toca de lo que ya funciona**: `authorization.ts`, `mutations.ts`,
+  `boundaries.test.ts`, `registry.ts` del storefront, `stores.ts` (una columna más
+  en un `select` existente), el hub de tienda (una tarjeta) y `storeTheme.ts` (un
+  refactor sin cambio de salida). Nada de esto tiene migración de datos detrás.
+- **Marcha atrás**: todo el capítulo es aditivo y sin migración — `git revert` del
+  diff completo, sin dato que deshacer. El paso más caro de deshacer a medias es
+  el 31 (la fixture del seed), y solo si `npm run seed` ya corrió en una base con
+  datos que alguien quiere conservar.
+
+## Preguntas antes de aprobar
+
+Ninguna abierta. Las seis que hubo (SP1–SP4 de la spec, DP12 y DP13 del diseño)
+están resueltas y escritas aquí para que el plan se lea sin el hilo del chat:
+
+- **SP1 — Cobertura estricta**: un admin solo edita el branding de una marca si
+  `session.storeIds` cubre el **100 %** de sus sucursales renderizables. Si falta
+  una, 403 seco — nunca un guardado parcial ni un aviso de «a cuántas afecta».
+- **SP2 — El contacto de la marca queda fuera** de esta tanda.
+- **SP3 — La fixture de dos-o-más-sucursales va en `prisma/seed.ts`** (marca
+  `el-trebol`, de un solo uso), no agrupada al vuelo dentro del smoke.
+- **SP4 — Logo y portada quedan fuera** de esta tanda.
+- **DP12 — Se construye `/sesion-cerrada`** en esta tanda (paso 30): quince líneas,
+  arregla de paso el 401 de agrupar sucursales.
+- **DP13 — Se aprueban los seis hexadecimales de las paletas**, con la advertencia
+  del humano de que se van a reemplazar por un sistema de diseño propio más
+  adelante; el reemplazo es una edición de constante, no de esta tanda.
+
+**Lo que sigue abierto a propósito, y no bloquea esta firma**: si F-011 pasa a
+`passes: true` al cerrar esta tanda pese a que su nota en `features.json` menciona
+que F-023 sustituye parcialmente el criterio 4. `spec.md` lo deja como «No
+decidido a propósito» — es una decisión de cierre, no de plan, y se le pregunta
+al humano en el paso 34.
+
+## Aprobación (tanda 3)
+
+<!-- Lo escribe `bash .agent/sdd.sh approve F-011 '<lo que dijo el humano>'`.
+     No se edita a mano. -->
+
+- 2026-08-28T02:44:37Z — aprobado por el humano: «Apruebo el plan (recomendado)»

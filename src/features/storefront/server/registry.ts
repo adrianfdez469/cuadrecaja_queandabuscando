@@ -276,6 +276,54 @@ export function expandBrandTouch(
   return [brandSlug, ...ownSlugValues] as unknown as SlugTouchSet;
 }
 
+declare const brandRevalidationBrand: unique symbol;
+/**
+ * F-011 tanda 3 (R36, R37, I12): what `expandBrandRevalidation()` returns,
+ * and nothing else. Same nominal trick as `SlugTouchSet` above — a
+ * hand-rolled object with this exact shape does NOT satisfy this type, so
+ * building the revalidation set any other way is a compile error at
+ * `saveBrandTheme`'s signature, not something that depends on a grep
+ * recognizing the right syntax.
+ */
+export type BrandRevalidationSet = {
+  /** Canonical slug of every RENDERABLE branch — for `revalidateStores`. */
+  readonly canonicalSlugs: readonly PublicSlug[];
+  /** The brand's own slug — for `revalidateStorefronts`. */
+  readonly brandSlugs: readonly string[];
+} & { readonly [brandRevalidationBrand]: true };
+
+/**
+ * THE single place that turns "a brand's own slug, plus its RENDERABLE
+ * members as they stand right now" into what a branding write has to
+ * revalidate (R36): every member's own canonical slug, plus the brand's own.
+ * Gemela of `expandBrandTouch` — a branding write does not change any
+ * slug's RESOLUTION (§ Cinco cosas que solo se ven leyendo, punto 3 de
+ * architecture.md), so this never calls `revalidateSlugs`, only
+ * `revalidateStores`/`revalidateStorefronts`.
+ *
+ * No cast: every canonical slug is produced by `canonicalSlug()` itself, so
+ * a brand with exactly one renderable member returns `[brandSlug]` with no
+ * special case, and `canonicalSlug()` throws if a member of a multi-branch
+ * brand somehow lacks its own `slug` — the ADR 0018 invariant broken
+ * upstream, not swallowed here.
+ */
+export function expandBrandRevalidation(
+  brandSlug: string,
+  members: readonly BrandMemberSlug[],
+): BrandRevalidationSet {
+  const canonicalSlugs = members.map((member) =>
+    canonicalSlug({
+      storeSlug: member.slug,
+      brandSlug,
+      brandBranchCount: members.length,
+    }),
+  );
+  return {
+    canonicalSlugs,
+    brandSlugs: [brandSlug],
+  } as unknown as BrandRevalidationSet;
+}
+
 export type RegroupInput = { primaryStoreId: string; joiningStoreId: string };
 
 export type RegroupRejection = "DIFFERENT_BUSINESS" | "ALREADY_IN_BRAND" | "NOT_FOUND";

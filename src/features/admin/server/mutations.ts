@@ -5,12 +5,17 @@ import type { Prisma } from "@/generated/prisma/client";
 import { extensionForMime } from "@/lib/imageType";
 import type { AllowedImageMime } from "@/constants/media";
 import { uploadStoreObject } from "@/lib/supabase/storage";
-import { expandBrandTouch, regroupStoreIntoBrand } from "@/features/storefront/server/registry";
+import {
+  expandBrandTouch,
+  regroupStoreIntoBrand,
+  type BrandRevalidationSet,
+} from "@/features/storefront/server/registry";
 import { objectPathFor } from "../storagePaths";
-import type { AuthorizedStoreId } from "../authorization";
+import type { AuthorizedStorefrontId, AuthorizedStoreId } from "../authorization";
 import { PRODUCT_ROW_SELECT, toAdminProductRow } from "./products";
 import { PROMOTION_ROW_SELECT, toAdminPromotionRow } from "./promotions";
 import type {
+  AdminBrandingRow,
   AdminProductRow,
   AdminPromotionRow,
   AdminStoreRow,
@@ -20,6 +25,7 @@ import type {
   ProductWriteBody,
   StoreStatusBody,
 } from "../types";
+import type { ThemeTokens } from "@/features/theming/storeTheme";
 
 /**
  * The panel's write funnel. THE ONLY file in the panel that writes to
@@ -68,6 +74,67 @@ async function commit<T>(slug: PublicSlug, write: () => Promise<T>): Promise<T> 
   const value = await write();
   revalidateStores([slug]);
   return value;
+}
+
+/**
+ * F-011 tanda 3 (R31, R35): the ONLY column of `Storefront` the panel writes
+ * today. `slug`/`name`/`businessId` are the brand's identity and belong to
+ * `features/storefront/server/registry.ts`; contact and the two image
+ * columns stay without a writer (HD17, HD19, I15).
+ */
+type PanelStorefrontColumn = "themeTokens";
+type PanelStorefrontWrite = Pick<Prisma.StorefrontUpdateInput, PanelStorefrontColumn>;
+
+/**
+ * Gemelo of `commit()` for a BRAND write (R36): revalidates every renderable
+ * branch AND the brand itself. Private, like `commit()` — writing branding
+ * without revalidating the whole set is not possible without editing this
+ * file.
+ */
+async function commitBrand<T>(touch: BrandRevalidationSet, write: () => Promise<T>): Promise<T> {
+  const value = await write();
+  revalidateStores(touch.canonicalSlugs);
+  revalidateStorefronts(touch.brandSlugs);
+  return value;
+}
+
+/**
+ * F-011 tanda 3 (HD16, R42-R44): `storefrontId` is only ever
+ * `AuthorizedStorefrontId` — produced by `authorizeBrandCoverage`, which
+ * only succeeds when `session.storeIds` covers EVERY renderable branch.
+ * `touch` is only ever a `BrandRevalidationSet` — produced by
+ * `expandBrandRevalidation`, from the SAME branches array that authorized
+ * the write (R43). Neither can be hand-rolled: both are branded types.
+ */
+export async function saveBrandTheme(
+  storefrontId: AuthorizedStorefrontId,
+  touch: BrandRevalidationSet,
+  tokens: ThemeTokens, // R33: `parsed.data`, never the raw request body
+): Promise<AdminWriteResult<AdminBrandingRow>> {
+  try {
+    const updated = await commitBrand(touch, () =>
+      prisma.storefront.update({
+        where: { id: storefrontId },
+        // R34: `themeTokensSchema.parse({})` is `{}`, never `null` — there is
+        // no code path that could hand this a `null` for a `Json?` column.
+        data: { themeTokens: tokens as Prisma.InputJsonObject } satisfies PanelStorefrontWrite,
+        select: { id: true, slug: true, themeTokens: true },
+      }),
+    );
+
+    return {
+      kind: "saved",
+      value: {
+        storefrontId: updated.id,
+        brandSlug: updated.slug as PublicSlug,
+        themeTokens: tokens,
+        branchCount: touch.canonicalSlugs.length,
+      },
+    };
+  } catch (error) {
+    if (isRecordNotFound(error)) return { kind: "not_found" };
+    throw error;
+  }
 }
 
 /**

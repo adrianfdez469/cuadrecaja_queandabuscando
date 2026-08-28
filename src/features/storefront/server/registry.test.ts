@@ -30,7 +30,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-const { createStorefrontWithStore, previewSlug, regroupStoreIntoBrand } =
+const { createStorefrontWithStore, expandBrandRevalidation, previewSlug, regroupStoreIntoBrand } =
   await import("./registry");
 
 function storeData() {
@@ -521,5 +521,33 @@ describe("regroupStoreIntoBrand() — HS8, § Agrupar dos tiendas bajo una marca
     // sin enterarse de que E se unió. `tests.md` § Fallos encontrados #2.
     expect(result.revalidate.slugValues).toContain("grupo-joining-test");
     expect(result.revalidate.canonicalSlugs).toContain("grupo-joining-test");
+  });
+});
+
+describe("expandBrandRevalidation() — F-011 tanda 3 (R36, R37, I12)", () => {
+  it("a single member with no own slug resolves to [brandSlug]", () => {
+    const result = expandBrandRevalidation("el-trebol", [{ slug: null }]);
+    expect(result.canonicalSlugs).toEqual(["el-trebol"]);
+    expect(result.brandSlugs).toEqual(["el-trebol"]);
+  });
+
+  it("three members each return their own canonical slug", () => {
+    const result = expandBrandRevalidation("el-trebol", [
+      { slug: "el-trebol-centro" },
+      { slug: "el-trebol-playa" },
+      { slug: "el-trebol-almacen" },
+    ]);
+    expect(result.canonicalSlugs).toEqual([
+      "el-trebol-centro",
+      "el-trebol-playa",
+      "el-trebol-almacen",
+    ]);
+    expect(result.brandSlugs).toEqual(["el-trebol"]);
+  });
+
+  it("throws when a member of a multi-branch brand lacks its own slug (ADR 0018 invariant)", () => {
+    expect(() =>
+      expandBrandRevalidation("el-trebol", [{ slug: "el-trebol-centro" }, { slug: null }]),
+    ).toThrow();
   });
 });

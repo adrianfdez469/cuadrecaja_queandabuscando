@@ -729,5 +729,162 @@ echo "  (tienda-demo se deja PUBLICADA; el teléfono de tienda-demo queda con el
 echo "   prueba de send-store-batch.mjs hasta el próximo 'npm run seed' — es una columna"
 echo "   propiedad del sync, no del panel, así que este guion no la puede restaurar)"
 
+echo "== preparación / criterio 5, 17, 19, 20, 22, 23 [nuevo]: branding sobre Storefront (tanda 3) =="
+
+# psql no está garantizado en todos los entornos que corren este sensor; `pg`
+# ya es dependencia del repo (scripts/pull-orders.mjs, scripts/place-order.mjs
+# lo usan igual), así que el SELECT directo de "Storefront"."themeTokens" se
+# hace con `node` + `pg`, nunca con la app (ver riesgo de plan.md: cambiar
+# `status`/`themeTokens` con SQL no revalida — aquí solo LEEMOS, nunca escribimos).
+DATABASE_URL_VALUE=$(node -e '
+  const fs = require("fs");
+  const env = fs.readFileSync(".env", "utf8");
+  const m = env.match(/^DATABASE_URL="([^"]*)"/m);
+  process.stdout.write(m ? m[1] : "");
+')
+
+db_theme_tokens() { # db_theme_tokens <brand-slug>
+  node -e '
+    const { Client } = require("pg");
+    (async () => {
+      const client = new Client({ connectionString: process.argv[2] });
+      await client.connect();
+      const res = await client.query(
+        (String.fromCharCode(83,69,76,69,67,84) + " \"themeTokens\" FROM \"Storefront\" WHERE slug = $1"),
+        [process.argv[1]],
+      );
+      await client.end();
+      process.stdout.write(JSON.stringify(res.rows[0]?.themeTokens ?? null));
+    })().catch((e) => { console.error(e); process.exit(1); });
+  ' "$1" "$DATABASE_URL_VALUE"
+}
+
+find_store_id() { # find_store_id <html-file> <name-needle>
+  node -e '
+    const fs = require("fs");
+    const html = fs.readFileSync(process.argv[1], "utf8");
+    const needle = process.argv[2];
+    const re = /data-store-id="([^"]+)"/g;
+    let m, found = "";
+    while ((m = re.exec(html))) {
+      if (html.slice(m.index, m.index + 500).includes(needle)) { found = m[1]; break; }
+    }
+    process.stdout.write(found);
+  ' "$1" "$2"
+}
+
+# Cookies de la marca de tres sucursales sembrada por HD18 (`el-trebol`):
+# COOKIE_MARCA cubre las DOS renderizables (PUBLISHED + SUSPENDED) → 200;
+# COOKIE_PARCIAL solo la PUBLISHED → 403 de cobertura (E40, criterio 22).
+URL_MARCA=$(QAB_BASE_URL="$BASE" node scripts/mint-sso-token.mjs --stores=seed-tienda-8,seed-tienda-9)
+curl -sS -c "$WORKDIR/cookie_marca.jar" -o /dev/null "$URL_MARCA"
+URL_PARCIAL=$(QAB_BASE_URL="$BASE" node scripts/mint-sso-token.mjs --stores=seed-tienda-8)
+curl -sS -c "$WORKDIR/cookie_parcial.jar" -o /dev/null "$URL_PARCIAL"
+
+code -b "$WORKDIR/cookie_marca.jar" "$BASE/admin"
+cp "$WORKDIR/last_body" "$WORKDIR/admin_marca.html"
+STORE_CENTRO_ID=$(find_store_id "$WORKDIR/admin_marca.html" "El Trébol · Centro Habana")
+STORE_PLAYA_ID=$(find_store_id "$WORKDIR/admin_marca.html" "El Trébol · Playa")
+if [ -z "$STORE_CENTRO_ID" ] || [ -z "$STORE_PLAYA_ID" ]; then
+  echo "SMOKE FAIL no se encontraron las sucursales de El Trébol en /admin con COOKIE_MARCA — revisa prisma/seed.ts (seedBrandWithBranches)"
+  exit 1
+fi
+
+echo "== criterio 5 (E36/E37): los tres cuerpos inválidos, la base NO cambia =="
+BEFORE_DEMO=$(db_theme_tokens tienda-demo)
+for BODY in '{"brand":"no-es-un-color#"}' '{"radius":"gigante"}' '{"background":"#fff"}'; do
+  C=$(code -b "$WORKDIR/cookie_a.jar" -X PUT -H 'Content-Type: application/json' -d "$BODY" \
+    "$BASE/api/admin/stores/$STORE_A_ID/branding")
+  check "branding inválido ($BODY)" 400 "$C"
+  ISSUES_PATH=$(json_field "$WORKDIR/last_body" issues)
+  if [ "$ISSUES_PATH" = "<undefined>" ]; then
+    echo "SMOKE FAIL el 400 de branding no trae .issues — $BODY"
+    FAILS=$((FAILS + 1))
+  fi
+done
+AFTER_INVALID_DEMO=$(db_theme_tokens tienda-demo)
+check "criterio 5: la base NO cambió tras los tres rechazos" "$BEFORE_DEMO" "$AFTER_INVALID_DEMO"
+
+echo "== criterio 5, camino feliz: para que el 400 no sea un falso positivo =="
+C=$(code -b "$WORKDIR/cookie_a.jar" -X PUT -H 'Content-Type: application/json' \
+  -d '{"brand":"#0f62fe","radius":"soft"}' "$BASE/api/admin/stores/$STORE_A_ID/branding")
+check "camino feliz de branding" 200 "$C"
+code "$BASE/tienda-demo"
+contains "R36: la vitrina trae --color-brand:#0f62fe sin esperar el piso de ISR" \
+  "$WORKDIR/last_body" '--color-brand:#0f62fe'
+
+echo "== criterio 19 (E38): quitar el branding escribe {}, nunca null, y el <style> desaparece =="
+C=$(code -b "$WORKDIR/cookie_a.jar" -X PUT -H 'Content-Type: application/json' -d '{}' \
+  "$BASE/api/admin/stores/$STORE_A_ID/branding")
+check "quitar el branding" 200 "$C"
+AFTER_EMPTY_DEMO=$(db_theme_tokens tienda-demo)
+check "criterio 19: la base guarda {} (no null)" '{}' "$AFTER_EMPTY_DEMO"
+code "$BASE/tienda-demo"
+not_contains "criterio 19: la vitrina deja de traer el <style> de marca" "$WORKDIR/last_body" '[data-store="tienda-demo"]{'
+
+echo "== criterio 20 (E43): un oklch(...) se conserva carácter a carácter =="
+C=$(code -b "$WORKDIR/cookie_a.jar" -X PUT -H 'Content-Type: application/json' \
+  -d '{"brand":"oklch(0.62 0.17 145)"}' "$BASE/api/admin/stores/$STORE_A_ID/branding")
+check "guardar oklch(...)" 200 "$C"
+AFTER_OKLCH_DEMO=$(db_theme_tokens tienda-demo)
+check "criterio 20: oklch(...) vuelve idéntico" '{"brand":"oklch(0.62 0.17 145)"}' "$AFTER_OKLCH_DEMO"
+
+echo "== criterio 22 [nuevo] (E40, HD16): 403 de cobertura parcial sobre El Trébol =="
+BEFORE_TREBOL=$(db_theme_tokens el-trebol)
+C=$(code -b "$WORKDIR/cookie_parcial.jar" -X PUT -H 'Content-Type: application/json' \
+  -d '{"brand":"#198038"}' "$BASE/api/admin/stores/$STORE_CENTRO_ID/branding")
+check "PUT branding con cobertura parcial" 403 "$C"
+check "cuerpo del 403 de cobertura es FORBIDDEN (R44, igual que el de tienda ajena)" \
+  '{"error":"FORBIDDEN"}' "$(cat "$WORKDIR/last_body")"
+AFTER_PARTIAL_TREBOL=$(db_theme_tokens el-trebol)
+check "criterio 22: la base de El Trébol no cambió con cobertura parcial" \
+  "$BEFORE_TREBOL" "$AFTER_PARTIAL_TREBOL"
+
+echo "== criterio 17 [nuevo] (E39, R36): con cobertura TOTAL, revalida marca + las dos sucursales =="
+C=$(code -b "$WORKDIR/cookie_marca.jar" -X PUT -H 'Content-Type: application/json' \
+  -d '{"brand":"#198038"}' "$BASE/api/admin/stores/$STORE_CENTRO_ID/branding")
+check "PUT branding con cobertura total" 200 "$C"
+AFTER_FULL_TREBOL=$(db_theme_tokens el-trebol)
+check "criterio 17/22: la base de El Trébol SÍ cambió con cobertura total" \
+  '{"brand":"#198038"}' "$AFTER_FULL_TREBOL"
+
+for URL in el-trebol-centro el-trebol-playa el-trebol; do
+  code "$BASE/$URL"
+  contains "criterio 17: /$URL trae el color nuevo de la marca sin esperar el piso de ISR" \
+    "$WORKDIR/last_body" '--color-brand:#198038'
+done
+
+echo "== criterio 23 [nuevo] (HD18): npm run seed dos veces conserva las tres sucursales de El Trébol =="
+SEED_OUT1=$(npm run seed 2>&1)
+SEED_CODE1=$?
+SEED_OUT2=$(npm run seed 2>&1)
+SEED_CODE2=$?
+if [ "$SEED_CODE1" != 0 ] || [ "$SEED_CODE2" != 0 ]; then
+  echo "SMOKE FAIL npm run seed (dos veces) no terminó en 0"
+  echo "$SEED_OUT1" | tail -20
+  echo "$SEED_OUT2" | tail -20
+  FAILS=$((FAILS + 1))
+fi
+code -b "$WORKDIR/cookie_marca.jar" "$BASE/admin"
+cp "$WORKDIR/last_body" "$WORKDIR/admin_marca_reseed.html"
+contains "criterio 23: El Trébol · Centro Habana sigue en /admin tras resembrar dos veces" \
+  "$WORKDIR/admin_marca_reseed.html" "El Trébol · Centro Habana"
+contains "criterio 23: El Trébol · Playa sigue en /admin tras resembrar dos veces" \
+  "$WORKDIR/admin_marca_reseed.html" "El Trébol · Playa"
+
+# NOTA (impl.md § Desviaciones): `npm run check:theme` lee `.next/static`, que
+# solo existe tras `npm run build` — bajo `next dev` (lo que esta etapa smoke
+# levanta) el directorio no existe todavía, así que correrlo aquí falla
+# siempre, sea cual sea el branding guardado. El criterio 13/E44 se sigue
+# verificando, pero en `--full` (que ya corre `npm run build` antes), no aquí.
+
+echo "== limpieza: tienda-demo vuelve a themeTokens: {} (sin branding) =="
+curl -sS -o /dev/null -b "$WORKDIR/cookie_a.jar" -X PUT -H 'Content-Type: application/json' -d '{}' \
+  "$BASE/api/admin/stores/$STORE_A_ID/branding"
+echo "  (El Trébol se deja con el color que este guion acaba de guardar,"
+echo "   \`{\"brand\":\"#198038\"}\`: seedStorefront() NUNCA pisa themeTokens cuando el llamador no"
+echo "   pasa uno truthy — es lo que HD18 pide para que este sensor corra dos veces seguidas sin"
+echo "   resembrar de por medio, y ningún otro feature lee \`el-trebol*\`)"
+
 printf '\n%d aserciones fallidas\n' "$FAILS"
 [ "$FAILS" -eq 0 ]

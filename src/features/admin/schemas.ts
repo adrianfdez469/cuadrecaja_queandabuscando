@@ -7,6 +7,7 @@ import {
   STORE_DISABLED_MESSAGE_MAX_LENGTH,
 } from "@/constants/storeClosure";
 import { PROMOTION_MAX_PRODUCTS, PROMOTION_NAME_MAX_LENGTH } from "@/constants/promotions";
+import { themeTokensSchema } from "@/features/theming/storeTheme";
 import type { GroupStoresBody, ProductWriteBody, PromotionBody, StoreStatusBody } from "./types";
 
 /**
@@ -113,6 +114,15 @@ function endsAfterStarts(data: { startsAt: string; endsAt: string | null }): boo
   if (!data.endsAt) return true;
   return new Date(data.endsAt).getTime() > new Date(data.startsAt).getTime();
 }
+
+/**
+ * F-011 tanda 3 (R32, criterio 16): NOT a copy of the five branding keys —
+ * the criterion literally says "rechazado por themeTokensSchema", so the
+ * endpoint has to use THAT object. An alias is the most this file does with
+ * it; `schemas.test.ts` pins the identity with `.toBe()`, and a `grep` for
+ * `brandContrast`/`accentContrast`/`radius` in this file must find nothing.
+ */
+export { themeTokensSchema as brandingBodySchema };
 
 export const promotionBodySchema = z
   .discriminatedUnion("scope", [
