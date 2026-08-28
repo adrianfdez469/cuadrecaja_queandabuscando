@@ -5,6 +5,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { buildSearchDocument } from "../src/lib/canonical";
 import { RESERVED_SLUGS, slugify } from "../src/lib/slug";
 import { writeSearchDocument } from "../src/features/marketplace/server/searchVector";
+import { mintSyncToken } from "../src/lib/syncAuth";
 
 /**
  * Development seed.
@@ -218,6 +219,30 @@ const SECOND_STORE_PRODUCTS: SeedProduct[] = [
   },
 ];
 
+/**
+ * F-018 (E26, C1): a second, fully independent business — its own store,
+ * its own products, its own token. Ids and slug deliberately new
+ * (`seed-negocio-2`, `seed-tienda-7`) so this fixture never crosses the one
+ * F-004/F-010/F-011/F-017 already read (risk table, plan.md).
+ */
+const OTHER_BUSINESS_PRODUCTS: SeedProduct[] = [
+  {
+    name: "Miel de abeja 250 g",
+    category: "Otro negocio",
+    price: "890",
+    currency: "CUP",
+    availability: "AVAILABLE",
+    featured: true,
+  },
+  {
+    name: "Vinagre de manzana 500 ml",
+    category: "Otro negocio",
+    price: "410",
+    currency: "CUP",
+    availability: "AVAILABLE",
+  },
+];
+
 async function main() {
   console.log("Seeding…");
 
@@ -390,6 +415,60 @@ async function main() {
     products: [DEMO_PRODUCTS[2], DEMO_PRODUCTS[5]],
     categories,
   });
+
+  // F-018 (E26, C1, C7): a second business, fully independent — what makes
+  // "the pull of A never sees B's orders" verifiable against real seeded
+  // data, not only against the `db` project's own fixtures.
+  const otherBusiness = await prisma.business.upsert({
+    where: { externalId: "seed-negocio-2" },
+    create: {
+      externalId: "seed-negocio-2",
+      name: "Colmado El Faro",
+      baseCurrencyCode: "CUP",
+    },
+    update: {},
+  });
+
+  const otherCategoryName = "Otro negocio";
+  const otherCategory = await prisma.localCategory.upsert({
+    where: {
+      businessId_externalId: {
+        businessId: otherBusiness.id,
+        externalId: `seed-cat-${slugify(otherCategoryName)}`,
+      },
+    },
+    create: {
+      businessId: otherBusiness.id,
+      externalId: `seed-cat-${slugify(otherCategoryName)}`,
+      name: otherCategoryName,
+      slug: slugify(otherCategoryName),
+    },
+    update: { name: otherCategoryName },
+  });
+  const otherCategories = new Map([[otherCategoryName, otherCategory.id]]);
+
+  await seedStore({
+    businessId: otherBusiness.id,
+    externalId: "seed-tienda-7",
+    slug: "el-faro",
+    name: "Colmado El Faro",
+    description: "Un negocio totalmente distinto, para probar el aislamiento por token.",
+    city: "Santiago de Cuba",
+    address: "Calle Enramada, Santiago de Cuba",
+    whatsapp: "+5350000007",
+    themeTokens: null,
+    checkoutMode: "WHATSAPP",
+    deliveryEnabled: false,
+    deliveryFee: null,
+    products: OTHER_BUSINESS_PRODUCTS,
+    categories: otherCategories,
+  });
+
+  // HD4/E23/E26/E27: acuña solo si el negocio todavía no tiene hash, para
+  // que `npm run seed && npm run seed` (el CI siembra dos veces) no rote el
+  // token que el desarrollador ya guardó (C15).
+  await ensureSyncToken(business);
+  await ensureSyncToken(otherBusiness);
 
   const counts = {
     stores: await prisma.store.count(),
@@ -626,6 +705,30 @@ async function seedStore(input: {
       },
     });
   }
+}
+
+/**
+ * HD4/E23/E26/E27: acuña un token de sync SOLO si `business` todavía no
+ * tiene `syncTokenHash`. Usa la MISMA `mintSyncToken` que el script de
+ * acuñación y el guard (PP2) — nunca una reimplementación. Idempotente por
+ * diseño: la segunda corrida del seed no toca el hash ya poblado, así que
+ * el token que el desarrollador ya guardó de la primera corrida sigue
+ * sirviendo (C15).
+ */
+async function ensureSyncToken(business: { id: string; externalId: string }): Promise<void> {
+  const current = await prisma.business.findUniqueOrThrow({
+    where: { id: business.id },
+    select: { syncTokenHash: true },
+  });
+  if (current.syncTokenHash) return;
+
+  const { token, hash } = mintSyncToken();
+  await prisma.business.update({ where: { id: business.id }, data: { syncTokenHash: hash } });
+
+  console.log(
+    `Sync token minted for ${business.externalId} (save it now — it will not be shown again):`,
+  );
+  console.log(token);
 }
 
 async function upsertCanonical(product: SeedProduct, businessId: string): Promise<string> {
