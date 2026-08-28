@@ -61,7 +61,15 @@ export const productPayloadSchema = z.object({
   businessId: z.string().min(1),
   storeId: z.string().min(1),
   localName: z.string().min(1),
-  barcode: z.string().nullish(),
+  /** F-024 v4 (R1): obligatory, list of text, `[]` valid. No `.max()` (R11):
+   *  a cap would turn a datum the POS cannot change into a permanent 400. */
+  barcodes: z.array(z.string()),
+  /** F-024 v4 (R2): the singular key is FORBIDDEN, not merely ignored. Zod
+   *  silently drops unknown keys, so leaving it out of the object would not
+   *  satisfy criterion 1 — its presence must produce an `issue` and the 400. */
+  barcode: z
+    .never({ error: "`barcode` was removed in contract v4 — send `barcodes: string[]` instead" })
+    .optional(),
   localCategoryId: z.string().nullish(),
   price: z.number().nonnegative(),
   currency: z.string().length(3),

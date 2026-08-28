@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Availability, OrderStatus, StoreStatus } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
-import { buildSearchDocument } from "@/lib/canonical";
+import { buildSearchDocument, normalizeBarcodes } from "@/lib/canonical";
 import { writeSearchDocument } from "./searchVector";
+import { recordCanonicalBarcodes } from "@/features/sync/server/canonicalBarcodes";
 import { mintSyncToken } from "@/lib/syncAuth";
 
 /**
@@ -37,6 +38,12 @@ function hexToDigits(hash: string): string {
  * `normalizeBarcode` (an 8/12/13/14-digit run) and never one of the seed's
  * EANs (`CanonicalProduct.ean` is unique). `salt` lets one execution mint
  * several canonicals without colliding with itself.
+ *
+ * F-024: `CanonicalProduct.ean` stays unique — still the one code that picks
+ * the fusion (R5) — but a canonical can now carry MORE codes in
+ * `CanonicalBarcode` (spec.md I6). `createCanonical`'s `extraEans` below is
+ * how a fixture adds them, always through the same `deriveEan` so they never
+ * collide with the seed or with another fixture's own codes.
  */
 export function deriveEan(token: string, salt = 0): string {
   const hash = createHash("sha256").update(`${token}:${salt}`).digest("hex");
@@ -66,11 +73,15 @@ export type FixtureSession = {
    *  SAME path the sync uses (`writeSearchDocument` — never a raw
    *  `data: { searchDocument }`, which is exactly what G1 forbids). The
    *  token is appended to `name` (and to every alias, via the caller) so a
-   *  search for `<word> <token>` can only ever match this fixture. */
+   *  search for `<word> <token>` can only ever match this fixture.
+   *  F-024: `extraEans` records additional `CanonicalBarcode` rows beyond
+   *  the returned `ean`, through the same `recordCanonicalBarcodes` the sync
+   *  uses — a fixture that needs several codes on one canonical. */
   createCanonical(opts: {
     name: string;
     aliases?: readonly string[];
     isExclusive?: boolean;
+    extraEans?: readonly string[];
   }): Promise<FixtureCanonical>;
   /** Creates a `StoreProduct` offer. Defaults to a live one (AVAILABLE,
    *  visible, not deleted) so tests only have to override what they mean
@@ -168,6 +179,7 @@ export async function createFixtureSession(): Promise<FixtureSession> {
     name: string;
     aliases?: readonly string[];
     isExclusive?: boolean;
+    extraEans?: readonly string[];
   }): Promise<FixtureCanonical> {
     canonicalSalt += 1;
     const ean = deriveEan(token, canonicalSalt);
@@ -182,6 +194,13 @@ export async function createFixtureSession(): Promise<FixtureSession> {
       prisma,
       canonical.id,
       buildSearchDocument(opts.name, opts.aliases ?? []),
+    );
+    // F-024: same writer the sync uses (`recordCanonicalBarcodes`), never a
+    // bespoke `createMany` on this table.
+    await recordCanonicalBarcodes(
+      prisma,
+      canonical.id,
+      normalizeBarcodes([ean, ...(opts.extraEans ?? [])]),
     );
     return { id: canonical.id, ean, name: opts.name };
   }

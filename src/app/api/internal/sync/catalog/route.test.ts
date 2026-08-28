@@ -37,6 +37,37 @@ const { POST } = await import("./route");
 const TOKEN = "t".repeat(48);
 const CALLER = { businessId: "business-a", externalId: "seed-negocio-1" };
 
+/**
+ * F-024, C1 (E10-E12): the v4 contract cut. `barcodes` (list) is mandatory;
+ * `barcode` (singular) is forbidden — its mere presence, even alongside a
+ * valid `barcodes`, must 400 the whole batch before `processCatalogBatch`
+ * (and so before `recordBatch`/the `SyncEvent` inbox) ever runs.
+ */
+function productEvent(eventId: string, payloadOverrides: Record<string, unknown> = {}) {
+  return {
+    eventId,
+    entity: "PRODUCT",
+    operation: "UPDATE",
+    occurredAt: "2026-08-27T00:00:00.000Z",
+    payload: {
+      storeProductId: "seed-tienda-1-p0",
+      productId: "seed-producto-0",
+      businessId: "seed-negocio-1",
+      storeId: "seed-tienda-1",
+      localName: "Refresco de cola 1.5 L",
+      barcodes: ["7501031311309"],
+      localCategoryId: null,
+      price: 499,
+      currency: "CUP",
+      canonicalProductId: null,
+      imageUrl: null,
+      publishToStore: true,
+      updatedAt: "2026-08-27T00:00:00.000Z",
+      ...payloadOverrides,
+    },
+  };
+}
+
 function currencyEvent(eventId: string) {
   return {
     eventId,
@@ -147,6 +178,103 @@ describe("POST /api/internal/sync/catalog — cuerpos inválidos", () => {
     expect(response.status).toBe(400);
     expect((await response.json()).error).toBe("INVALID_BATCH");
     expect(processCatalogBatch).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/internal/sync/catalog — F-024 C1: contrato v4 de PRODUCT (E10-E12)", () => {
+  it("E10: `barcode` presente (incluso junto a `barcodes`) responde 400 y no llama processCatalogBatch", async () => {
+    const response = await post({
+      businessId: "seed-negocio-1",
+      events: [productEvent("evt-barcode", { barcode: "7501031311309" })],
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe("INVALID_BATCH");
+    expect(body.issues).toBeDefined();
+    expect(processCatalogBatch).not.toHaveBeenCalled();
+  });
+
+  it("E10: `barcode: null` también responde 400 — la clave prohibida no se ignora por su valor", async () => {
+    const response = await post({
+      businessId: "seed-negocio-1",
+      events: [productEvent("evt-barcode-null", { barcode: null })],
+    });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("INVALID_BATCH");
+    expect(processCatalogBatch).not.toHaveBeenCalled();
+  });
+
+  it("E11: `barcodes` ausente responde 400 con el issue de campo requerido", async () => {
+    const payload: Record<string, unknown> = {
+      storeProductId: "seed-tienda-1-p0",
+      productId: "seed-producto-0",
+      businessId: "seed-negocio-1",
+      storeId: "seed-tienda-1",
+      localName: "Refresco de cola 1.5 L",
+      localCategoryId: null,
+      price: 499,
+      currency: "CUP",
+      canonicalProductId: null,
+      imageUrl: null,
+      publishToStore: true,
+      updatedAt: "2026-08-27T00:00:00.000Z",
+    };
+    const response = await post({
+      businessId: "seed-negocio-1",
+      events: [
+        {
+          eventId: "evt-no-barcodes",
+          entity: "PRODUCT",
+          operation: "UPDATE",
+          occurredAt: "2026-08-27T00:00:00.000Z",
+          payload,
+        },
+      ],
+    });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("INVALID_BATCH");
+    expect(processCatalogBatch).not.toHaveBeenCalled();
+  });
+
+  it("E12: `barcodes` con un elemento numérico responde 400", async () => {
+    const response = await post({
+      businessId: "seed-negocio-1",
+      events: [productEvent("evt-numeric", { barcodes: [7501031311309] })],
+    });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("INVALID_BATCH");
+    expect(processCatalogBatch).not.toHaveBeenCalled();
+  });
+
+  it("E12: `barcodes` como cadena en vez de lista responde 400", async () => {
+    const response = await post({
+      businessId: "seed-negocio-1",
+      events: [productEvent("evt-string", { barcodes: "7501031311309" })],
+    });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("INVALID_BATCH");
+    expect(processCatalogBatch).not.toHaveBeenCalled();
+  });
+
+  it("E9: `barcodes: []` es válido — no es un 400", async () => {
+    processCatalogBatch.mockResolvedValue({
+      ok: ["evt-empty"],
+      failed: [],
+      results: [{ eventId: "evt-empty", status: "processed" }],
+    });
+
+    const response = await post({
+      businessId: "seed-negocio-1",
+      events: [productEvent("evt-empty", { barcodes: [] })],
+    });
+
+    expect(response.status).toBe(207);
+    expect(processCatalogBatch).toHaveBeenCalled();
   });
 });
 

@@ -21,6 +21,7 @@
     "db:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
     "db:backfill-search": "tsx scripts/backfill-search-vector.ts",
+    "count:barcodes": "tsx scripts/count-canonical-barcodes.ts",
     "mint:token": "tsx scripts/mint-sync-token.ts",
     "prepare": "husky",
     "postinstall": "prisma generate",
