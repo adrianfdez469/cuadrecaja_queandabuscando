@@ -20,12 +20,21 @@
  *   node scripts/send-store-batch.mjs --store=seed-tienda-2  # target another
  *                                                       seed store (default:
  *                                                       seed-tienda-1)
+ *   node scripts/send-store-batch.mjs --token=<token>  # F-018: seed-negocio-1's own token
+ *
+ * F-018: `QAB_BEARER_TOKEN` (or `--token=`) has to be seed-negocio-1's own
+ * token — minted with `npm run mint:token -- seed-negocio-1` — or the
+ * server answers 403 BUSINESS_MISMATCH.
  */
 import "dotenv/config";
 
 const BASE = process.env.QAB_BASE_URL ?? "http://localhost:3000";
 const args = new Set(process.argv.slice(2));
-const token = process.env.SYNC_TOKEN;
+const token =
+  process.argv
+    .slice(2)
+    .find((arg) => arg.startsWith("--token="))
+    ?.split("=")[1] ?? process.env.QAB_BEARER_TOKEN;
 
 const storeArg = process.argv.find((arg) => arg.startsWith("--store="));
 const storeId = storeArg ? storeArg.slice("--store=".length) : "seed-tienda-1";
