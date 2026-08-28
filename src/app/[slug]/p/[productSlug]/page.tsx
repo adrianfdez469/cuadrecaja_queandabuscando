@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import Image from "next/image";
 import { AVAILABILITY_LABEL, AVAILABILITY_TONE, isOrderable } from "@/lib/availability";
 import { resolvePrice, type ResolvedPrice } from "@/lib/pricing";
 import { formatMoney } from "@/lib/money";
+import { deriveImageVariants, socialImageUrl } from "@/lib/imageVariants";
+import { IMAGE_VARIANT_WIDTH_DETAIL } from "@/constants/media";
 import {
   getPublishedBranchesForParams,
   getStoreCatalog,
@@ -13,10 +14,17 @@ import {
 import { requireResolution } from "@/features/storefront/server/resolve";
 import { Badge } from "@/components/ui/Badge";
 import { Container } from "@/components/ui/Container";
+import { ResponsiveImage } from "@/components/ui/ResponsiveImage";
 import { AddToCartButton } from "@/features/cart/components/AddToCartButton";
 import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
 import { BranchBar } from "@/components/store/BranchBar";
 import { StoreSearchBox } from "@/components/store/StoreSearchBox";
+
+/** design.md § 2: the geometry of the two-column detail layout, expressed
+ *  with `calc()` so it accounts for the container's own gutters instead of
+ *  the naive "100vw below the breakpoint" that over-requests. */
+const DETAIL_IMAGE_SIZES =
+  "(min-width: 1152px) 536px, (min-width: 768px) calc(50vw - 40px), (min-width: 640px) calc(100vw - 48px), calc(100vw - 32px)";
 
 /**
  * Pre-render the catalogue of every published store. Like the store page, this
@@ -61,12 +69,30 @@ export async function generateMetadata({
   const product = (await getStoreCatalog(resolution)).find((p) => p.slug === productSlug);
   if (!product) return { title: "Producto no encontrado" };
 
+  // R15: openGraph never points at AVIF or the (up to 4 MB) original — social
+  // crawlers don't reliably accept AVIF, and a raw original would be huge.
+  // A legacy F-011 URL (no variants) passes through unchanged, with no
+  // declared dimensions, exactly as it did before this feature (design.md § 2).
+  const originalUrl = product.imageUrls[0];
+  const hasVariants = originalUrl ? deriveImageVariants(originalUrl) !== null : false;
+  const ogImage = originalUrl ? socialImageUrl(originalUrl) : undefined;
+
   return {
     title: product.name,
     description: product.description ?? undefined,
     openGraph: {
       title: product.name,
-      images: product.imageUrls.slice(0, 1),
+      images: ogImage
+        ? hasVariants
+          ? [
+              {
+                url: ogImage,
+                width: IMAGE_VARIANT_WIDTH_DETAIL,
+                height: IMAGE_VARIANT_WIDTH_DETAIL,
+              },
+            ]
+          : [ogImage]
+        : undefined,
     },
   };
 }
@@ -148,12 +174,11 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
       <Container className="grid gap-8 py-8 md:grid-cols-2">
         <div className="bg-surface-muted relative aspect-square overflow-hidden rounded-lg">
           {image ? (
-            <Image
+            <ResponsiveImage
               src={image}
               alt={product.name}
-              fill
-              sizes="(max-width: 768px) 100vw, 50vw"
-              className="object-cover"
+              variant="detail"
+              sizes={DETAIL_IMAGE_SIZES}
               priority
             />
           ) : (

@@ -25,6 +25,17 @@ export type HandlerOutcome = {
    * depending on `boundaries.test.ts`'s (partial) grep to notice.
    */
   touchedSlugValues?: SlugTouchSet;
+  /**
+   * F-023 R9/R10/R14: the bucket prefix of every object of this product,
+   * present ONLY on a terminal `DELETE` (never on `publishToStore: false`,
+   * which is reversible and keeps its photos). The handler never calls
+   * Storage itself — `processBatch.ts` drains this, deduplicated, AFTER
+   * `revalidateStores`/`revalidateSlugs`/`revalidateStorefronts`, which is
+   * what R14 ("borrar después de escribir y revalidar") and R13 (a Storage
+   * failure can never flip an already-reported `processed` into `failed`)
+   * both require.
+   */
+  purgeObjectPrefix?: string;
 };
 
 export const PROCESSED: HandlerOutcome = { status: "processed" };

@@ -54,4 +54,16 @@ export default defineConfig([
       ],
     },
   },
+
+  {
+    // F-023 (R1, architecture.md § Cinco cosas… punto 5): `next/image` is
+    // gone for good (`images.unoptimized: true`), so the ONE place in the
+    // repo that emits a raw `<img>` is deliberate, not a regression the
+    // default `no-img-element` warning exists to catch. Scoped to this one
+    // file, not the whole `components/ui/` directory.
+    files: ["src/components/ui/ResponsiveImage.tsx"],
+    rules: {
+      "@next/next/no-img-element": "off",
+    },
+  },
 ]);
