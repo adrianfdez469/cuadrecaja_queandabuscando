@@ -416,6 +416,46 @@ async function main() {
     categories,
   });
 
+  // F-011 tanda 3 (HD18): a brand of THREE branches, sembrada YA agrupada —
+  // agrupar no tiene vuelta (ADR 0018 (f)) y el sensor tiene que poder correr
+  // dos veces seguidas. De un solo uso: ningún otro feature lee `el-trebol*`,
+  // y NO toca `seedStore`/`seedClosedStore` ni `bodega-uno`/`bodega-dos`
+  // (fixtures de agrupar de F-017, que verifican otra cosa). `themeTokens`
+  // se siembra `null` a propósito: `seedStorefront()` solo escribe branding
+  // cuando le llega algo truthy, así que un `npm run seed` posterior NO pisa
+  // lo que el sensor de branding acaba de guardar — es lo que deja correr
+  // `.agent/specs/F-011/smoke.sh` dos veces seguidas sin resembrar.
+  await seedBrandWithBranches({
+    businessId: business.id,
+    brandSlug: "el-trebol",
+    name: "El Trébol",
+    branches: [
+      {
+        externalId: "seed-tienda-8",
+        ownSlug: "el-trebol-centro",
+        status: "PUBLISHED",
+        name: "El Trébol · Centro Habana",
+        city: "La Habana",
+      },
+      {
+        externalId: "seed-tienda-9",
+        ownSlug: "el-trebol-playa",
+        status: "SUSPENDED",
+        name: "El Trébol · Playa",
+        city: "La Habana",
+        disabledReasonCode: "VACACIONES",
+        disabledMessage: "Volvemos en septiembre.",
+      },
+      {
+        externalId: "seed-tienda-10",
+        ownSlug: null,
+        status: "DRAFT",
+        name: "El Trébol · Almacén",
+        city: "La Habana",
+      },
+    ],
+  });
+
   // F-018 (E26, C1, C7): a second business, fully independent — what makes
   // "the pull of A never sees B's orders" verifiable against real seeded
   // data, not only against the `db` project's own fixtures.
@@ -715,6 +755,88 @@ async function seedStore(input: {
  * el token que el desarrollador ya guardó de la primera corrida sigue
  * sirviendo (C15).
  */
+/**
+ * F-011 tanda 3 (HD18, architecture.md § La fixture de HD18): a brand
+ * already grouped, with THREE branches — one of each status that matters to
+ * "renderable" (`status != DRAFT`): `PUBLISHED` and `SUSPENDED` both count,
+ * `DRAFT` counts for neither. Reuses `seedStorefront()` (idempotent against
+ * the `Slug` registry) and never touches `seedStore()`/`seedClosedStore()`.
+ *
+ * Each RENDERABLE branch needs its OWN `Store.slug` (`canonicalSlug()`
+ * throws otherwise, once the brand has more than one) — so, unlike
+ * `seedStore()`'s single optional `ownSlug`, every renderable branch here
+ * gets one, each with its own `Slug` registry row (kind `STORE`), same
+ * pattern as `bodega-central`/`bodega-central-vedado`.
+ */
+async function seedBrandWithBranches(input: {
+  businessId: string;
+  brandSlug: string;
+  name: string;
+  branches: {
+    externalId: string;
+    ownSlug: string | null;
+    status: "PUBLISHED" | "SUSPENDED" | "DRAFT";
+    name: string;
+    city: string;
+    disabledReasonCode?: string;
+    disabledMessage?: string;
+  }[];
+}) {
+  const storefrontId = await seedStorefront({
+    businessId: input.businessId,
+    slug: input.brandSlug,
+    name: input.name,
+    // themeTokens intentionally omitted (undefined): seedStorefront() only
+    // ever WRITES branding when it is truthy, so this never overwrites what
+    // the branding sensor just saved on a previous run.
+  });
+
+  for (const branch of input.branches) {
+    const suspended = branch.status === "SUSPENDED";
+    const published = branch.status === "PUBLISHED";
+
+    const store = await prisma.store.upsert({
+      where: { externalId: branch.externalId },
+      create: {
+        businessId: input.businessId,
+        storefrontId,
+        externalId: branch.externalId,
+        name: branch.name,
+        city: branch.city,
+        slug: branch.ownSlug,
+        status: branch.status,
+        publishedAt: published || suspended ? now : null,
+        disabledReasonCode: suspended ? (branch.disabledReasonCode ?? null) : null,
+        disabledMessage: suspended ? (branch.disabledMessage ?? null) : null,
+        disabledAt: suspended ? now : null,
+        sourceOptIn: published || suspended,
+        sourceUpdatedAt: now,
+      },
+      // Regla del seed (§ prisma/seed.ts, ya documentada arriba): `update`
+      // NUNCA escribe `slug` ni `storefrontId` — de un solo uso o no, es la
+      // misma trampa que desharía una agrupación si alguien la rompiera.
+      update: {
+        name: branch.name,
+        city: branch.city,
+        status: branch.status,
+        disabledReasonCode: suspended ? (branch.disabledReasonCode ?? null) : null,
+        disabledMessage: suspended ? (branch.disabledMessage ?? null) : null,
+        disabledAt: suspended ? now : null,
+        sourceOptIn: published || suspended,
+        sourceUpdatedAt: now,
+      },
+    });
+
+    if (branch.ownSlug) {
+      await prisma.slug.upsert({
+        where: { value: branch.ownSlug },
+        create: { value: branch.ownSlug, kind: "STORE", storeId: store.id },
+        update: {},
+      });
+    }
+  }
+}
+
 async function ensureSyncToken(business: { id: string; externalId: string }): Promise<void> {
   const current = await prisma.business.findUniqueOrThrow({
     where: { id: business.id },

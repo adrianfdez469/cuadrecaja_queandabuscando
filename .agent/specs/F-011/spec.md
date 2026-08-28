@@ -1,9 +1,18 @@
 ---
 feature: F-011
 agente: sdd-spec
-actualizado: 2026-08-26T16:36:46Z
+actualizado: 2026-08-28T01:44:00Z
 estado: listo
 ---
+
+> **Aviso de lectura (2026-08-28).** Todo lo que hay hasta el final de «No
+> decidido a propósito» es el documento del ciclo 1, escrito cuando `themeTokens`
+> vivía en `Store`. **No se ha tocado ni una línea**: los criterios 1–4 están
+> verificados y en `main` (PR #6) y la regla 3 los reserva. Lo que este ciclo
+> añade está en el capítulo final, **«Tanda 3 — el criterio 5 sobre
+> `Storefront`»**, y es lo único que hay que leer para construirlo. El resto sirve
+> de historia y de contexto; donde el capítulo final contradiga al ciclo 1, manda
+> el capítulo final y lo dice explícitamente.
 
 ## Problema
 
@@ -650,3 +659,583 @@ en el backlog (regla 4), que este documento no crea.
 - **Recolección de objetos huérfanos en el bucket** (R22) y **cron de
   revalidación en bordes de promoción** (R28): quedan anotados como deuda
   conocida, para el humano y el backlog, no para este ciclo.
+
+---
+
+# Tanda 3 — el criterio 5 sobre `Storefront`
+
+**Capítulo añadido el 2026-08-28.** Cubre **un solo** `acceptance_criteria`, el
+quinto:
+
+> «Guardar branding inválido es rechazado por themeTokensSchema y no llega a la
+> base.»
+
+**Qué no toca este capítulo.** Los criterios 1–4 están verificados ejecutando y
+fusionados a `main`; la regla 3 los reserva y la regla 4 reserva el backlog. No
+se reescribe ni se reinterpreta nada de arriba, ni se cambia `passes` en
+`.agent/features.json`: eso lo decide el humano al cerrar el ciclo.
+
+**Numeración.** Continúa la del ciclo 1 para que dos números iguales no
+signifiquen dos cosas: escenarios **E35+**, reglas **R31+**, criterios propuestos
+**16+**, incongruencias **I9+**. Las decisiones del humano de este ciclo son
+**HD16–HD19** y siguen la serie HD1–HD15 del progreso.
+
+**Estado: sin preguntas abiertas.** Las cuatro que bloqueaban el plan —quién puede
+editar el branding de una marca con varias sucursales, si entraba el contacto, cómo
+se consigue la fixture de dos sucursales y si entraban logo y portada— las contestó
+el humano el 2026-08-28 y están incorporadas abajo, en § Respuestas del humano y en
+cada regla y escenario que cambian.
+
+## Por qué se reabre, en una frase
+
+HD6 congeló el editor de branding porque la ADR 0012 iba a mover `themeTokens` de
+`Store` a `Storefront` y construirlo antes habría sido trabajo tirado. `Storefront`
+ya existe: F-017 está en `passes: true`, y la migración de ADR 0018 **borró**
+`Store.themeTokens`. El bloqueo desapareció y con él la excusa; lo que queda es
+que el dato cambió de dueño y el diseño congelado no lo sabe.
+
+## Lo que hoy es verdad en el código (leído, no supuesto)
+
+| Hecho                                                                                             | Dónde se comprueba                                                                                 |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `Store.themeTokens` **ya no existe**; la columna es `Storefront.themeTokens Json?`                | `prisma/schema.prisma:142`; ADR 0018 § Consecuencias («Tres columnas de `Store` se borran»)        |
+| `themeTokensSchema` **no cambió**: cinco claves, todas opcionales, `.strict()`                    | `src/features/theming/storeTheme.ts:17-25`                                                         |
+| `themeTokens` se lee en **dos** funciones cacheadas distintas, con **dos** tags                   | `src/features/catalog/server/queries.ts:129` (`storeTag`) y `:171` (`storefrontTag`)               |
+| El `<style>` lo emite el layout en dos ramas: selector de marca y página de sucursal              | `src/app/[slug]/layout.tsx:29` y `:58`                                                             |
+| El embudo de escritura y su `commit()` revalidan **un solo** `PublicSlug`                         | `src/features/admin/server/mutations.ts:67-71`                                                     |
+| Hay lista blanca de columnas para `StoreProduct`, `Store` y `Promotion`, **no** para `Storefront` | `src/features/admin/server/mutations.ts:42-54`                                                     |
+| La sesión del panel solo sabe autorizar **tiendas** (`storeIds`), nunca marcas                    | `src/features/admin/authorization.ts:27-31`, `src/app/api/admin/_lib/guard.ts:15-23`               |
+| Ya hay precedente de una escritura de sucursal que revalida más de lo que escribe                 | `src/features/admin/server/mutations.ts:249-255` (`setStoreEnabled`)                               |
+| El panel ya enseña las hermanas de la marca, con nombre y ciudad y **sin** `storeId`              | `src/features/admin/server/stores.ts:230-255`, `src/features/admin/components/StoreBrandCard.tsx`  |
+| `Storefront.contactPhone/Whatsapp/Email` se **leen** y no las escribe nadie                       | `src/features/catalog/server/queries.ts:103-119`, `src/lib/storeContact.ts`; `grep` sin escritores |
+| El seed guarda hoy valores `oklch(...)` en una marca                                              | `prisma/seed.ts:331` (`tienda-dos`)                                                                |
+| **Ninguna marca del seed tiene dos sucursales**; solo agrupar las crea, y no tiene vuelta         | `prisma/seed.ts:361-417`; ADR 0018 § decisión (f)                                                  |
+
+## Alcance de la tanda 3
+
+### Dentro
+
+- Un editor de branding del panel que escribe **`Storefront.themeTokens`** y solo
+  esa columna: los cinco tokens de `themeTokensSchema`.
+- Su endpoint de escritura bajo `/api/admin/`, dentro del embudo único que ya
+  existe (`src/features/admin/server/mutations.ts`), con su propia lista blanca.
+- **La autorización por cobertura total de la marca** (HD16, R42): solo escribe
+  quien administra **todas** las sucursales renderizables; a quien le falte una, 403.
+- El rechazo del branding inválido con el **mismo** `themeTokensSchema` que
+  renderiza el tema, y la garantía observable de que nada inválido se persiste.
+- La revalidación completa de lo que un guardado de marca cambia de significado:
+  **cada** sucursal renderizable de la marca **más** la marca.
+- **Una fixture de marca ya agrupada** en `prisma/seed.ts` (HD18), sin la cual R36
+  y R42 no se pueden verificar dos veces seguidas.
+- La sección de branding en `.agent/specs/F-011/smoke.sh`, para que el criterio 5
+  entre en el sensor repetible y no en una comprobación manual.
+
+### Fuera (explícito)
+
+- **`Storefront.slug`.** Lo gobierna el registro de slugs (ADR 0018 (a)) y
+  cambiarlo es proponer un valor, con su rechazo tipado (ADR 0018 (d)). Es su
+  propio feature.
+- **`Storefront.name`.** Nace del sync al crear la marca; renombrarla no lo pide
+  ningún criterio.
+- **El contacto de la marca** (`contactPhone`, `contactWhatsapp`,
+  `contactEmail`). **HD17**: fuera de esta tanda, anotado como deuda para otro
+  ciclo. Ver I15.
+- **`Storefront.logoUrl` y `coverUrl`.** **HD19**: fuera de esta tanda; F-023 va a
+  cambiar cómo se almacenan y se sirven las imágenes. Ver I15.
+- **Agrupar sucursales desde el panel para conseguir la cobertura de R42.** Ya
+  existe (F-017) y no es de esta tanda; lo único que esta tanda añade a `prisma/`
+  es la fixture de HD18.
+- **Agrupar y desagrupar sucursales.** Agrupar ya está construido (F-017);
+  desagrupar no existe a propósito (ADR 0018 (f)).
+- **Validación de contraste.** HD8 y DP4(a) ya la descartaron: un branding
+  ilegible se puede guardar, con aviso en la maqueta. Sigue siendo deuda.
+- **Publicar, cerrar y abrir al público.** Es de la sucursal y ya está construido
+  (HD10–HD15). `Storefront` no tiene `status` a propósito (ADR 0018 (e)).
+- **Los criterios 1–4 y sus escenarios.** Verificados y cerrados.
+
+## Actores y precondiciones
+
+El mismo actor del ciclo 1 —el administrador de un negocio, con la cookie de
+F-008— y una precondición nueva que no existía:
+
+- La tienda que el admin abre en el panel pertenece a una **marca**
+  (`Store.storefrontId` es obligatorio, `prisma/schema.prisma:184`), y esa marca
+  puede tener sucursales que **no** están en `session.storeIds`. El panel ya
+  sabe enseñarlas sin dar acceso a ellas.
+- **Precondición nueva de HD16**: para escribir el branding, `session.storeIds`
+  tiene que contener **todas** las sucursales renderizables de esa marca
+  (`status != DRAFT`). Con una sola sucursal —el caso de casi todo el seed y de
+  casi todos los negocios— la precondición se cumple sola y el admin no nota que
+  existe.
+- No hay actor nuevo: el sync no escribe ninguna columna de `Storefront` salvo al
+  crear la fila la primera vez (ADR 0018 (e)), así que en esta tabla **no hay
+  columna compartida** y no existe el conflicto «gana el último» que obligó a las
+  columnas de override del ciclo 1.
+
+## Comportamiento esperado
+
+- **E35** — Dado un admin que gestiona la única sucursal de una marca, cuando
+  guarda `{"brand":"#0f62fe","radius":"soft"}`, entonces responde 200,
+  `Storefront.themeTokens` queda con **exactamente** esas dos claves, y la
+  siguiente petición pública a `/<slug de la marca>` trae
+  `--color-brand:#0f62fe` **sin** esperar el piso de ISR.
+- **E36** — Dado un branding inválido —un color que no pasa el regex, un `radius`
+  fuera del enum, o una clave desconocida como `background`—, entonces responde
+  **400** con los problemas de Zod y `Storefront.themeTokens` queda **idéntica** a
+  como estaba. _Este es el criterio 5._
+- **E37** — Dada una clave desconocida, el rechazo lo produce el `.strict()` del
+  esquema y **no** un guardado que la ignora en silencio: guardar y descartar
+  claves sería un 200 que incumple el criterio.
+- **E38** — Dado un branding que el admin quita, entonces se escribe `{}` y no
+  `null`, y la página pública deja de traer la etiqueta `<style>`.
+- **E39** — Dada una marca con **dos** sucursales renderizables, cuando se guarda
+  el branding, entonces en la siguiente petición cambian **las dos** páginas de
+  sucursal **y** la página del selector de la marca, sin esperar el piso de ISR.
+  Es el escenario que el ciclo 1 no podía ni escribir.
+- **E40** — Dada esa misma marca, y un admin cuya sesión solo trae **una** de las
+  dos sucursales, cuando intenta guardar el branding, entonces responde **403**
+  `{"error":"FORBIDDEN"}` y `Storefront.themeTokens` queda **exactamente** como
+  estaba: ni una escritura parcial, ni un guardado con aviso, ni un 200 que
+  cambie solo lo suyo (HD16). El branding no se puede repartir por sucursal: es
+  una columna de la marca, así que o se autoriza entera o no se autoriza.
+- **E40b** — Dado ese mismo admin, cuando abre el panel de la sucursal que sí
+  administra, entonces la pantalla del branding **se ve y explica por qué no
+  puede editarla**, nombrando las sucursales que le faltan —el panel ya sabe
+  listarlas con nombre y ciudad y sin `storeId`
+  (`src/features/admin/server/stores.ts:230-255`)—. No es un 404 ni una tarjeta
+  que desaparece: la tienda sí es suya, lo que no cubre es la marca entera.
+- **E41** — Dada una petición de escritura sin cookie, entonces **401**; dada una
+  sobre una tienda fuera de la sesión, entonces **403** y ninguna columna cambia.
+  El 403 sale del mismo mapeo que el criterio 2 ya verificado, y es el **mismo**
+  cuerpo que devuelve el 403 de cobertura de E40: dos motivos distintos, una sola
+  respuesta, para no filtrar por HTTP cuántas sucursales tiene una marca ajena.
+- **E42** — Dadas dos pestañas guardando el branding de la misma marca, gana la
+  última escritura completa (semántica de reemplazo, R33). No hay bloqueo
+  optimista y no se finge que lo haya. Contra el sync no hay carrera posible: no
+  comparten ninguna columna de esta tabla.
+- **E43** — Dado un valor `oklch(0.62 0.17 145)` guardado, entonces se conserva
+  tal cual y no se normaliza a `#rrggbb`: es lo que hay hoy en la base
+  (`prisma/seed.ts:331`) y convertirlo cambiaría el color de una tienda viva.
+- **E44** — Dado un guardado correcto desde el panel, entonces `npm run check:theme`
+  sigue terminando en 0: el editor no puede reintroducir los dos fallos que
+  arregló F-016 (`@theme inline` y `rounded-[--radius-lg]`).
+- **E45** — Dado un `themeTokens` inválido que ya estuviera en la base,
+  `renderStoreTheme` lo descarta en silencio y devuelve cadena vacía
+  (`src/features/theming/storeTheme.ts:49-50`): la tienda se queda sin tema y
+  nadie se entera. Por eso «no llega a la base» es la **única** defensa
+  observable, y no una comprobación redundante con el render.
+
+## Reglas de negocio
+
+**Propiedad y forma del dato**
+
+- **R31** — El branding es de la **marca**. La única columna que esta tanda
+  escribe es `Storefront.themeTokens`. `Store` no tiene esa columna y no vuelve a
+  tenerla.
+- **R32** — El cuerpo de la petición **es** el objeto de tokens, sin envoltorio, y
+  se valida con el `themeTokensSchema` **importado** de
+  `src/features/theming/storeTheme.ts`. Dos motivos, y los dos son el criterio
+  literal: una copia del esquema en el panel dejaría de ser «rechazado por
+  themeTokensSchema» el día que una de las dos cambie, y un envoltorio
+  (`{"themeTokens":{…}}`) haría que `{"background":"#fff"}` se rechazara por
+  clave desconocida **del envoltorio** y no por el `.strict()` del esquema.
+- **R33** — Se guarda `parsed.data`, nunca el cuerpo recibido, y la semántica es
+  de **reemplazo**: lo que no viene, desaparece.
+- **R34** — Quitar el branding escribe `{}`, nunca `null`. Prisma rechaza un
+  `null` plano en una columna `Json?`; es la misma trampa que ya documenta
+  `src/features/sync/server/handlers/store.ts`.
+- **R35** — La escritura entra por `src/features/admin/server/mutations.ts` con su
+  propia lista blanca de columnas —`themeTokens` y nada más— y se expone como un
+  route handler bajo `/api/admin/`. No una server action (R5 sigue vigente: el
+  403 tiene que ser un código HTTP que `curl` vea).
+
+**Revalidación**
+
+- **R36** — Un guardado de branding revalida el tag de **cada** sucursal
+  renderizable de la marca (`storeTag` de su slug canónico) **y** el de la marca
+  (`storefrontTag`). Revalidar solo la sucursal desde la que se entró deja las
+  hermanas y el selector con el color viejo hasta el piso de ISR de 3600 s.
+- **R37** — El conjunto de slugs a revalidar **no se arma a mano**. AGENTS.md §
+  Prohibiciones lo prohíbe literalmente y la ficha
+  `.agent/playbook/revalida-solo-lo-que-se-escribe-no-lo-que-cambia-de-significado.md`
+  ya fichó el mismo defecto tres veces. Dónde vive exactamente esa proyección lo
+  decide `sdd-architect`; ver I12.
+- **R38** — Las lecturas del panel siguen sin pasar por `cached()` (R9): el admin
+  tiene que ver lo que acaba de guardar.
+
+**Producto**
+
+- **R39** — No se valida contraste (HD8, DP4(a)). La maqueta avisa; el guardado no
+  bloquea.
+- **R40** — El panel **no** se viste con la marca de la tienda. Los tokens de una
+  marca solo se aplican dentro del contenedor de la maqueta.
+- **R41** — El editor no ofrece CSS libre ni claves fuera del esquema (R12 sigue).
+  Los cinco tokens son los que hay.
+
+**Autorización (HD16)**
+
+- **R42** — Escribir el branding de una marca exige que `session.storeIds`
+  contenga **todas** sus sucursales renderizables (`status != DRAFT`). Si falta
+  una sola, **403**, sin escritura y sin escritura parcial. R1–R4 del ciclo 1
+  siguen vigentes tal cual: esto las estrecha para esta columna, no las sustituye.
+- **R43** — Esa comprobación **no la puede hacer la sesión sola**. El guard de hoy
+  decide con 0 queries (`src/app/api/admin/_lib/guard.ts:15-23`) porque el
+  `storeId` viene en la URL; la cobertura de una marca exige leer su lista de
+  sucursales. Consecuencia que `sdd-architect` tiene que resolver a propósito: el
+  camino del branding lleva **una lectura antes de autorizar**, y es la misma que
+  R36 necesita después para saber qué revalidar. Una consulta sirve para las dos
+  cosas; dos serían dos verdades que pueden divergir.
+- **R44** — El 403 de cobertura y el 403 de tienda ajena tienen el **mismo**
+  cuerpo, `{"error":"FORBIDDEN"}`. Un código o un motivo distinto le contaría a
+  quien no debe cuántas sucursales tiene una marca que no administra.
+- **R45** — La pantalla sí distingue los dos casos, porque quien la ve ya
+  administra esa tienda: con cobertura incompleta el editor aparece **bloqueado y
+  con el motivo**, nombrando las sucursales que faltan (E40b). Un formulario que
+  se rellena para acabar en 403 es peor que un formulario que no se puede
+  rellenar.
+- **R46** — La cobertura se evalúa **en el momento de la escritura**. Si entre el
+  render de la pantalla y el guardado la marca gana una sucursal que el admin no
+  administra, el guardado responde 403; si la pierde, responde 200. No hay bloqueo
+  optimista, igual que en el resto del panel (E42).
+
+## Casos límite y errores
+
+- **Marca con una sola sucursal**: el slug canónico de la sucursal **es** el de la
+  marca (`src/lib/publicSlug.ts`), así que revalidar «todas las sucursales más la
+  marca» produce el mismo string dos veces. Es correcto y `revalidateStores`
+  deduplica (`src/lib/cache.ts:87`).
+- **Marca con una sucursal que además conserva un alias vivo** (`bodega-central`
+  y `bodega-central-vedado` en el seed): las dos URL comparten entrada de caché
+  por el slug canónico (ADR 0018 (c)), así que no hay una segunda entrada que
+  revalidar. Si el árbol de tags cambia, esto se cae: es un caso a probar, no a
+  suponer.
+- **Sucursal en `DRAFT`**: no renderiza en público, así que **ni cuenta para la
+  cobertura de R42 ni entra en el conjunto a revalidar de R36**. Es el mismo
+  filtro `status: { not: "DRAFT" }` que ya usan todas las lecturas del repo
+  (`src/features/admin/server/stores.ts:24`), y usar dos definiciones distintas de
+  «sucursal de la marca» en las dos mitades del mismo endpoint sería el bug más
+  difícil de ver de esta tanda.
+- **Sucursal `SUSPENDED`** (cerrada al público desde el panel o por el POS):
+  **sí** cuenta para las dos cosas. Sigue teniendo página —200 con el aviso de
+  cierre, HD11— y esa página lleva el tema de la marca.
+- **Cobertura incompleta con la sucursal que falta en `DRAFT`**: la cobertura se
+  cumple, porque esa sucursal no renderiza. Es coherente con la regla y hay que
+  probarlo, no suponerlo.
+- **Marca sin ninguna sucursal renderizable**: el guardado tiene que responder 200
+  igual —el branding es del dato, no de la vitrina— y no fallar al no encontrar
+  ningún slug que revalidar.
+- **Guardar el mismo branding dos veces**: idempotente, mismo 200, misma fila.
+- **Cuerpo vacío `{}`**: es válido y significa «sin branding» (E38). No es un 400.
+- **Cuerpo que no es un objeto** (`[]`, `"azul"`, `null`): 400, no un 500.
+- **Sesión vencida a mitad del formulario**: 401 y nada a medias en la base.
+- **La marca desaparece entre el guard y la escritura**: 404, como ya hace
+  `setStoreEnabled` con `P2025` (`src/features/admin/server/mutations.ts:267-270`).
+- **Un `themeTokens` inválido ya persistido** (no lo puede crear este endpoint,
+  pero sí una escritura anterior o manual): la tienda se sirve sin tema y sin
+  error (E45). No se arregla en esta tanda; se anota.
+
+## Datos y contrato
+
+**Columna.** `Storefront.themeTokens`, `Json?` (`prisma/schema.prisma:142`).
+Valores: los cinco de `themeTokensSchema` —`brand`, `brandContrast`, `accent`,
+`accentContrast` como color CSS de hasta 64 caracteres, y `radius` en
+`sharp|soft|round`—, todos opcionales, sin claves adicionales.
+
+**Sin migración.** La columna ya existe y la creó F-017. Esta tanda **no toca
+`prisma/schema.prisma` ni añade ninguna migración**, y ninguno de los dos comandos
+prohibidos por AGENTS.md entra en el horizonte. Lo único que toca de `prisma/` es
+`prisma/seed.ts`, por la fixture de HD18.
+
+**Sin cambio de contrato.** `Storefront` es propio de queandabuscando y el POS no
+lo conoce (ADR 0018 § Consecuencias). `docs/sync-contract.md` no cambia y no hay
+v4. La v3 sigue escrita y **sin enviar**, que es deuda del humano y no de esta
+tanda.
+
+**Fixtures que hacen falta antes de verificar nada:**
+
+1. Una cookie acotada a una sola tienda:
+   `node scripts/mint-sso-token.mjs --stores=seed-tienda-1`
+   (`scripts/mint-sso-token.mjs:18-22`).
+2. **Una marca con dos sucursales, sembrada ya agrupada** (HD18), para E39, E40 y
+   R42. No se consigue agrupando dentro del sensor: agrupar no tiene vuelta (ADR
+   0018 (f)), así que un `smoke.sh` que agrupara solo funcionaría la primera vez
+   después de cada `npm run seed`. La fixture se escribe en `prisma/seed.ts` con
+   el mismo patrón con que el ciclo 2 añadió `tienda-cerrada`: **de un solo uso,
+   sin que ningún otro feature la lea**, para no romper F-004, F-006, F-010 ni
+   `check:bundle`. Las dos fixtures de agrupar que ya existen (`bodega-uno` y
+   `bodega-dos`, `prisma/seed.ts:385-417`) son de F-017 y **no se tocan**: siguen
+   sirviendo para verificar la acción de agrupar, que es otra cosa.
+3. **Dos cookies sobre esa marca nueva**: una con las dos sucursales (camino
+   feliz, E39) y otra con una sola (el 403 de E40), las dos con la bandera
+   `--stores=` de `scripts/mint-sso-token.mjs`.
+4. `tienda-dos` como fixture de E43: ya guarda `oklch(...)` (`prisma/seed.ts:331`).
+
+## El criterio 5, traducido a algo que se ejecuta
+
+**Tanda 3.** Entorno base, el mismo del ciclo 1: `docker compose up -d`,
+`npm run db:migrate`, `npm run seed`, `npm run build`, `npx next start`, y la
+cookie del punto 1 de arriba.
+
+La **ruta exacta** del endpoint la fija `sdd-architect` (ver «No decidido a
+propósito»); lo que esta spec fija y no es negociable es el verbo, los tres
+cuerpos, los tres códigos, la tabla que se consulta y el orden:
+
+```bash
+# 1. Los tres rechazos. Los tres tienen que responder 400 con `issues`.
+for BODY in '{"brand":"no-es-un-color#"}' '{"radius":"gigante"}' '{"background":"#fff"}'; do
+  curl -s -o /tmp/out -w '%{http_code}\n' -b "$COOKIE" \
+    -X PUT -H 'content-type: application/json' -d "$BODY" "$BRANDING_URL"
+done
+# esperado: 400, 400, 400 — y `.issues[].path` no vacío en los tres
+
+# 2. La base NO cambió después de los tres.
+psql "$DATABASE_URL" -Atc \
+  'SELECT "themeTokens" FROM "Storefront" WHERE slug = '"'"'tienda-demo'"'"';'
+# esperado: exactamente el mismo valor que antes del paso 1
+
+# 3. El camino feliz, para que el 400 no sea un falso positivo por otra causa.
+curl -s -o /dev/null -w '%{http_code}\n' -b "$COOKIE" \
+  -X PUT -H 'content-type: application/json' \
+  -d '{"brand":"#0f62fe","radius":"soft"}' "$BRANDING_URL"
+# esperado: 200
+
+# 4. Y se ve en la vitrina sin esperar el piso de ISR (R36).
+curl -s http://localhost:3000/tienda-demo | grep -c -- '--color-brand:#0f62fe'
+# esperado: >= 1
+```
+
+Más un test del proyecto `node` sobre el esquema de la petición: los tres cuerpos
+de arriba fallan, `{}` pasa, `{"brand":"oklch(0.62 0.17 145)"}` pasa, y una clave
+desconocida falla por `.strict()`.
+
+**Y donde vive de verdad:** todo esto entra como sección nueva de
+`.agent/specs/F-011/smoke.sh`, para que `bash .agent/verify.sh F-011 --smoke`
+vuelva a cubrir los cinco criterios y no cuatro. Un criterio que solo se comprueba
+a mano es un criterio que se cae la próxima vez.
+
+## Criterios de aceptación propuestos (siguen del ciclo 1)
+
+Los cinco `[ya]` no se tocan. Del ciclo 1 quedan vivos y **ahora sí ejecutables**
+el **13** (`check:theme` en 0 después de guardar branding por el panel) y el
+**15** (`verify.sh --full` en 0), que se escribieron para un editor que no llegó a
+existir. A ellos se suman:
+
+16. `[nuevo]` El esquema es **el mismo objeto**, no una copia: un test del
+    proyecto `node` importa `themeTokensSchema` de
+    `src/features/theming/storeTheme.ts` y comprueba que el esquema del endpoint
+    lo referencia; o un test de fronteras que falle si las cinco claves se
+    redefinen en `src/features/admin/schemas.ts`.
+17. `[nuevo]` Con la marca de dos sucursales sembrada por HD18 y una cookie que
+    trae **las dos**, un guardado de branding deja las dos páginas de sucursal
+    **y** la del selector con el color nuevo en la petición inmediatamente
+    siguiente (E39, R36).
+18. `[nuevo]` `git grep -n 'themeTokens' src/features/admin` solo encuentra
+    escrituras contra `storefront`, nunca contra `store`; y `npx prisma validate`
+    termina en 0 sin migración nueva.
+19. `[nuevo]` Quitar el branding escribe `{}` —comprobado con un `SELECT`, no con
+    la respuesta del endpoint— y la respuesta pública deja de traer `<style>`
+    (E38).
+20. `[nuevo]` Un valor `oklch(...)` guardado desde el panel vuelve del `SELECT`
+    idéntico, carácter a carácter (E43).
+21. `[nuevo]` El editor se juzga a 360 y 1280 px con el mecanismo que F-017
+    construyó —chromium headless, la etapa `--visual` de `.agent/verify.sh`—, con
+    un guion visual propio de F-011 en .agent/specs/F-011/visual.mjs (por crear).
+    Tres agentes distintos documentaron en el ciclo 1 que no podían juzgar 360 ni
+    768 px; ese hueco ya tiene herramienta y no hay motivo para heredarlo.
+22. `[nuevo]` **El 403 de cobertura** (HD16, R42): con una cookie que trae **una
+    sola** de las dos sucursales de la marca sembrada por HD18, el guardado del
+    branding responde `403 {"error":"FORBIDDEN"}` y un `SELECT` de
+    `Storefront.themeTokens` devuelve exactamente lo que había antes (E40). Con la
+    cookie que trae las dos, la misma petición responde 200 — para que el 403 no
+    sea un falso positivo por una ruta mal escrita o un cuerpo inválido, que es la
+    misma cautela con la que se verificó el criterio 2.
+23. `[nuevo]` `npm run seed && npm run seed` sigue terminando en 0 con la fixture
+    de HD18, y la marca sembrada conserva sus dos sucursales tras la segunda
+    pasada. El CI siembra dos veces y una fixture de agrupación no idempotente lo
+    rompería en un sitio donde nadie la está mirando (ficha
+    `.agent/playbook/seed-storefront-colisiona-con-slug-ya-agrupado.md`).
+
+## Incongruencias detectadas
+
+- **I9 — El criterio 5 dice «no llega a la base» y la tabla que nombraba
+  desapareció.** El ciclo 1 lo iba a verificar con un `SELECT` sobre
+  `Store.themeTokens`; esa columna la borró la migración de F-017 (ADR 0018 §
+  Consecuencias: «Tres columnas de `Store` se borran»). **Resuelta aquí sin
+  preguntar y sin tocar el criterio** (regla 3): la base es
+  `Storefront.themeTokens` y el `SELECT` va contra `Storefront`. El criterio
+  literal sigue siendo cierto y verificable; lo que cambió es dónde se mira.
+- **I10 — El permiso es por tienda y el dato es de la marca. RESUELTA por HD16.**
+  La sesión trae `storeIds` (`src/features/admin/authorization.ts:27-31`) y no hay
+  ningún concepto de «marca autorizada» en el repo. ADR 0018 (e) sube el branding
+  a `Storefront` y **no dice quién puede escribirlo**; ADR 0018 (f) solo resuelve
+  el caso de agrupar, exigiendo permiso sobre **las dos** tiendas. El humano
+  eligió la lectura estricta y coherente con esa (f): **cobertura total o 403**
+  (R42–R46, E40). La incongruencia se cierra, pero **deja trabajo estructural**:
+  el guard del panel decide hoy con cero consultas y este camino necesita una
+  (R43), así que `sdd-architect` tiene que decidir dónde vive esa lectura sin
+  abrir un segundo camino de autorización. La ADR 0018 no cubre este punto: es
+  material para actualizarla o para un párrafo nuevo.
+- **I11 — `commit()` revalida un slug y un branding cambia N+1 tags.** El embudo
+  (`src/features/admin/server/mutations.ts:67-71`) fue diseñado cuando toda
+  escritura del panel era de una sucursal. `themeTokens` se lee bajo **dos** tags
+  distintos —`storeTag(canonicalSlug)` por sucursal
+  (`src/features/catalog/server/queries.ts:143-148`) y `storefrontTag(brandSlug)`
+  para el selector (`:181-188`)—, así que un guardado que solo llame a `commit()`
+  deja rancias todas las hermanas y el selector **hasta 3600 s**. Es exactamente
+  la firma de la ficha
+  `.agent/playbook/revalida-solo-lo-que-se-escribe-no-lo-que-cambia-de-significado.md`,
+  fichada ya tres veces en este repo. El propio `setStoreEnabled` tuvo que
+  saltarse `commit()` para resolverlo (`mutations.ts:236-255`): la cuarta
+  instancia del mismo defecto entra por aquí si nadie lo mira.
+- **I12 — El helper obligatorio no devuelve lo que esta escritura necesita.**
+  AGENTS.md § Prohibiciones prohíbe armar a mano el array de slugs de una marca y
+  manda llamar a `expandBrandTouch()`. Pero `expandBrandTouch` devuelve un
+  `SlugTouchSet` de **valores del registro** para `revalidateSlugs`
+  (`src/features/storefront/server/registry.ts:269-277`), y lo que un branding
+  necesita son **slugs canónicos** para `revalidateStores`, que exige
+  `PublicSlug[]`. Hoy el único sitio autorizado a hacer ese salto con un cast es
+  `regroupStoreIntoBrand` (`registry.ts:457-471`), con un comentario que dice que
+  es «the one place in the whole codebase allowed to make that claim». Decidir
+  dónde vive la proyección para el branding —extender `expandBrandTouch`, un
+  gemelo suyo en `registry.ts`, o un cast que rompe esa exclusividad— es
+  **decisión de `sdd-architect`**, no de esta spec; lo que la spec exige es R36 y
+  R37.
+- **I13 — El diseño congelado está escrito sobre `Store` y sobre una forma de URL
+  que la ADR 0018 superó.** `.agent/specs/F-011/design.md` § «Congelado» dice, en
+  su punto 2, que la maqueta necesita el selector de sucursal de ADR 0012 y que
+  las páginas viven en `/[slug]/[sucursal]`. ADR 0018 (b) **supera esa línea**: el
+  selector vive en `/[slug]` de la marca y cada sucursal en su **propio slug de
+  primer nivel**. Y su punto 1 propone mover el editor a `/admin/marcas/…`, lo que
+  choca con I10. El detalle de qué sobrevive y qué se repiensa está en la tabla
+  del final de este capítulo.
+- **I14 — La ADR 0017 está rancia en tres puntos y su § «Reabrir cuando» manda un
+  mecanismo que ya no aplica.** Sigue marcada **Propuesta** aunque lo que decide
+  está construido y fusionado; su § (c) presenta AP5 y AP6 como abiertas aunque el
+  ciclo 2 las implementó (`Store.sourceOptIn` y `Store.sourceUpdatedAt`,
+  `prisma/schema.prisma:230-239`); y su § «Reabrir cuando» dice que al llegar
+  `Storefront` el editor se construye «con el mecanismo de override descrito
+  arriba» —columnas de override y precedencia en un módulo—, que es justo lo que
+  ADR 0018 (e) hizo **innecesario**: en `Storefront` no hay ninguna columna
+  compartida con el sync, así que no hay nada que precedenciar. El propio
+  documento pide que se actualice y no se interprete. **Corregirla es de
+  `sdd-architect`**, no mía.
+- **I15 — Tres columnas de contacto y dos de imagen se leen y no las escribe
+  nadie.** `Storefront.contactPhone`, `contactWhatsapp` y `contactEmail` tienen su
+  precedencia implementada y probada (`src/lib/storeContact.ts`) y su lectura
+  viva (`src/features/catalog/server/queries.ts:112-119`), pero ningún camino del
+  repo las escribe: ni el panel, ni el sync, ni el seed. `logoUrl` se lee y no se
+  pinta en ningún sitio, y `coverUrl` solo alimenta el `openGraph`
+  (`src/app/[slug]/page.tsx:64`). Es funcionalidad a medio construir, no un
+  descuido de F-017: su editor era exactamente lo que HD5 canceló. Ningún
+  `acceptance_criteria` las cubre, así que la regla 3 impide meterlas como
+  criterio. **Cerrada por HD17 y HD19: las cinco quedan fuera de esta tanda**, el
+  contacto como deuda para otro ciclo y las dos de imagen esperando a F-023. La
+  incongruencia no desaparece —siguen siendo columnas leídas que nadie escribe—,
+  pero deja de ser una pregunta abierta.
+- **I16 — `depends_on` de F-011 no menciona lo que de verdad lo bloqueó.** Dice
+  `["F-008"]`, y lo que tuvo parado el criterio 5 durante dos ciclos fue F-017.
+  Como el backlog es del humano (regla 4), queda escrito aquí y no se toca.
+- **I17 — La nota de F-011 en `.agent/features.json` empieza con «Sin empezar».**
+  Hay cuatro criterios verificados ejecutando, fusionados a `main` en el PR #6, 18
+  pasos de plan construidos y dos ciclos de `sdd-tester` en verde. La nota es del
+  humano y solo él la corrige; se señala para que nadie lea el backlog y concluya
+  que este feature no tiene código.
+- **I18 — El caso que hace falta probar no existe en el seed, y crearlo no tiene
+  vuelta. RESUELTA por HD18.** E39, E40 y los criterios 17 y 22 `[nuevo]`
+  necesitan una marca con dos sucursales. El seed no tiene ninguna
+  (`prisma/seed.ts:361-417`: cada tienda es su propia marca) y la única forma de
+  crearla en caliente es la acción de agrupar, que ADR 0018 (f) define **sin
+  desagrupar**; un sensor repetible no puede depender de una operación
+  irreversible sobre una fixture. Se siembra ya agrupada, con el precedente de
+  `tienda-cerrada`, y con la advertencia de idempotencia del criterio 23
+  `[nuevo]`: el CI siembra dos veces.
+
+## Respuestas del humano (HD16–HD19)
+
+Las cuatro preguntas que este capítulo dejó abiertas el 2026-08-28 las contestó el
+humano ese mismo día. Se anotan aquí con su consecuencia, en el mismo formato con
+que HD1–HD15 viven en `.agent/progress/F-011.md`, y **no queda ninguna pregunta
+abierta que bloquee el plan**.
+
+- **HD16 — El branding de una marca lo edita quien administra TODAS sus
+  sucursales.** Si a la sesión le falta una sola sucursal renderizable de esa
+  marca, la escritura responde **403** y no se guarda nada: ni parcialmente, ni
+  con un aviso, ni «solo lo suyo». Fue la opción estricta, contra la
+  recomendación de esta spec, y es coherente con ADR 0018 (f), que ya exige
+  permiso sobre **las dos** tiendas para agrupar. Consecuencias escritas en R42–R46
+  y E40/E40b, y una estructural que hereda `sdd-architect`: la autorización de
+  este camino ya no se decide con cero consultas (R43).
+
+- **HD17 — El contacto de la marca no entra en esta tanda.** `contactPhone`,
+  `contactWhatsapp` y `contactEmail` siguen siendo columnas leídas que nadie
+  escribe (I15). Queda como deuda anotada para otro ciclo, no como olvido.
+
+- **HD18 — La marca de dos sucursales se siembra ya agrupada en `prisma/seed.ts`.**
+  Nada de agrupar dentro de `.agent/specs/F-011/smoke.sh`: agrupar no tiene vuelta
+  y el sensor tiene que poder correr dos veces seguidas. Mismo precedente que
+  `tienda-cerrada` en el ciclo 2. Es lo único que esta tanda toca de `prisma/`.
+
+- **HD19 — El logo y la portada de la marca no entran.** `Storefront.logoUrl` y
+  `coverUrl` esperan a F-023, que va a cambiar cómo se almacenan y se sirven las
+  imágenes.
+
+## Qué sobrevive del diseño congelado y qué hay que repensar
+
+Lectura obligatoria antes de tocar `.agent/specs/F-011/design.md`: la forma de las
+pantallas se sostiene casi entera; lo que cambió es de qué fila salen los valores,
+a cuántas páginas afectan y qué promete el microcopy.
+
+| Pieza congelada (design.md § 2b y su microcopy)                                           | Veredicto                                  | Por qué                                                                                                                                                                                                                                                                |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Las seis paletas como chips `type="button"` **sin `name`**                                | **Sirve tal cual**                         | Nada del cambio de tabla la toca. DP3 (los seis nombres) ya está contestada                                                                                                                                                                                            |
+| `ColorTokenField`: texto **con** `name` + `<input type="color">` **sin** `name`           | **Sirve, y sigue siendo obligatorio**      | `prisma/seed.ts:331` guarda `oklch(...)` hoy; VE6 no ha caducado y E43 lo convierte en criterio                                                                                                                                                                        |
+| Los cuatro `RadioCard` de `radius`, incluida «Las de siempre»                             | **Sirve tal cual**                         | `RADIUS_SCALE` no cambió (`src/features/theming/storeTheme.ts:29-33`)                                                                                                                                                                                                  |
+| Extraer `themeCustomProperties()` de `storeTheme.ts` para la maqueta                      | **Sirve tal cual, sigue sin existir**      | El módulo exporta hoy solo `themeTokensSchema`, `ThemeTokens` y `renderStoreTheme`                                                                                                                                                                                     |
+| La maqueta aplica propiedades personalizadas en su `style`, sin `<style>` ni `data-store` | **Sirve tal cual**                         | Es lo que impide que la maqueta pelee con la regla real y lo que respeta F-016                                                                                                                                                                                         |
+| La maqueta enseña la cabecera de la vitrina                                               | **Repensar**                               | Hoy hay **dos** cabeceras públicas distintas: la del selector de marca (`src/app/[slug]/layout.tsx:35-41`, sin carrito y sin enlace) y la de sucursal (`:71-90`). Con varias sucursales hay que decidir cuál se previsualiza, o el admin ve una pantalla que no existe |
+| La nota «al descongelar, la maqueta necesita el selector de ADR 0012»                     | **Superada**                               | ADR 0018 (b) cambió la forma: no hay `/[slug]/[sucursal]`; el selector vive en `/[slug]` de la marca y cada sucursal en su propio slug de primer nivel                                                                                                                 |
+| La nota «el editor pasa a `/admin/marcas/<storefront>`»                                   | **Repensar, con HD16 encima**              | La sesión sigue autorizando tiendas y ahora además exige cubrir la marca entera (R42). Entrar por el hub que ya existe conserva el guard, el 403 del criterio 2 y la tarjeta «Tu marca» de F-017                                                                       |
+| Microcopy «Tu tienda usa la paleta por defecto…», «Tus clientes ya lo ven en tu tienda»   | **Repensar**                               | Con varias sucursales, «tu tienda» es falso: el guardado afecta a todas. El texto tiene que nombrar la **marca** y decir a cuántas sucursales alcanza                                                                                                                  |
+| El estado «Guardado en tienda no publicada»                                               | **Repensar**                               | HD10–HD15 cambiaron qué significa: hoy hay `DRAFT` (nunca fue pública, 404) y `SUSPENDED` (cerrada por el panel o por el POS, 200 con aviso)                                                                                                                           |
+| `PalettePreview` (la tira de color en la tarjeta del listado)                             | **Repensar dónde vive**                    | El listado es de **tiendas** y la paleta es de la **marca**: dos hermanas mostrarían la misma tira sin explicar por qué                                                                                                                                                |
+| La tarjeta 2a «Datos de Cuadre de Caja»                                                   | **Ya construida**                          | Vive en el hub desde el ciclo 1                                                                                                                                                                                                                                        |
+| La tarjeta 2c «Texto y contacto» y sus cuatro columnas de override                        | **Cancelada, y su mecanismo ya no aplica** | ADR 0018 (e) puso el contacto en `Storefront`, donde el sync no escribe: no hace falta ninguna columna de override ni módulo de precedencia nuevo (`src/lib/storeContact.ts` ya lo resuelve). HD17 la deja fuera de esta tanda                                         |
+| HD8 / DP4(a): se puede guardar un branding ilegible, avisa la maqueta                     | **Sigue en pie**                           | Ninguna ADR posterior lo tocó                                                                                                                                                                                                                                          |
+| El aviso «HD2: publicar y despublicar se hace en Cuadre de Caja»                          | **Falso a medias, ya señalado**            | HD10: abrir y cerrar al público es del panel; solo publicar por primera vez sigue siendo del POS                                                                                                                                                                       |
+| «No pude juzgar 360 ni 768 px» (VE18, repetido por tres agentes)                          | **Ya tiene herramienta**                   | F-017 construyó la etapa `--visual` con chromium headless. Ver criterio 21 `[nuevo]`                                                                                                                                                                                   |
+
+## No decidido a propósito (tanda 3)
+
+- **La ruta exacta del endpoint de branding y la URL de la pantalla.** Es de
+  `sdd-architect` con `sdd-designer`. Lo que la spec fija: verbo de reemplazo,
+  cuerpo = objeto de tokens (R32), 400/401/403/404 con los cuerpos que ya usa
+  `src/app/api/admin/_lib/respond.ts`, ni una server action (R35), y el 403 de
+  cobertura con el mismo cuerpo que el de tienda ajena (R44).
+- **Dónde se comprueba la cobertura de HD16 y de dónde sale su consulta** (R43):
+  extender el guard, una función nueva del feature del panel, o un tipo marcado
+  gemelo de `AuthorizedStoreId`. Lo único que la spec exige es que **no haya un
+  segundo camino de autorización** y que la lectura que decide el 403 sea la misma
+  que alimenta la revalidación de R36.
+- **Dónde vive la proyección «marca → slugs a revalidar»** (I12): extender
+  `expandBrandTouch`, un gemelo suyo en `src/features/storefront/server/registry.ts`,
+  o algo mejor. Lo decide `sdd-architect`; la spec solo exige R36 y R37.
+- **Si el editor es una tarjeta más del hub o una pantalla propia**, y **cómo se
+  ve bloqueado** cuando la cobertura es incompleta (E40b, R45). Es `design.md`.
+- **Si la maqueta previsualiza la cabecera de sucursal, la del selector, o las
+  dos.** Es `design.md`.
+- **El nombre, los slugs y los `externalId` de la fixture de HD18.** Es
+  `sdd-architect` en `architecture.md` § Fixtures. Lo que la spec exige: dos
+  sucursales renderizables bajo una marca, de un solo uso, que ningún otro feature
+  lea, e idempotente ante un segundo `npm run seed` (criterio 23 `[nuevo]`).
+- **Actualizar la ADR 0017** (I14), añadir a la ADR 0018 el punto que HD16 decide
+  y que ninguna ADR cubría (I10), y decidir si esta tanda merece ADR propia. Es
+  `sdd-architect`. Mi lectura: no hace falta una ADR nueva —ADR 0018 (e) ya decidió
+  la propiedad del dato—, pero la 0017 hay que ponerla al día o mandará a quien la
+  lea a construir un mecanismo de override que nadie necesita, y la cobertura de
+  HD16 tiene que quedar escrita donde vive el resto de la frontera de escritura.
+- **El editor de contacto e imágenes de la marca** (HD17, HD19) y la validación de
+  contraste (HD8): deuda conocida, anotada para el humano y el backlog.
+- **Si F-011 pasa a `passes: true` al cerrar este criterio**, dado que la nota del
+  feature dice que F-023 sustituye parcialmente el cuarto. No lo decide esta spec
+  ni ningún agente: es del humano al cerrar el ciclo, con `.agent/features.json`
+  delante.

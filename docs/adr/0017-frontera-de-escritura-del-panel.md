@@ -1,10 +1,22 @@
 # 0017 — La frontera de escritura del panel, el estado compartido de la tienda, y el descuento dentro de `unitPrice`
 
-**Propuesta** · 26 de agosto de 2026 · F-011
+**Aceptada** · 26 de agosto de 2026 · F-011 · _actualizada el 28 de agosto de
+2026, al cerrarse AP5/AP6 y al llegar `Storefront`_
 
 Tres decisiones que se toman juntas porque las tres definen lo mismo: **quién es
 dueño de qué columna** cuando hay tres escritores —el sync, el panel y el
 checkout— sobre las mismas tablas.
+
+> **Estado, con fecha.** Se escribió como «Propuesta» y lo que decide está
+> construido, verificado y fusionado a `main` (PR #6, F-011 ciclos 1 y 2), así
+> que pasa a **Aceptada**. Dos partes de este documento habían quedado rancias y
+> están corregidas abajo, no reinterpretadas: los dos huecos de la decisión (c)
+> —AP5 y AP6— **ya se cerraron** y tienen columna en el schema, y la nota de
+> § «Reabrir cuando» que mandaba construir el editor de branding «con el
+> mecanismo de override descrito arriba» **quedó superada** por
+> [ADR 0018](0018-registro-de-slugs-y-slug-canonico.md) (e): en `Storefront` no
+> hay ninguna columna compartida con el sync, así que no hay nada que
+> precedenciar.
 
 ## Contexto
 
@@ -70,11 +82,12 @@ silencioso del importe cobrado. Quitar el override pone las dos columnas a `null
 
 ### Lo que esta decisión NO hace, y por qué
 
-**El panel no edita hoy branding ni contacto de la tienda.** El diseño existía
-—cuatro columnas de override en `Store` (`descriptionOverride`, `phoneOverride`,
-`whatsappOverride`, `emailOverride`) y la precedencia encapsulada en un módulo
-gemelo de `lib/pricing.ts`— y se **detuvo** por decisión del humano, por dos
-motivos distintos que conviene no confundir:
+**El panel no editaba branding ni contacto de la tienda cuando esto se
+escribió.** El diseño existía —cuatro columnas de override en `Store`
+(`descriptionOverride`, `phoneOverride`, `whatsappOverride`, `emailOverride`) y
+la precedencia encapsulada en un módulo gemelo de `lib/pricing.ts`— y se
+**detuvo** por decisión del humano, por dos motivos distintos que conviene no
+confundir:
 
 - El contacto y la descripción quedan en modo lectura por alcance: se prefirió
   una entrega más corta.
@@ -83,11 +96,19 @@ motivos distintos que conviene no confundir:
   a poseer slug, branding y contacto. Construir el editor sobre `Store` habría
   significado moverlo de tabla poco después.
 
-Queda escrito para que nadie lo lea como un olvido: cuando `Storefront` llegue,
-el mecanismo a usar es el de ADR 0007 aplicado a la tienda —columnas de override
-propiedad del panel, precedencia en un solo módulo, handler del sync intacto—,
-que es la única forma de satisfacer a la vez «el panel edita contacto» y «el sync
-se queda como está».
+**Lo que pasó después, y por qué esas cuatro columnas no se van a crear nunca**
+(28 de agosto de 2026): `Storefront` llegó con F-017, y
+[ADR 0018](0018-registro-de-slugs-y-slug-canonico.md) (e) puso allí el branding y
+el contacto **con el sync sin escribir ni una de esas columnas**. Eso hace
+innecesario todo el mecanismo de override: no hay columna compartida, luego no
+hay «gana el último» que resolver ni precedencia que encapsular. Las tres
+columnas de `Store` que este documento discutía (`themeTokens`, `logoUrl`,
+`coverUrl`) las **borró** la migración de F-017.
+
+Quien venga a construir un editor de branding o de contacto: la frontera que
+aplica es la de la decisión (g) de ADR 0018 —lista blanca de columnas de
+`Storefront` dentro del mismo embudo, y cobertura total de la marca para
+escribir—, no un mecanismo de override.
 
 ## Decisión (b) — el descuento va dentro de `unitPrice`; `originalUnitPrice` no cambia de significado
 
@@ -170,25 +191,30 @@ enum de base rompería la escritura del sync) más un texto corto opcional del
 negocio, validado en longitud.
 
 **Quién gana cuando los dos escriben: el último.** Es la decisión del humano y se
-respeta. Tiene dos consecuencias que esta ADR deja **explícitamente abiertas**,
-porque no son del arquitecto:
+respeta. Tenía dos consecuencias que esta ADR dejó abiertas (AP5 y AP6) y que
+**el humano cerró el 26 de agosto de 2026**; están construidas y verificadas, y
+esta sección se actualiza en vez de interpretarse, que es lo que la versión
+anterior pedía:
 
-1. Hoy el handler escribe `status: "PUBLISHED"` en **todo** evento con
-   `publishToStore: true`, incluido el que llega porque alguien cambió el teléfono
-   en el POS. Con «gana el último» tal cual, un cierre del panel se deshace con la
-   siguiente edición rutinaria de la tienda en el POS. La alternativa es que el
-   POS solo escriba el estado cuando **su** opt-in cambia, guardando el último
-   valor visto en una columna. Está sin decidir (AP5 de
-   `.agent/specs/F-011/architecture.md`).
-2. `Store` no tiene marca de tiempo de origen, así que un evento reencolado del
-   outbox puede resucitar una tienda recién cerrada. El payload de `STORE` **ya
-   trae `updatedAt`** (`src/features/sync/schemas.ts:42`), así que el guarda
-   anti-rancio no cuesta contrato: es una columna y la misma comparación que ya
-   hace `handlers/product.ts:46`. Está sin decidir (AP6).
+1. **AP5, cerrada con la opción (b): el POS solo escribe el estado cuando su
+   propio opt-in cambia.** Antes, `handleStore` ponía `status: "PUBLISHED"` en
+   **todo** evento con `publishToStore: true`, incluido el que llegaba porque
+   alguien cambió un teléfono en el POS: un cierre del panel se deshacía con la
+   siguiente edición rutinaria. Ahora se guarda el último `publishToStore` visto
+   en `Store.sourceOptIn` (`prisma/schema.prisma`, bloque «HD10/AP5(b)») y el
+   handler toca `status` y las columnas de cierre **solo en la transición**.
+   Sigue habiendo un solo estado y sigue ganando el último: lo que cambia es que
+   «el POS escribió el estado» pasa a significar «el POS dijo algo sobre
+   publicación».
+2. **AP6, cerrada con la opción (a): sí hay guarda anti-rancio.**
+   `Store.sourceUpdatedAt` existe y el handler compara contra ella igual que
+   `handlers/product.ts` hace desde F-005, así que un evento reencolado del
+   outbox ya no resucita una tienda recién cerrada. No costó contrato: el payload
+   de `STORE` ya traía `updatedAt`.
 
-Quien lea esta ADR después: si esas dos preguntas ya se contestaron, la respuesta
-está en el progreso de F-011 y **esta sección hay que actualizarla**, no
-interpretarla.
+Con las dos cerradas, «gana el último» significa el último **de verdad**, y entre
+el panel y el POS no cambia nada: un evento nuevo del POS que anuncia un cambio
+de opt-in sigue pisando al panel.
 
 **El interruptor entra por el mismo sitio que todo lo demás**: un route handler
 bajo `/api/admin/`, el mismo guard, el mismo módulo de escritura y la misma
@@ -205,7 +231,10 @@ efecto buscado, no un descuido, y por eso está escrito aquí.
 - Una sola lista blanca por tabla, en tipos, en un solo módulo de escritura. Con
   (c) esa lista incluye `status` y las tres columnas de motivo, y **excluye**
   `publishedAt`: el test de fronteras comprueba que `status` aparece solo en la
-  mutación del interruptor.
+  mutación del interruptor. La misma forma vale para toda tabla que el panel
+  escriba después —`Storefront` incluida, ADR 0018 (g)—: una lista blanca en
+  tipos, en `src/features/admin/server/mutations.ts`, y ninguna columna de
+  identidad dentro (ni `slug`, ni `publishedAt`).
 - Un solo compositor de precio (`resolvePrice` en `src/lib/pricing.ts`) que usan
   la vitrina y el pedido: no hay dos implementaciones que puedan divergir.
 - Un test que fija que sin promociones el precio es idéntico al de antes, y otro
@@ -223,9 +252,12 @@ efecto buscado, no un descuido, y por eso está escrito aquí.
   negocio no puede ver por separado.
 - Un valor de enum nuevo para «cerrada por el negocio»: dos estados que renderizan
   igual y una comprobación de dos valores en cada lectura.
-- Añadir `Store.sourceUpdatedAt` y una guarda anti-rancio: convierte el conflicto
-  en «gana el más reciente», que para un texto escrito a mano es otra forma de
-  perderlo, y toca el handler del sync.
+- ~~Añadir `Store.sourceUpdatedAt` y una guarda anti-rancio~~ — **esta
+  alternativa dejó de estar descartada**: es AP6 y se aceptó (ver (c)). El
+  argumento de contra («convierte el conflicto en gana-el-más-reciente») valía
+  para las columnas de **texto**, que HD5 sacó del panel; para `status`, que es un
+  interruptor y no un texto escrito a mano, el guarda es exactamente lo que hace
+  que «gana el último» signifique lo que parece decir.
 - Dejar de sincronizar esas columnas: rompe la tienda recién creada.
 - Desglosar el descuento por línea hacia el POS: v3 del contrato.
 - Descontar después de convertir: rompe la fórmula publicada.
@@ -244,10 +276,17 @@ efecto buscado, no un descuido, y por eso está escrito aquí.
 
 ## Reabrir cuando
 
-- Se contesten AP5 o AP6: la sección (c) se actualiza con la semántica elegida,
-  y deja de ser una decisión con dos huecos.
-- Llegue `Storefront` ([ADR 0012](0012-storefront-sobre-store.md)): branding y
-  contacto suben de tabla y el editor del panel se construye allí, con el
-  mecanismo de override descrito arriba.
+- ~~Se contesten AP5 o AP6~~ — **hecho** (26 de agosto de 2026), recogido en (c).
+- ~~Llegue `Storefront`~~ — **hecho** (F-017, 27 de agosto de 2026). El branding
+  y el contacto subieron a `Storefront` por
+  [ADR 0018](0018-registro-de-slugs-y-slug-canonico.md) (e), y quién los escribe
+  lo decide la (g) de esa misma ADR. **No** se usa ningún mecanismo de override:
+  esa ruta murió con la tabla que la necesitaba.
+- El panel escriba una columna **nueva** de `Storefront` (el contacto de la
+  marca, `logoUrl`, `coverUrl`): se amplía la lista blanca de esa tabla y se
+  comprueba que la regla de cobertura de ADR 0018 (g) sigue siendo la que se
+  quiere para esa columna.
 - El POS pida el desglose del descuento: es una versión nueva de
   `docs/sync-contract.md`, coordinada con el otro equipo.
+- `storeIds` deje de viajar en la cookie (es un feature de F-008): hoy es lo que
+  pone un techo de ~60 sucursales a la cobertura total de ADR 0018 (g).

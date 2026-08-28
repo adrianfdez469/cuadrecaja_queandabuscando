@@ -15,6 +15,7 @@ const revalidateStorefronts = vi.fn();
 const revalidateSlugs = vi.fn();
 const uploadStoreObject = vi.fn();
 const storefrontFindUnique = vi.fn();
+const storefrontUpdate = vi.fn();
 const regroupStoreIntoBrand = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
@@ -33,6 +34,7 @@ vi.mock("@/lib/prisma", () => ({
     },
     storefront: {
       findUnique: (...a: unknown[]) => storefrontFindUnique(...a),
+      update: (...a: unknown[]) => storefrontUpdate(...a),
     },
     promotion: {
       findFirst: (...a: unknown[]) => promotionFindFirst(...a),
@@ -65,11 +67,13 @@ const {
   saveProduct,
   appendProductImage,
   setStoreEnabled,
+  saveBrandTheme,
   createPromotion,
   updatePromotion,
   deletePromotion,
   groupStoreIntoBrand,
 } = await import("./mutations");
+const { expandBrandRevalidation } = await import("@/features/storefront/server/registry");
 
 function row(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -108,6 +112,7 @@ beforeEach(() => {
   revalidateSlugs.mockReset();
   uploadStoreObject.mockReset();
   storefrontFindUnique.mockReset();
+  storefrontUpdate.mockReset();
   regroupStoreIntoBrand.mockReset();
 });
 
@@ -507,5 +512,55 @@ describe("groupStoreIntoBrand() — HS8, etapa 2", () => {
         ],
       },
     });
+  });
+});
+
+describe("saveBrandTheme() — F-011 tanda 3 (R33-R36)", () => {
+  it("revalidates ALL canonical slugs of the brand's renderable branches and the brand's own slug — never revalidateSlugs", async () => {
+    storefrontUpdate.mockResolvedValue({
+      id: "storefront-1",
+      slug: "el-trebol",
+      themeTokens: { brand: "#0f62fe" },
+    });
+    const touch = expandBrandRevalidation("el-trebol", [
+      { slug: "el-trebol-centro" },
+      { slug: "el-trebol-playa" },
+    ]);
+
+    const result = await saveBrandTheme("storefront-1" as never, touch, {
+      brand: "#0f62fe",
+    } as never);
+
+    expect(storefrontUpdate).toHaveBeenCalledExactlyOnceWith({
+      where: { id: "storefront-1" },
+      data: { themeTokens: { brand: "#0f62fe" } },
+      select: { id: true, slug: true, themeTokens: true },
+    });
+    expect(revalidateStores).toHaveBeenCalledExactlyOnceWith([
+      "el-trebol-centro",
+      "el-trebol-playa",
+    ]);
+    expect(revalidateStorefronts).toHaveBeenCalledExactlyOnceWith(["el-trebol"]);
+    expect(revalidateSlugs).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      kind: "saved",
+      value: {
+        storefrontId: "storefront-1",
+        brandSlug: "el-trebol",
+        themeTokens: { brand: "#0f62fe" },
+        branchCount: 2,
+      },
+    });
+  });
+
+  it("maps a vanished storefront (P2025) to not_found, without revalidating anything", async () => {
+    storefrontUpdate.mockRejectedValue({ code: "P2025" });
+    const touch = expandBrandRevalidation("tienda-demo", [{ slug: null }]);
+
+    const result = await saveBrandTheme("gone" as never, touch, {} as never);
+
+    expect(result).toEqual({ kind: "not_found" });
+    expect(revalidateStores).not.toHaveBeenCalled();
+    expect(revalidateStorefronts).not.toHaveBeenCalled();
   });
 });

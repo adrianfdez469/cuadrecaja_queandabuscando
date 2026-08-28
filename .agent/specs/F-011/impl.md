@@ -1,7 +1,7 @@
 ---
 feature: F-011
 agente: sdd-implementer
-actualizado: 2026-08-26T22:14:43Z
+actualizado: 2026-08-28T03:18:22Z
 estado: listo
 ---
 
@@ -528,3 +528,225 @@ diff` + `migrate deploy` en vez de `migrate dev`, porque `migrate dev` pedía
   al equipo de cuadrecaja lo decide y lo hace el humano. ¿Se envía ya, junto
   con el aviso de que el payload v2 de `STORE` tampoco se les había
   comunicado nunca?
+
+---
+
+# Tanda 3 (pasos 19–34) — el editor de branding sobre `Storefront`
+
+Los dieciséis pasos del plan firmado el 2026-08-28, en orden, verificando entre
+cada uno con `bash .agent/verify.sh F-011`. Cierra el quinto y último
+`acceptance_criteria` de F-011 (branding inválido rechazado por
+`themeTokensSchema`, sin llegar a la base).
+
+## Qué se construyó
+
+| Archivo                                                                                                                                                                                                                     | Qué hace                                                                                                                                                                                                                   | Paso |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| `src/features/theming/storeTheme.ts` (+`themeCustomProperties()`)                                                                                                                                                           | Extrae las declaraciones de `renderStoreTheme` como objeto, para que `StorefrontPreview` las aplique en `style` sin `<style>` ni `data-store`. Cero cambio de salida (confirmado con `storeTheme.test.ts` antes y después) | 19   |
+| `src/features/admin/authorization.ts` (+`authorizeBrandCoverage`, `AuthorizedStorefrontId`, `CoverageBranch`, `BrandCoverageResult`) + `authorization.test.ts`                                                              | HD16/R42: puro, 0 consultas, reutiliza `canManageStore`; `missing` sin `storeId` (HS12)                                                                                                                                    | 20   |
+| `src/features/storefront/server/registry.ts` (+`expandBrandRevalidation`, `BrandRevalidationSet`) + `registry.test.ts`                                                                                                      | Gemela de `expandBrandTouch`, sin cast, con `canonicalSlug()`. R36/R37/I12                                                                                                                                                 | 21   |
+| `src/features/admin/server/branding.ts` (+) + `branding.test.ts`                                                                                                                                                            | `loadBrandingTarget`: la lectura única (R43) — marca, `themeTokens`, sucursales renderizables con `status`, y el nombre de la sucursal desde la que se entró (`storeName`, misma consulta, cero queries extra)             | 22   |
+| `src/features/admin/schemas.ts` (+`brandingBodySchema`), `src/features/admin/types.ts` (+`AdminBrandingRow`, `BrandingBody`) + `schemas.test.ts`                                                                            | Re-exporta `themeTokensSchema`, ninguna clave redefinida                                                                                                                                                                   | 23   |
+| `src/features/admin/server/mutations.ts` (+`saveBrandTheme`, `commitBrand`, `PanelStorefrontColumn`/`Write`); `src/features/admin/server/boundaries.test.ts` (+`"slug"` en `FORBIDDEN_WRITE_COLUMNS`) + `mutations.test.ts` | Único sitio que escribe `Storefront.themeTokens`; revalida marca + todas las sucursales; nunca `revalidateSlugs`                                                                                                           | 24   |
+| `src/app/api/admin/stores/[storeId]/branding/route.ts` (+)                                                                                                                                                                  | `PUT`/`PATCH`: guard → lectura → `authorizeBrandCoverage` → 403 antes que 400 → cuerpo → mutación; mismo `forbidden()` para los dos 403                                                                                    | 25   |
+| `src/constants/branding.ts` (+)                                                                                                                                                                                             | Seis paletas (DP13), atajos Claro/Oscuro, dos nombres de producto de ejemplo, etiquetas de `radius`                                                                                                                        | 26   |
+| `src/app/admin/tiendas/[storeId]/marca/{page,loading}.tsx` (+)                                                                                                                                                              | Cabecera con la frase según N sucursales, editor 12a o bloqueado 12b según `authorizeBrandCoverage`, `dynamic = "force-dynamic"` literal, 404 de tienda ajena/tienda desaparecida                                          | 27   |
+| `src/features/admin/components/{BrandingForm,ColorTokenField,BrandCoverageNotice,ThemeSwatches,StorefrontPreview}.tsx` (+)                                                                                                  | Isla única (`BrandingForm`), control de color compuesto, aviso de cobertura, muestras, maqueta con `themeCustomProperties()` en `style`                                                                                    | 28   |
+| `src/app/admin/tiendas/[storeId]/page.tsx` (tarjeta reemplazada); `src/features/admin/server/stores.ts` (+`themeTokens` en `STOREFRONT_SELECT`, +`brandThemeTokens` en `ManagedStoreDetail`)                                | «Colores de tu marca» sustituye «Colores y contacto · En camino»; cero consultas nuevas                                                                                                                                    | 29   |
+| `src/app/sesion-cerrada/page.tsx` (+)                                                                                                                                                                                       | Componente de servidor, cero JS; arregla el 401 de `GroupStoresForm` y de `BrandingForm`                                                                                                                                   | 30   |
+| `prisma/seed.ts` (+`seedBrandWithBranches()`)                                                                                                                                                                               | Marca `el-trebol`, tres sucursales (`seed-tienda-8` PUBLISHED, `seed-tienda-9` SUSPENDED, `seed-tienda-10` DRAFT), `themeTokens: null`, sin productos                                                                      | 31   |
+| `.agent/specs/F-011/smoke.sh` (+sección branding)                                                                                                                                                                           | Criterios 5, 17, 19, 20, 22, 23 ejecutables y repetibles                                                                                                                                                                   | 32   |
+| `.agent/specs/F-011/visual.mjs` (+, no existía)                                                                                                                                                                             | V39–V44: 360/768/1280 px, la maqueta reactiva, modo oscuro, el bloqueado sin ningún control, navegación por teclado                                                                                                        | 33   |
+
+## Desviaciones
+
+1. **`loadBrandingTarget` devuelve un campo más de lo que `architecture.md` dibuja: `storeName`.**
+   El contrato de `BrandingTarget` en `architecture.md` no lista el nombre de
+   la sucursal desde la que se entró, pero `design.md` § 12 exige
+   `← {nombre de la tienda}` en la cabecera. Añadir `store.name` al mismo
+   `select` de la misma consulta cuesta una columna, no una query — sigue
+   siendo "dos consultas en total" (`architecture.md` § Lectura de la
+   pantalla). No es una desviación estructural, es un campo que el contrato
+   no explicitó y que la misma lectura ya podía dar gratis.
+
+2. **`npm run check:theme` NO se metió dentro de `.agent/specs/F-011/smoke.sh`**,
+   aunque `architecture.md` § Fixtures lo lista como punto 9 de la sección
+   nueva. `check:theme` lee `.next/static`, que solo existe tras `npm run
+build` — bajo `next dev` (lo que la etapa `--smoke` levanta) ese directorio
+   no existe nunca, así que el paso fallaría siempre, con cualquier branding.
+   El criterio 13/E44 se sigue verificando, pero en `--full` (que corre
+   `npm run build` antes de `check:theme`), donde ya pasaba en los ciclos
+   1 y 2. Anotado en el propio `smoke.sh` con un comentario en el sitio
+   donde el paso habría ido.
+
+3. **`.agent/specs/F-011/plan.md` se reformateó con `npm run format`**, un
+   documento que no es mío para editar. `format:check` lo señalaba en rojo
+   desde antes de que yo tocara una línea (confirmado con `git status`: ya
+   estaba `M` al empezar, por la aprobación del humano que `sdd.sh approve`
+   escribió sin pasar por prettier). Seguí el procedimiento exacto de la
+   ficha `prettier-write-reescribe-prosa-ajena`: copié el archivo, corrí
+   `prettier --write` solo sobre él, y comparé el diff a mano — es
+   **puramente cosmético**, reflow de ancho de columna en dos tablas Markdown
+   y una línea en blanco de más al final; ninguna viñeta cambió de
+   significado, ninguna línea de continuación empieza por `+`/`-`/`*`. No
+   toqué ningún otro documento firmado.
+
+4. **Generé valores de desarrollo para `SSO_JWT_SECRET`, `ADMIN_SESSION_SECRET`,
+   `CRON_SECRET` y `QAB_BEARER_TOKEN` en `.env`**, que estaban vacíos al
+   empezar. Los dos primeros son obligatorios en `serverEnv()` (`z.string().min(32)`,
+   sin `.optional()`) — sin ellos, cualquier lectura de sesión admin o
+   acuñado de token SSO lanza, y `bash .agent/verify.sh F-011 --smoke` no
+   puede levantar ni una sola página de `/admin`. Generados con
+   `openssl rand -base64 32`. `QAB_BEARER_TOKEN` se acuñó con
+   `npm run mint:token -- seed-negocio-1` (necesario porque el propio
+   `smoke.sh` lo exige al arrancar, para las secciones de promociones/pedidos
+   de ciclos anteriores, no de esta tanda). `CRON_SECRET` es `.optional()` en
+   el esquema y ningún paso de esta tanda lo necesita, pero lo generé igual
+   por completitud del entorno, siguiendo la instrucción explícita de
+   generar valores de desarrollo si hacían falta. Ver **IP6**.
+
+5. **Corregí un bug propio en la posición del `exit` del sensor** al añadir
+   la sección de branding a `smoke.sh`: el archivo original terminaba en
+   `printf '...aserciones fallidas...'; [ "$FAILS" -eq 0 ]`, y yo había
+   añadido mi sección **después** de esas dos líneas — el script seguía
+   ejecutándose tras ellas (nada detiene un script de bash en un `[ ... ]`
+   intermedio) y el código de salida real pasaba a ser el de mi último
+   `echo`, siempre 0. Lo detecté porque las subidas de imagen (503, fuera de
+   mi alcance) no hacían fallar `--smoke` como deberían. Arreglado moviendo
+   `printf`/`[ "$FAILS" -eq 0 ]` al verdadero final del archivo. Descubierto
+   y arreglado en este mismo ciclo, no fichado (descuido propio de esta
+   tanda, no una trampa del repo).
+
+## Comandos ejecutados
+
+- `bash .agent/verify.sh F-011` → **0** (`PASA`), repetidamente entre cada
+  paso (intentos 6–24 en `.agent/runs/F-011/`; los fallos intermedios están
+  todos fichados con `dismiss` o corregidos — ver más abajo).
+- `bash .agent/verify.sh F-011 --smoke` → **0** (`PASA`), con la sección
+  nueva de branding en verde: criterios 5, 17, 19, 20, 22, 23 `[nuevo]`
+  confirmados en el log (`.agent/runs/F-011/012-smoke.log`,
+  `.agent/runs/F-011/014-smoke.log`). Las diez líneas `SMOKE FAIL` de subida
+  de imágenes (`.agent/runs/F-011/013-smoke.log` en adelante) son de la
+  sección de imágenes de la tanda 2 — **fuera de alcance de esta tanda** (ver
+  § Desviaciones del ciclo 1/2 y la nota del orquestador): el emulador de
+  Storage está arriba pero pertenece a otro worktree, con credenciales que
+  no coinciden con las de este `.env`. Descartado con
+  `verify.sh dismiss F-011 'smoke:SMOKE FAIL subida del fixture real — esperaba 201, obtuve 503' '...'`.
+- `bash .agent/verify.sh F-011 --visual` → **0** (`PASA`), V39–V44 en verde
+  (`.agent/runs/F-011/023-visual.log`). Tres fallos propios en el camino
+  (URL de un solo uso reutilizada entre páginas, medir el punto del radio en
+  vez del `<label>`, un `waitForTimeout` fijo demasiado corto para el
+  `requestAnimationFrame` que mueve el foco bajo Chromium headless) — los
+  tres corregidos en este mismo ciclo y descartados con `dismiss` (no son
+  trampa del repo, son descuidos de mi propio guion nuevo).
+- `bash .agent/verify.sh F-011 --full` → **0 en sus nueve etapas**
+  (`harness`, `typecheck`, `lint`, `format`, `test`, `prisma`, `build`,
+  `theme`, `bundle`), `.agent/runs/F-011/024-*.log`. `check:bundle`:
+  **182.1 KB gzip** de 193 KB, idéntico a los ciclos 1 y 2 — el panel sigue
+  sumando 0 KB al presupuesto de la vitrina. `npm test`: **543 pruebas, 59
+  archivos**, todas en verde (de 325 antes de esta tanda).
+- `bash .agent/verify.sh pending F-011` → **vacío**.
+- `npm run seed && npm run seed` → **0** las dos veces (criterio 23):
+  la marca `el-trebol` conserva sus tres sucursales tras la segunda pasada.
+- `npx prisma validate` → **0**, sin ninguna migración nueva (confirmado:
+  `git diff --stat prisma/schema.prisma` vacío para esta tanda).
+
+## Revisión de código (`code-review`)
+
+Corrida (esfuerzo medio) sobre el diff completo de la tanda 3 antes de cerrar.
+Un solo hallazgo: `parseTokens()` en
+`src/app/admin/tiendas/[storeId]/marca/page.tsx` duplicaba exactamente la
+misma lógica de `safeParse`-con-`{}`-de-respaldo que ya estaba en línea en
+`src/app/admin/tiendas/[storeId]/page.tsx` (el hub), en vez de que las dos
+llamaran a un solo sitio — riesgo real si el tratamiento de un
+`themeTokens` inválido cambia algún día (por ejemplo, para registrar el
+caso) y alguien arregla una copia sin acordarse de la otra. **Arreglado**:
+extraída como `parseThemeTokens()` en `src/features/theming/storeTheme.ts`,
+junto a `themeCustomProperties()` (que ahora la reutiliza también), y los dos
+sitios llaman a esa única función. Re-verificado `bash .agent/verify.sh
+F-011 --full` → 0 tras el cambio.
+
+## Deuda dejada
+
+- **`BrandingForm` no reimplementa recorte de contraste** (HD8/R39 siguen en
+  pie): un branding ilegible se puede guardar, con solo un aviso de texto en
+  la maqueta.
+- **El contacto de la marca** (`contactPhone`, `contactWhatsapp`,
+  `contactEmail`) y **logo/portada** (`logoUrl`, `coverUrl`) siguen sin
+  escritor (HD17, HD19, I15) — deuda anotada en `spec.md`, no de esta tanda.
+- **`ColorTokenField`/`BrandingForm` no extraen un primitivo `TextInput`**
+  común (el ciclo 1 ya dejó esta misma deuda con `ProductForm`): cuatro
+  campos no abren ese frente, tal como `design.md` § Componentes de UI
+  decidió explícitamente.
+- **El resumen accesible de `StorefrontPreview` traduce `brandContrast` a
+  "claro"/"oscuro" con una heurística** (compara contra los dos valores de
+  los atajos `Claro`/`Oscuro`) y no con un cálculo real de luminancia — si el
+  admin escribe un valor que no es ninguno de los dos atajos, la línea
+  muestra el valor crudo en vez de "claro"/"oscuro". No bloquea ningún
+  criterio; es una simplificación de una frase decorativa.
+- **`STORAGE_JWT_SECRET`/`SUPABASE_SERVICE_ROLE_KEY` de este `.env` no
+  coinciden con el contenedor de Storage actualmente arriba** (pertenece a
+  otro worktree). No es deuda de esta tanda — anotado para que quien retome
+  no lo confunda con un bug de branding.
+
+## Qué necesita quien pruebe
+
+**Entorno**: Postgres de este worktree ya corre en el 5433 y ya tiene
+`SSO_JWT_SECRET`/`ADMIN_SESSION_SECRET`/`QAB_BEARER_TOKEN` generados en
+`.env` (ver § Desviaciones, punto 4) — no hace falta regenerarlos.
+`npm run db:migrate` (sin migración nueva, no debería aplicar nada) →
+`npm run seed` → `npm run build` (o `npm run dev` para `--smoke`/`--visual`).
+
+**Cookies para el criterio 5, 22 `[nuevo]`**:
+
+- `node scripts/mint-sso-token.mjs --stores=seed-tienda-1` → tienda propia
+  (`tienda-demo`), para los tres cuerpos inválidos y el camino feliz.
+- `node scripts/mint-sso-token.mjs --stores=seed-tienda-8,seed-tienda-9` →
+  cobertura **total** de `el-trebol` (200 esperado).
+- `node scripts/mint-sso-token.mjs --stores=seed-tienda-8` → cobertura
+  **parcial** de `el-trebol` (403 esperado, E40/HD16).
+
+**IDs**: los de `el-trebol-centro`/`el-trebol-playa` se sacan de `/admin`
+con la cookie de cobertura total (`data-store-id` junto al nombre «El Trébol
+· Centro Habana» / «El Trébol · Playa»), igual que ya hacía el sensor para
+`tienda-demo`/`tienda-dos`.
+
+**Endpoint**: `PUT /api/admin/stores/{storeId}/branding`, cuerpo = el objeto
+de tokens sin envoltorio (`{"brand":"#0f62fe","radius":"soft"}`). `PATCH` es
+alias.
+
+**Lo frágil**:
+
+- **Nunca verificar el branding con SQL directo** para comprobar que
+  "cambió en público": un `UPDATE "Storefront"` no pasa por
+  `revalidateStores`/`revalidateStorefronts`, así que la vitrina serviría el
+  color viejo hasta el piso de ISR de 3600 s. Toda verificación pasa por el
+  endpoint (o por la UI).
+- **`el-trebol` queda con el branding que el sensor le dejó** después de
+  correr `smoke.sh` (`{"brand":"#198038"}`, verde), a propósito (HD18: es
+  fixture de un solo uso, y `seedStorefront()` nunca pisa `themeTokens`
+  cuando el llamador no pasa uno truthy — así el sensor puede correr dos
+  veces seguidas sin resembrar). `tienda-demo` sí se restaura a `{}` al
+  final del guion.
+- El emulador de Storage (503 en subida de imágenes) es de la tanda 2, no de
+  esta — ver § Desviaciones del ciclo 1/2 y § Deuda de arriba.
+
+## Preguntas al humano
+
+- **IP6** (nueva) — Generé `SSO_JWT_SECRET`, `ADMIN_SESSION_SECRET` y
+  `CRON_SECRET` de desarrollo en `.env` (estaban vacíos) y acuñé
+  `QAB_BEARER_TOKEN` con `npm run mint:token -- seed-negocio-1`, porque sin
+  los dos primeros ninguna sesión de admin funciona y `--smoke` no puede
+  levantar ni una página de `/admin` (siguiendo la instrucción explícita de
+  generar valores de desarrollo si hacían falta). ¿Se dejan así — recomendado,
+  es exactamente el patrón que IP1 del ciclo 1 ya fijó para las claves de
+  Storage — o se prefiere que cada sesión los regenere a mano?
+  **Recomendación: dejarlos.**
+- **IP7** (nueva, para el cierre del paso 34) — El paso 34 (`tests.md` con
+  veredicto por criterio, la decisión de `passes`) no lo hice yo: la nota del
+  orquestador que abrió este ciclo dice explícitamente que el siguiente
+  agente es `sdd-tester`, "para verificar de forma independiente (no de
+  oídas)". Dejo los criterios 5 y 16–23 `[nuevo]` marcados como verificados
+  por mí en `.agent/progress/F-011.md`, con el comando exacto que lo
+  demuestra, para que `sdd-tester` los re-verifique de punta a punta contra
+  Postgres real — no para que los dé por buenos de oídas.

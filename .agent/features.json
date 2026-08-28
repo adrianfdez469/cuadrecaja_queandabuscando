@@ -191,7 +191,7 @@
       "id": "F-011",
       "category": "admin",
       "status": "active",
-      "depends_on": ["F-008"],
+      "depends_on": ["F-008", "F-017"],
       "description": "Panel de administración: publicar tienda, branding, imágenes, descripciones, overrides y promociones.",
       "acceptance_criteria": [
         "Un admin solo ve y edita las tiendas presentes en storeIds de su sesión.",
@@ -200,8 +200,8 @@
         "Subir una imagen la almacena en Supabase Storage y la sirve por next/image.",
         "Guardar branding inválido es rechazado por themeTokensSchema y no llega a la base."
       ],
-      "passes": false,
-      "notes": "Sin empezar. La invariante del tercer criterio ya está implementada en el handler del sync; falta la UI que la ejercite. SUSTITUCION PARCIAL POR F-023: el cuarto criterio dice que la imagen se sirve por next/image, es decir optimizada en caliente por peticion; F-023 lo prohibe (las variantes se generan al subir y se sirven del CDN de Supabase) porque el optimizador de Vercel es un recurso medido y penaliza justo al comprador con conexion lenta. Por la regla 3 el criterio no se toca aqui, igual que hizo F-016 con F-003. El editor de horarios que la propuesta horarios-y-propiedad-de-campos asigna a este panel necesita Store.timezone, que trae F-022."
+      "passes": true,
+      "notes": "Cerrado en tres tandas. Tanda 1-2 (2026-08-26): listado y 403 por storeIds, editor de producto con los seis campos protegidos del sync, subida de imágenes al emulador de Supabase Storage, el interruptor de publicación/cierre al público (HD10-HD15) y promociones completas. El quinto criterio (branding) quedó bloqueado a propósito por HD6 esperando a que existiera Storefront. Tanda 3 (2026-08-28), reabierta tras cerrar F-017 (Storefront, passes:true): editor de branding sobre Storefront.themeTokens, con permiso estricto de cobertura total sobre las sucursales de la marca (HD16) y revalidación de todas ellas más el selector. Los cinco acceptance_criteria están verificados ejecutando por sdd-tester en dos ciclos independientes (ver .agent/specs/F-011/tests.md). depends_on gana F-017: lo que bloqueó el quinto criterio no fue F-008, fue la falta de Storefront. SUSTITUCION PARCIAL POR F-023, sin cambiar el criterio (regla 3, mismo patrón que F-016 con F-003): el cuarto criterio dice que la imagen se sirve por next/image, optimizada en caliente por petición; F-023 lo sustituirá por variantes generadas al subir y servidas del CDN de Supabase, cuando F-023 se construya. passes puesto por el orquestador con indicación expresa del humano."
     },
     {
       "id": "F-012",

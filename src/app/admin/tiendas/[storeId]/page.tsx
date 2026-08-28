@@ -13,9 +13,12 @@ import { listPromotions } from "@/features/admin/server/promotions";
 import { promotionStatus } from "@/features/admin/promotionLabel";
 import { StorePublicSwitch } from "@/features/admin/components/StorePublicSwitch";
 import { StoreBrandCard, type BrandCardBranch } from "@/features/admin/components/StoreBrandCard";
+import { ThemeSwatches } from "@/features/admin/components/ThemeSwatches";
 import { STORE_STATUS_LABEL, STORE_STATUS_TONE } from "@/features/admin/storeStatus";
+import { parseThemeTokens } from "@/features/theming/storeTheme";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Container } from "@/components/ui/Container";
 
@@ -57,6 +60,8 @@ export default async function StoreHubPage({ params }: PageProps<"/admin/tiendas
   const managedHrefBySlug = new Map(
     managedStores.map((managed) => [managed.canonicalSlug, `/admin/tiendas/${managed.id}`]),
   );
+  const brandTokens = parseThemeTokens(store.brandThemeTokens);
+
   const brandBranches: BrandCardBranch[] = brandBranchesRaw.map((branch) => ({
     canonicalSlug: branch.canonicalSlug,
     name: branch.name,
@@ -161,15 +166,23 @@ export default async function StoreHubPage({ params }: PageProps<"/admin/tiendas
       </div>
 
       <Card className="mt-4 p-6">
-        <h2 className="text-lg font-semibold">Colores y contacto</h2>
-        <Alert tone="muted" className="mt-3">
-          <p>En camino.</p>
-          <p>
-            Los colores de tu tienda y el texto de contacto se van a editar aquí. Todavía no:
-            primero llega el cambio que le da a tu marca una sola dirección para todas tus
-            sucursales.
-          </p>
-        </Alert>
+        <h2 className="text-lg font-semibold">Colores de tu marca</h2>
+        {brandTokens && Object.keys(brandTokens).length > 0 ? (
+          <div className="mt-3">
+            <ThemeSwatches tokens={brandTokens} />
+          </div>
+        ) : (
+          <p className="text-fg-muted mt-3 text-sm">Tu marca usa la paleta por defecto.</p>
+        )}
+        <div className="mt-4">
+          <Link href={`/admin/tiendas/${store.id}/marca`}>
+            <Button variant="secondary">
+              {brandTokens && Object.keys(brandTokens).length > 0
+                ? "Cambiar los colores"
+                : "Elegir los colores"}
+            </Button>
+          </Link>
+        </div>
       </Card>
     </Container>
   );

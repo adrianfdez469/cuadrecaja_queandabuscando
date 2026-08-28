@@ -38,6 +38,12 @@ const FORBIDDEN_WRITE_COLUMNS = [
   "syncedPrice",
   "localName",
   "availability",
+  // F-011 tanda 3: the panel never writes the slug of a store OR a brand —
+  // that identity is `features/storefront/server/registry.ts`'s alone.
+  // `PanelStorefrontWrite` (the branding write's own whitelist) already
+  // makes this a compile error; this is the same second, grep-based line
+  // of defense `boundaries.test.ts` already keeps for every other column.
+  "slug",
 ];
 
 function listFiles(dir: string): string[] {

@@ -1,6 +1,7 @@
 import type { Availability, StoreStatus } from "@/generated/prisma/enums";
 import type { StorageFailureReason as LibStorageFailureReason } from "@/lib/supabase/storage";
 import type { PublicSlug } from "@/lib/publicSlug";
+import type { ThemeTokens } from "@/features/theming/storeTheme";
 
 /**
  * Wire types for the admin panel.
@@ -103,6 +104,22 @@ export type ProductWriteBody = {
 
 /** Alias of the shared shape in `@/lib/supabase/storage` (AGENTS.md: no duplicate interfaces). */
 export type StorageFailureReason = LibStorageFailureReason;
+
+/**
+ * F-011 tanda 3. What `PUT /api/admin/stores/{storeId}/branding` accepts —
+ * `ThemeTokens` imported from theming, never a second declaration of the
+ * same five keys (AGENTS.md: no duplicate interfaces; R32/criterio 16).
+ */
+export type BrandingBody = ThemeTokens;
+
+/** What a branding write returns. `branchCount` does not leak anything: only
+ *  an admin who already covers every one of those branches (HD16) receives it. */
+export type AdminBrandingRow = {
+  storefrontId: string;
+  brandSlug: PublicSlug;
+  themeTokens: ThemeTokens;
+  branchCount: number;
+};
 
 /** HD3/PP3. Read shape for the panel's promotions screens. */
 export type AdminPromotionRow = {

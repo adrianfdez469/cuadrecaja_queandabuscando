@@ -212,6 +212,54 @@ una sola marca es una **acción explícita del panel**, no un efecto del sync.
   va, y crear una marca nueva significa estrenar una URL que nadie ha impreso. Es
   su propio feature, con su propia decisión.
 
+## Decisión (g) — el branding de una marca lo escribe quien administra TODAS sus sucursales renderizables
+
+_Añadida el 28 de agosto de 2026 (F-011, tanda 3, HD16). La decisión (e) subió
+el branding y el contacto a `Storefront` y **no dijo quién puede escribirlos**;
+esto lo cierra._
+
+La sesión del panel solo sabe autorizar **tiendas** (`session.storeIds`,
+`src/features/admin/authorization.ts`), y el dato es de la **marca**. Como el
+branding no se puede repartir por sucursal —es una columna sola, compartida por
+todas—, o se autoriza entera o no se autoriza:
+
+- **Cobertura total o 403.** Escribir una columna de panel de una marca exige que
+  `session.storeIds` contenga **todas** sus sucursales **renderizables**
+  (`status != DRAFT`). Si falta una sola: **403**, sin escritura parcial, sin
+  aviso y sin un 200 que cambie «solo lo suyo».
+- **Es la lectura estricta de la decisión (f)**, que ya exige permiso sobre **las
+  dos** tiendas para agrupar. Un admin que no puede juntar dos sucursales tampoco
+  puede repintar las de otro.
+- **Renderizable, no publicada.** `DRAFT` no cuenta —no tiene página—;
+  `SUSPENDED` **sí** —tiene página, 200 con el aviso de cierre, y esa página
+  lleva el tema de la marca—. Es el mismo filtro que usan el resolvedor
+  (`src/features/storefront/server/resolve.ts`) y el canónico de la decisión (c),
+  y usar dos definiciones distintas en las dos mitades del mismo endpoint es el
+  fallo más difícil de ver de este camino.
+- **El 403 de cobertura y el 403 de tienda ajena son indistinguibles por HTTP**:
+  el mismo `{"error":"FORBIDDEN"}`. Un código o un motivo propio le contaría a
+  quien no debe cuántas sucursales tiene una marca que no administra. La
+  **pantalla** sí distingue —quien la ve ya administra una sucursal de esa
+  marca—: enseña el editor bloqueado y nombra las sucursales que faltan, con
+  nombre y ciudad y sin `storeId`.
+- **Se evalúa en el momento de la escritura.** Si entre el render de la pantalla
+  y el guardado la marca gana una sucursal ajena, el guardado responde 403; si la
+  pierde, responde 200. No hay bloqueo optimista, igual que en el resto del panel.
+- **Consecuencia estructural**: este camino deja de decidirse con cero consultas.
+  Autorizar exige leer la lista de sucursales de la marca, y esa **misma** lectura
+  es la que dice qué hay que revalidar después (cada sucursal renderizable más la
+  marca). Una consulta sirve para las dos cosas; dos serían dos verdades que
+  pueden divergir. La comprobación vive en el módulo de autorización que ya
+  existe, como una función pura más, con su propio tipo marcado —el mismo patrón
+  que `AuthorizedStoreId` y que `PublicSlug` de la decisión (c)—, y **no** como un
+  segundo guard.
+
+**Consecuencia que conviene saber antes de que sorprenda**: `storeIds` viaja en
+la cookie de sesión, cuyo límite práctico está en ~60–65 tiendas. Una marca con
+más sucursales renderizables que eso **no tiene branding editable por nadie**,
+porque nadie puede tener una sesión que las cubra. Es un límite de F-008, no de
+esta decisión, pero lo hace visible.
+
 ## Alternativas descartadas
 
 - **Clave ajena compuesta** `Slug(value, storefrontId) → Storefront(slug, id)`:
@@ -242,7 +290,20 @@ una sola marca es una **acción explícita del panel**, no un efecto del sync.
   marca principal pase de catálogo a selector, a cambio de un formulario sin
   campo de slug y de no tener que decidir qué branding hereda.
 - **La segunda sucursal desde un fixture del seed**: un fixture no le sirve a
-  ningún comerciante, y la acción de agrupar hacía falta de todos modos.
+  ningún comerciante, y la acción de agrupar hacía falta de todos modos. (Ojo:
+  esto descarta el fixture como **sustituto de la funcionalidad**, no como
+  fixture. F-011 sí siembra una marca ya agrupada, de un solo uso, porque agrupar
+  no tiene vuelta y un sensor repetible no puede depender de una operación
+  irreversible.)
+- **Para la (g), «cualquiera que administre al menos una sucursal escribe el
+  branding, y la pantalla dice a cuántas afecta»**: es lo que recomendaba la
+  especificación y lo que el humano **rechazó**. Habría dejado que el admin de
+  una sucursal repintara las de sus socios sin que ellos pudieran evitarlo.
+- **Para la (g), repartir el branding por sucursal**: es volver a poner
+  `themeTokens` en `Store`, que es justo lo que la decisión (e) deshizo.
+- **Para la (g), un permiso de marca en el token del SSO**: lo emite cuadrecaja,
+  que no conoce `Storefront` (es propio de queandabuscando). Sería contrato nuevo
+  con el otro equipo para una regla que se deduce de `storeIds`.
 
 ## Consecuencias
 
@@ -264,6 +325,12 @@ una sola marca es una **acción explícita del panel**, no un efecto del sync.
   consigo misma en el buscador.
 - El contrato con cuadrecaja **no cambia**: `Storefront` es propio de
   queandabuscando y el POS no lo conoce. No hay v4.
+- Por la (g), una escritura de marca **no** se autoriza con cero consultas, y la
+  respuesta de esa escritura invalida `2N+1` tags (las dos de cada sucursal
+  renderizable más el de la marca): con una sucursal son tres; con sesenta, ~121,
+  que es del orden de segundos. Revalidar menos no es una opción —dejaría a las
+  hermanas y al selector con el dato viejo hasta el piso de ISR—; lo que se mueve,
+  si algún día hace falta, es _cuándo_ se invalida.
 
 ## Reabrir cuando
 
@@ -277,3 +344,9 @@ una sola marca es una **acción explícita del panel**, no un efecto del sync.
 - **F-022** escriba la tabla exhaustiva de propiedad de campos: el bloque de
   `Storefront` sale de la decisión (e), y la fila del contacto es la que tiene
   dos dueños con precedencia.
+- Un negocio con **muchas** sucursales se queje de que nadie puede editar su
+  branding: es el techo de la cookie que la (g) hace visible, y su arreglo
+  —`storeIds` en base en vez de en el token— es de F-008.
+- Alguien pida un **permiso de marca** de verdad (un rol «dueño de la marca» en
+  vez de deducirlo de `storeIds`): la (g) es la regla que se deduce de lo que hay
+  hoy, y un rol explícito la sustituiría entera.

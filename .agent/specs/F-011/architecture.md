@@ -1,9 +1,18 @@
 ---
 feature: F-011
 agente: sdd-architect
-actualizado: 2026-08-26T19:07:22Z
+actualizado: 2026-08-28T01:43:48Z
 estado: listo
 ---
+
+> **Aviso de lectura (2026-08-28).** Todo lo que hay hasta el final de
+> «Preguntas al humano» es el documento del ciclo 2 (tanda A: productos,
+> imágenes, promociones y el interruptor HD10–HD15). **No se ha tocado ni una
+> línea**: está construido, verificado y fusionado a `main`. Lo que este ciclo
+> añade está en el capítulo final, **«Tanda 3 — el editor de branding sobre
+> `Storefront`»**, y es lo único que hay que leer para construirlo. Donde el
+> capítulo final contradiga a los anteriores, manda el capítulo final y lo dice
+> explícitamente.
 
 ## Qué cambió en este ciclo (HD5–HD15)
 
@@ -1625,3 +1634,785 @@ contrato.**
 parece querer decir. Si tu lectura es que asumir ese riesgo era parte de la
 decisión, dilo y se queda en (b): el diseño funciona igual, y la migración tiene
 ese `ALTER TABLE` en un bloque aparte precisamente para poder no aplicarlo.
+
+---
+
+# Tanda 3 — el editor de branding sobre `Storefront`
+
+**Capítulo añadido el 2026-08-28.** Cubre **un solo** `acceptance_criteria`, el
+quinto («Guardar branding inválido es rechazado por themeTokensSchema y no llega
+a la base»), sobre la especificación de `.agent/specs/F-011/spec.md` § «Tanda 3»
+y las decisiones **HD16–HD19**.
+
+**Qué no toca.** Nada del ciclo 1 ni del ciclo 2: los criterios 1–4 están
+verificados y en `main`, y este capítulo no reinterpreta ni reescribe una línea
+de arriba. No toca `prisma/schema.prisma`, no añade migración y no cambia
+`docs/sync-contract.md`. Lo único que toca de `prisma/` es `prisma/seed.ts`
+(HD18). Numeración: continúa la del ciclo 1 y la de la spec —**AP7+** para las
+preguntas, si hubiera; no hay.
+
+## Qué decide este capítulo, en cinco frases
+
+1. El branding entra por **`PUT /api/admin/stores/{storeId}/branding`** (alias
+   `PATCH`): la marca se deriva de una sucursal ya autorizada, nunca del cuerpo.
+2. La cobertura total de HD16 la decide **una función pura más del módulo de
+   autorización que ya existe** (`src/features/admin/authorization.ts`), con un
+   segundo tipo marcado, `AuthorizedStorefrontId`, que la mutación exige por
+   firma. No hay un segundo camino de autorización: hay un segundo **tipo**.
+3. Esa función se alimenta de **una sola lectura**, en un archivo nuevo del
+   panel, y ese **mismo valor en memoria** es el que después decide qué se
+   revalida. R43 se cumple porque no hay dos consultas que puedan divergir: hay
+   una y su resultado se pasa de mano en mano.
+4. La proyección «marca → slugs a revalidar» vive **en
+   `src/features/storefront/server/registry.ts`, junto a `expandBrandTouch`**,
+   como una función gemela que devuelve un tipo marcado nuevo
+   (`BrandRevalidationSet`). Armar el array a mano deja de compilar en el sitio
+   donde importa: la firma de la mutación.
+5. La fixture de HD18 es **una marca con tres sucursales** —una `PUBLISHED`, una
+   `SUSPENDED` y una `DRAFT`—, sembrada ya agrupada, de un solo uso. Las tres no
+   son adorno: son lo que hace que el sensor distinga «renderizable» de
+   «publicada» en **las dos** mitades del endpoint.
+
+## Estado actual relevante (leído, no supuesto)
+
+Lo que ya existe y se reutiliza **tal cual**:
+
+| Pieza                                              | Qué aporta a esta tanda                                                                                                                |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/features/admin/authorization.ts`              | `authorizeStore` + `AuthorizedStoreId`. El 403 de tienda ajena de E41 sale de aquí sin tocar nada (criterio 2, ya verificado).         |
+| `src/app/api/admin/_lib/guard.ts`                  | `guardAdminStore(storeId)`: 401/403 con **0 consultas**. Sigue siendo la primera puerta del camino nuevo.                              |
+| `src/app/api/admin/_lib/respond.ts`                | `forbidden()`, `unauthorized()`, `zodInvalidBody()`, `readAdminJsonBody()`, `writeResultToResponse()`. **R44 sale gratis**: ver abajo. |
+| `src/features/admin/server/mutations.ts`           | El embudo único, `commit()` y las listas blancas por tipo. La escritura nueva entra aquí y en ningún otro sitio.                       |
+| `src/features/storefront/server/registry.ts`       | `expandBrandTouch` y `SlugTouchSet`: el patrón exacto que la proyección nueva copia (tipo marcado + un solo sitio que proyecta).       |
+| `src/lib/publicSlug.ts`                            | `canonicalSlug()` y `PublicSlug`. Es lo que impide inventar el slug de una hermana sin haber contado las sucursales de la marca.       |
+| `src/lib/cache.ts`                                 | `revalidateStores` (canónicos) y `revalidateStorefronts` (marca). Los dos ya se usan; no hace falta ninguna función de caché nueva.    |
+| `src/features/theming/storeTheme.ts`               | `themeTokensSchema` (`.strict()`, cinco claves) y `renderStoreTheme`. **Se importa, no se copia** (R32, criterio 16).                  |
+| `src/features/admin/server/stores.ts`              | `listBrandBranches(storefrontId)`: nombre, ciudad y estado de las hermanas **sin `storeId`** (HS12). Es la mitad de vista de E40b.     |
+| `src/features/admin/components/StoreBrandCard.tsx` | La tarjeta «Tu marca» del hub. Es el punto de entrada natural a la pantalla nueva; `sdd-designer` decide el copy.                      |
+| `scripts/mint-sso-token.mjs`                       | Ya tiene `--stores=<externalId>[,…]` (ciclo 1, I7). Las dos cookies de HD18 no piden ni una línea de script.                           |
+| `prisma/seed.ts`                                   | `seedStorefront()` ya es idempotente **contra el registro `Slug`**, no solo contra `Storefront` (ficha `seed-storefront-colisiona-…`). |
+
+Lo que **no existe**: ninguna escritura sobre `Storefront` fuera de
+`src/features/storefront/server/registry.ts`, ninguna lista blanca de columnas
+para esa tabla, ninguna pantalla de marca en el panel, y ningún concepto de
+«marca autorizada» en la sesión.
+
+### Cinco cosas que solo se ven leyendo, y que cambian el diseño
+
+1. **Hay dos tests de fronteras por `grep` que este camino puede poner rojos sin
+   querer.** `src/features/storefront/server/boundaries.test.ts` prohíbe, fuera
+   de `resolve.ts` y `registry.ts`, tres patrones **dentro de los argumentos de
+   una llamada a Prisma**: `where: { slug`, `store: { slug:` y
+   `storefront: { slug:`. La lectura nueva tiene que ir **por `id`** y anidar
+   siempre `storefront: { select: … }`, nunca `storefront: { slug: true }`.
+   Y `src/features/admin/server/boundaries.test.ts` exige que
+   `revalidateStores` solo se importe en `mutations.ts` —así que la
+   revalidación del branding **no puede vivir en el archivo de lectura**— y
+   recorre los bloques `data: { … }` de `mutations.ts` buscando columnas
+   prohibidas.
+2. **`expandBrandTouch()` no devuelve lo que esta escritura necesita, y el único
+   cast que existe hoy es explícitamente irrepetible.** Devuelve un
+   `SlugTouchSet` de **valores del registro** para `revalidateSlugs`
+   (`registry.ts:269-277`); el branding necesita **slugs canónicos**
+   (`PublicSlug[]`) para `revalidateStores`. El salto entre los dos lo hace hoy
+   `regroupStoreIntoBrand` con un cast comentado como «the one place in the whole
+   codebase allowed to make that claim» (`registry.ts:462-471`). Copiarlo aquí
+   sería convertir una excepción documentada en una costumbre. De ahí la función
+   gemela, que **no necesita ningún cast**: calcula cada canónico con
+   `canonicalSlug()`.
+3. **Un guardado de branding NO cambia la resolución del slug**, así que **no** se
+   llama a `revalidateSlugs`. Comprobado campo a campo contra
+   `src/features/storefront/server/resolve.ts`: `PublicResolution` lleva
+   `storeId`, `canonicalSlug`, `storefrontId`, `brandSlug`, `brandName`,
+   `branchCount`, `isAlias` y `branches[]` (nombre, ciudad, dirección, estado y
+   motivo de cierre). Ninguno es branding. Revalidar de más aquí no rompería
+   nada, pero escribirlo sin haberlo comprobado es exactamente la clase de
+   suposición que la ficha
+   `.agent/playbook/revalida-solo-lo-que-se-escribe-no-lo-que-cambia-de-significado.md`
+   ficha en la dirección contraria.
+4. **El techo de la cookie de sesión acota HD16 por arriba, y es una consecuencia
+   que nadie ha escrito.** Escribir branding exige tener **todas** las sucursales
+   renderizables en `session.storeIds`, y `storeIds` son uuid dentro del JWT: el
+   límite de ~4 KB por cookie se alcanza alrededor de **60–65 tiendas** (§
+   Escalabilidad del ciclo 1). Una marca con más de ~60 sucursales renderizables
+   **no tiene branding editable por nadie**, y el admin ni siquiera entra: el
+   navegador descarta la cookie en silencio. No se arregla aquí (es F-008), pero
+   queda escrito porque es el primer límite duro que HD16 introduce.
+5. **El `<style>` lo emite el layout también para una tienda cerrada.**
+   `src/app/[slug]/layout.tsx:58-67` calcula `themeCss` **antes** de la rama
+   `closed`, así que la página de una sucursal `SUSPENDED` lleva el tema de la
+   marca igual que una abierta. Es lo que hace verificable, en una sola aserción
+   del sensor, que `SUSPENDED` cuenta para la revalidación (§ Fixtures).
+
+## Decisión
+
+**El branding entra por el embudo que ya existe, con la marca derivada de una
+sucursal autorizada, y la cobertura total de HD16 se decide en el mismo módulo
+puro que decide todo lo demás del panel — con un segundo tipo marcado y una sola
+lectura que sirve para autorizar y para revalidar.**
+
+En una frase por pieza:
+
+- **Ruta**: `PUT /api/admin/stores/{storeId}/branding` (alias `PATCH`), cuerpo =
+  el objeto de tokens sin envoltorio (R32).
+- **Autorización**: `guardAdminStore` (0 consultas, 401/403 de siempre) →
+  1 lectura → `authorizeBrandCoverage` (pura, 0 consultas) → 403 con el **mismo**
+  `forbidden()` (R44).
+- **Escritura**: `saveBrandTheme` en `src/features/admin/server/mutations.ts`,
+  con lista blanca `PanelStorefrontWrite = Pick<…, "themeTokens">`.
+- **Revalidación**: `commitBrand()` privado, que dispara `revalidateStores` sobre
+  los canónicos de **todas** las sucursales renderizables y `revalidateStorefronts`
+  sobre la marca (R36).
+- **Proyección**: `expandBrandRevalidation()` en
+  `src/features/storefront/server/registry.ts`, con tipo marcado propio (R37, I12).
+- **Pantalla**: `/admin/tiendas/{storeId}/marca`, hermana de la de agrupar, con el
+  editor **bloqueado y explicado** cuando la cobertura es incompleta (E40b, R45).
+- **Fixture**: una marca de tres sucursales en `prisma/seed.ts` (HD18).
+
+**Alternativas descartadas**, una línea cada una:
+
+- `PUT /api/admin/storefronts/{storefrontId}/branding`: la sesión no sabe
+  autorizar una marca, así que la primera puerta dejaría de ser
+  `guardAdminStore` y habría que escribir un guard nuevo — un segundo camino de
+  autorización, que es justo lo que la spec prohíbe. Y un `storefrontId` en la
+  URL permite nombrar una marca en la que no se tiene ni una sucursal.
+- El `storefrontId` en el cuerpo: viola R3 del ciclo 1 (el id que se autoriza
+  sale de la URL o de la fila, nunca del cuerpo).
+- Meter la cobertura en `guardAdminStore`: lo convertiría en un guard con
+  consulta para **todas** las rutas del panel, incluidas las diecisiete que no la
+  necesitan. La cobertura es de este camino, no del panel.
+- Un `kind: "brand_not_covered"` en `AdminWriteResult`: sería un motivo nuevo
+  que mapear a HTTP, es decir, dos sitios donde el 403 de cobertura podría dejar
+  de parecerse al de tienda ajena (R44). Se decide **antes** de llamar a la
+  mutación, con el mismo `forbidden()` que ya existe, exactamente como
+  `src/app/api/admin/stores/[storeId]/branches/route.ts` hace con la segunda
+  tienda de agrupar.
+- Dos lecturas (una para autorizar, otra para revalidar): son dos verdades que
+  pueden divergir, y la spec lo prohíbe explícitamente (R43).
+- Extender `expandBrandTouch` con un segundo valor de retorno: le cambiaría el
+  tipo a sus tres llamadores actuales —incluidos el sync y `regroupStoreIntoBrand`—
+  por una necesidad que no es suya.
+- Un cast de `SlugTouchSet` a `PublicSlug[]` en `mutations.ts`: rompe la
+  exclusividad que `registry.ts:460-465` se atribuye por escrito.
+- Copiar las cinco claves en `src/features/admin/schemas.ts`: el criterio dice
+  «rechazado por themeTokensSchema», y dos esquemas divergen el día que uno
+  cambie (criterio 16).
+- Envolver el cuerpo en `{"themeTokens": {…}}`: haría que `{"background":"#fff"}`
+  se rechazara por clave desconocida **del envoltorio** y no por el `.strict()`
+  del esquema (R32, E37).
+- Editor en el hub de la tienda en vez de pantalla propia: el hub ya hace cinco
+  consultas en paralelo y mezcla lo de la sucursal con lo de la marca; la pantalla
+  de agrupar ya sentó el precedente contrario.
+
+## Componentes
+
+| Componente                                          | Capa                 | Responsabilidad                                                                                                                                                                        | Archivo                                                          |
+| --------------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `authorizeBrandCoverage` + `AuthorizedStorefrontId` | `features/admin/`    | **Puro, 0 consultas.** HD16/R42: `ok` solo si `canManageStore` es cierto para **todas** las sucursales que recibe; si no, `FORBIDDEN` con los nombres que faltan (para E40b).          | `src/features/admin/authorization.ts` (+)                        |
+| `loadBrandingTarget`                                | `features/*/server/` | **Prisma, lectura. Una consulta.** De un `AuthorizedStoreId` a su marca: id, slug, nombre, `themeTokens` y **las sucursales renderizables**. Es la lectura única de R43.               | src/features/admin/server/branding.ts (por crear)                |
+| `expandBrandRevalidation` + `BrandRevalidationSet`  | `features/*/server/` | **Puro, 0 consultas.** De (slug de marca, miembros) a `{canonicalSlugs, brandSlugs}`, con `canonicalSlug()` por miembro. Gemela de `expandBrandTouch` (R37, I12).                      | `src/features/storefront/server/registry.ts` (+)                 |
+| `saveBrandTheme` + `commitBrand`                    | `features/*/server/` | **Prisma, escritura.** Único sitio que escribe `Storefront.themeTokens`, con lista blanca `PanelStorefrontWrite`. `commitBrand` revalida marca + sucursales (R35, R36).                | `src/features/admin/server/mutations.ts` (+)                     |
+| `brandingBodySchema`                                | `features/*/schemas` | **Re-exporta** `themeTokensSchema`. Ni una clave redefinida (R32, criterio 16).                                                                                                        | `src/features/admin/schemas.ts` (+)                              |
+| `AdminBrandingRow`, `BrandingBody`                  | `features/admin/`    | Tipos de cable. `BrandingBody = ThemeTokens`, importado de theming: no se duplica interfaz (AGENTS.md).                                                                                | `src/features/admin/types.ts` (+)                                |
+| Endpoint de branding                                | `src/app/` (HTTP)    | `PUT`/`PATCH`. Orquesta guard → lectura → cobertura → cuerpo → mutación. Ninguna decisión propia.                                                                                      | src/app/api/admin/stores/[storeId]/branding/route.ts (por crear) |
+| Pantalla de marca                                   | `src/app/`           | `/admin/tiendas/{storeId}/marca`, `dynamic = "force-dynamic"` **literal**. 404 si la tienda no es suya (R7); editor bloqueado y explicado si la cobertura falta (E40b).                | src/app/admin/tiendas/[storeId]/marca/page.tsx (por crear)       |
+| `BrandingForm`                                      | `features/admin/`    | `"use client"` (HD7). Isla: chips de paleta, `ColorTokenField`, `RadioCard` de `radius`, maqueta, `fetch` al endpoint, `issues` en línea, `<noscript>`. La forma es de `sdd-designer`. | src/features/admin/components/BrandingForm.tsx (por crear)       |
+| `themeCustomProperties`                             | `features/theming/`  | Extraído de `renderStoreTheme` para que la maqueta aplique las propiedades en su `style` **sin** `<style>` ni `data-store`. Misma salida que hoy (F-016, `check:theme`).               | `src/features/theming/storeTheme.ts` (+)                         |
+| Fixture de marca con tres sucursales                | `prisma/`            | `seedBrandWithBranches()`, HD18. Reutiliza `seedStorefront()` y **no toca** `seedStore`/`seedClosedStore`.                                                                             | `prisma/seed.ts` (+)                                             |
+| Sección de branding del sensor                      | `.agent/`            | Criterios 5, 17, 19, 20, 22 y 23 ejecutables y repetibles.                                                                                                                             | `.agent/specs/F-011/smoke.sh` (+)                                |
+| Guion visual de F-011                               | `.agent/`            | Criterio 21 `[nuevo]`: 360 y 1280 px con la etapa `--visual` que construyó F-017.                                                                                                      | .agent/specs/F-011/visual.mjs (por crear)                        |
+
+## Contratos
+
+### Autorización — dos entradas, un solo módulo
+
+```ts
+// src/features/admin/authorization.ts  (+)   — sigue puro: sin Prisma, sin React
+declare const brandAuthorized: unique symbol;
+/** Un storefrontId cuyas sucursales renderizables están TODAS en la sesión
+ *  (HD16/R42). Solo esta función lo produce; la mutación lo exige por firma. */
+export type AuthorizedStorefrontId = string & {
+  readonly [brandAuthorized]: true;
+};
+
+/** Una sucursal renderizable, tal como la devuelve la lectura única. */
+export type CoverageBranch = { id: string; name: string; city: string | null };
+
+export type BrandCoverageResult =
+  | { ok: true; storefrontId: AuthorizedStorefrontId }
+  | {
+      ok: false;
+      denial: "FORBIDDEN";
+      missing: readonly { name: string; city: string | null }[];
+    };
+
+export function authorizeBrandCoverage(
+  session: AdminSession, // NO nullable: ver abajo
+  brand: { storefrontId: string; branches: readonly CoverageBranch[] },
+): BrandCoverageResult;
+// implementación: brand.branches.filter((b) => !canManageStore(session, b.id))
+//   vacío        → ok
+//   no vacío     → FORBIDDEN, `missing` con SOLO nombre y ciudad
+```
+
+Cuatro propiedades de esta firma, y ninguna es cosmética:
+
+1. **`session` no es nullable.** El 401 sigue viviendo en un único sitio
+   (`authorizeStore` → `guardAdminStore`), y quien llama a esta función ya tiene
+   una sesión probada. Un estado imposible menos.
+2. **`missing` no lleva `storeId`.** Es lo mismo que decidió HS12 para
+   `BrandBranch` (`src/features/admin/server/stores.ts:230-255`): la vista no
+   puede construir un enlace ni un formulario hacia una sucursal ajena aunque
+   alguien lo intente después. Y lo que sale por HTTP no es esto, sino un
+   `forbidden()` pelado (R44).
+3. **No consulta nada.** La consulta la hace el llamador y la pasa entera; por
+   eso la lista de sucursales que autoriza es, literalmente, la misma que
+   después se revalida (R43).
+4. **Reutiliza `canManageStore`.** No hay una segunda comparación de conjuntos en
+   el repo: R1 y R2 del ciclo 1 siguen intactas y esto solo las estrecha para una
+   columna.
+
+### La lectura única (R43)
+
+```ts
+// src/features/admin/server/branding.ts   (por crear)  — Prisma, lectura
+/** El filtro de «sucursal renderizable», escrito UNA vez en este archivo. Las
+ *  dos mitades del endpoint —cobertura y revalidación— no comparten una
+ *  cláusula `where`: comparten el ARRAY que esta consulta devolvió. */
+const RENDERABLE = { status: { not: "DRAFT" } } as const;
+
+export type BrandingTarget = {
+  storefrontId: string;
+  brandSlug: string;
+  brandName: string;
+  /** Tal cual está en la base: lo valida el editor al pintarlo, no esta capa. */
+  themeTokens: unknown;
+  /** Renderizables (`status != DRAFT`), ordenadas por nombre. Cada una con su
+   *  `slug` propio (null si la marca tiene una sola sucursal). */
+  branches: readonly {
+    id: string;
+    name: string;
+    city: string | null;
+    slug: string | null;
+  }[];
+};
+
+export function loadBrandingTarget(storeId: AuthorizedStoreId): Promise<BrandingTarget | null>;
+// UNA consulta:
+//   prisma.store.findUnique({ where: { id: storeId }, select: { storefront: { select: {
+//     id, slug, name, themeTokens,
+//     stores: { where: RENDERABLE, select: { id, name, city, slug }, orderBy: { name: "asc" } },
+//   } } } })
+// `null` sólo si la tienda desapareció entre el login y esta petición → 404.
+```
+
+**Ojo con el test de fronteras del storefront**: la consulta va por `id` y anida
+`storefront: { select: … }`. Escribirla como `where: { slug: … }` o como
+`storefront: { slug: true }` pone rojo
+`src/features/storefront/server/boundaries.test.ts` sin que el mensaje diga por
+qué.
+
+### La proyección de revalidación (R36, R37, I12)
+
+```ts
+// src/features/storefront/server/registry.ts  (+)   — puro, 0 consultas
+declare const brandRevalidationBrand: unique symbol;
+/** Lo que `expandBrandRevalidation()` devuelve, y nada más. Mismo truco
+ *  nominal que `SlugTouchSet`: un objeto armado a mano con la misma forma NO
+ *  satisface este tipo, así que la cuarta instancia de la ficha
+ *  `revalida-solo-lo-que-se-escribe-no-lo-que-cambia-de-significado` es un
+ *  error de compilación en la firma de `saveBrandTheme`, no algo que dependa
+ *  de que un `grep` reconozca la sintaxis. */
+export type BrandRevalidationSet = {
+  /** Canónicos de cada sucursal renderizable — para `revalidateStores`. */
+  readonly canonicalSlugs: readonly PublicSlug[];
+  /** El slug de la marca — para `revalidateStorefronts`. */
+  readonly brandSlugs: readonly string[];
+} & { readonly [brandRevalidationBrand]: true };
+
+export function expandBrandRevalidation(
+  brandSlug: string,
+  members: readonly BrandMemberSlug[],
+): BrandRevalidationSet;
+// canonicalSlugs = members.map(canonicalSlug({ storeSlug, brandSlug, brandBranchCount: members.length }))
+// brandSlugs     = [brandSlug]
+```
+
+Por qué **aquí** y no en `features/admin/`:
+
+- AGENTS.md § Prohibiciones manda toda proyección «marca → slugs» a
+  `expandBrandTouch()` de este archivo. Una segunda proyección en otro sitio es
+  exactamente la deriva que la ficha describe.
+- Pasa por `canonicalSlug()` de `src/lib/publicSlug.ts`, así que el caso de una
+  marca con **una** sucursal devuelve `[brandSlug]` sin ninguna rama especial, y
+  el de varias devuelve el slug propio de cada una. **No hace falta ningún
+  cast**: el `PublicSlug` lo produce la función que tiene derecho a producirlo.
+- Es hermana, no sustituta: `expandBrandTouch` sigue sirviendo a `slugTag`, que
+  esta escritura no necesita (§ Revalidación).
+
+`BrandMemberSlug` (`{ slug: string | null }`) ya existe en ese archivo, y
+`BrandingTarget.branches` lo satisface estructuralmente sin ninguna conversión.
+
+### El embudo — la lista blanca de `Storefront`
+
+```ts
+// src/features/admin/server/mutations.ts  (+)
+/** Las ÚNICAS columnas de Storefront que el panel escribe hoy (R31, R35).
+ *  `slug`, `name` y `businessId` son identidad de la marca y las escribe
+ *  `features/storefront/server/registry.ts`; el contacto y las imágenes
+ *  siguen sin escritor (HD17, HD19, I15). */
+type PanelStorefrontColumn = "themeTokens";
+type PanelStorefrontWrite = Pick<Prisma.StorefrontUpdateInput, PanelStorefrontColumn>;
+
+/** Gemelo de `commit()` para una escritura de MARCA: revalida cada sucursal
+ *  renderizable y la marca. Privado, como `commit()`: escribir branding sin
+ *  revalidar no es posible sin editar este archivo. */
+async function commitBrand<T>(touch: BrandRevalidationSet, write: () => Promise<T>): Promise<T> {
+  const value = await write();
+  revalidateStores(touch.canonicalSlugs); // storeTag + storeCatalogTag de cada sucursal
+  revalidateStorefronts(touch.brandSlugs); // storefrontTag de la marca (el selector)
+  return value;
+}
+
+export async function saveBrandTheme(
+  storefrontId: AuthorizedStorefrontId, // HD16: sin cobertura total no compila
+  touch: BrandRevalidationSet, // R37: sin la proyección, tampoco
+  tokens: ThemeTokens, // R33: `parsed.data`, nunca el cuerpo recibido
+): Promise<AdminWriteResult<AdminBrandingRow>>;
+// prisma.storefront.update({ where: { id: storefrontId },
+//   data: { themeTokens: tokens } satisfies PanelStorefrontWrite,
+//   select: { id: true, slug: true, themeTokens: true } })
+// P2025 → { kind: "not_found" } → 404, igual que `setStoreEnabled`.
+```
+
+Tres notas de implementación que no son detalle:
+
+- **R34 se cumple por construcción.** `themeTokensSchema.parse({})` devuelve
+  `{}`, así que **no existe camino** que produzca `null` para esa columna y la
+  trampa de Prisma con `Json?` no puede dispararse. No hace falta ningún
+  `Prisma.DbNull`, y meterlo sería introducir el único modo de fallo que R34
+  quiere evitar.
+- Si `tokens` (propiedades opcionales) no encaja en `Prisma.InputJsonValue`, la
+  única forma aceptada de resolverlo es
+  `themeTokens: tokens as Prisma.InputJsonObject`. **Nunca `any`** (ESLint lo
+  prohíbe, ficha `eslint-any-prohibido`).
+- La lista blanca de `Store` **no gana `themeTokens`**: esa columna ya no existe
+  en `Store`, así que el criterio 18 `[nuevo]` (`git grep themeTokens
+src/features/admin` solo contra `storefront`) está garantizado por el schema, y
+  el `grep` es el sensor, no la garantía.
+
+### El endpoint
+
+```
+PUT   /api/admin/stores/{storeId}/branding            (alias PATCH)
+  content-type: application/json estricto; tope ADMIN_MAX_BODY_BYTES (16 KB);
+  cache-control: no-store en toda respuesta.
+
+  body = EL OBJETO DE TOKENS, sin envoltorio (R32):
+    { "brand"?: css, "brandContrast"?: css, "accent"?: css,
+      "accentContrast"?: css, "radius"?: "sharp"|"soft"|"round" }
+    Semántica de REEMPLAZO (R33): lo que no viene, desaparece. `{}` = sin branding (E38).
+
+  200 { storefrontId, brandSlug, themeTokens, branchCount }
+```
+
+`branchCount` en la respuesta no filtra nada: solo la recibe quien administra
+**todas** esas sucursales (R42). Es lo que deja a la isla decir «lo ven tus N
+sucursales» sin una segunda petición.
+
+**Por qué la marca no está en la URL aunque el recurso sea de la marca.** Dos
+admins de dos sucursales de la misma marca escriben la misma fila por dos URL
+distintas. Es deliberado: la URL nombra **por dónde se entra y qué se autoriza**
+(una sucursal de la sesión), no la identidad del recurso. La identidad la
+devuelve la respuesta (`storefrontId`, `brandSlug`), y la carrera entre los dos
+la resuelve E42: gana la última escritura completa.
+
+### Tabla de errores (delta sobre la del ciclo 1)
+
+| Código | Cuerpo                                                       | Cuándo                                                                                                                                                                                        | Dónde se decide                                                                   |
+| ------ | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| 200    | `{storefrontId, brandSlug, themeTokens, branchCount}`        | Guardado (E35). Idempotente: guardar dos veces devuelve lo mismo.                                                                                                                             | ruta ← `AdminWriteResult`                                                         |
+| 400    | `{"error":"INVALID_BODY","issues":[{"path":…,"message":…}]}` | **Criterio 5**: color fuera del regex, `radius` fuera del enum, clave desconocida (`.strict()`), cuerpo que no es objeto (`[]`, `"azul"`, `null`), JSON roto, `content-type` no JSON, > 16 KB | `zodInvalidBody` sobre `themeTokensSchema` en `src/app/api/admin/_lib/respond.ts` |
+| 401    | `{"error":"UNAUTHORIZED"}`                                   | Sin cookie o vencida (E41).                                                                                                                                                                   | `src/app/api/admin/_lib/guard.ts`                                                 |
+| 403    | `{"error":"FORBIDDEN"}`                                      | Tienda fuera de la sesión (E41) **o** cobertura incompleta de la marca (E40, HD16).                                                                                                           | `forbidden()` — **la misma función para los dos** (R44)                           |
+| 404    | `{"error":"NOT_FOUND"}`                                      | La tienda autorizada, o su marca, desapareció entre el login y la petición.                                                                                                                   | ruta / `mutations.ts` (`P2025`)                                                   |
+| 500    | `{"error":"WRITE_FAILED"}`                                   | Excepción no prevista, con `console.error("[admin] …")`.                                                                                                                                      | ruta                                                                              |
+
+**R44 no es una convención que haya que recordar: es que hay una sola
+implementación.** `forbidden()` está exportada una vez en
+`src/app/api/admin/_lib/respond.ts` y los dos caminos la llaman. Para que los
+dos 403 dejaran de parecerse habría que escribir un segundo `NextResponse.json`,
+que es un cambio visible en review.
+
+### El esquema — el mismo objeto, no una copia (R32, criterio 16)
+
+```ts
+// src/features/admin/schemas.ts  (+)
+/** R32/criterio 16: NO se redefine ninguna de las cinco claves aquí. El
+ *  criterio dice «rechazado por themeTokensSchema», así que el endpoint usa
+ *  ESE objeto; un alias es lo máximo que se permite. */
+export { themeTokensSchema as brandingBodySchema } from "@/features/theming/storeTheme";
+```
+
+Lo fija un test de una línea —`expect(brandingBodySchema).toBe(themeTokensSchema)`—
+más el `grep` del criterio 16: las cadenas `brandContrast`, `accentContrast` y
+`radius` no aparecen en `src/features/admin/schemas.ts`.
+
+## Flujo de datos
+
+### Escritura de branding (el camino que decide todo)
+
+```mermaid
+sequenceDiagram
+  participant I as Isla BrandingForm
+  participant R as branding/route.ts
+  participant G as _lib/guard.ts
+  participant B as server/branding.ts
+  participant A as authorization.ts
+  participant M as server/mutations.ts
+  participant X as registry.ts
+  participant DB as Postgres
+  participant C as lib/cache.ts
+
+  I->>R: PUT { brand, radius, ... }
+  R->>G: guardAdminStore(storeId)
+  G-->>R: 401 / 403                      (0 consultas — E41, criterio 2)
+  R->>B: loadBrandingTarget(authorizedStoreId)
+  B->>DB: SELECT marca + sucursales renderizables WHERE store.id = $1
+  DB-->>B: BrandingTarget | null → 404
+  R->>A: authorizeBrandCoverage(session, target)
+  A-->>R: FORBIDDEN → forbidden()        (0 consultas — E40, HD16)
+  R->>R: readAdminJsonBody + themeTokensSchema.safeParse → 400 (criterio 5)
+  R->>M: saveBrandTheme(storefrontId, expandBrandRevalidation(...), parsed.data)
+  M->>X: expandBrandRevalidation(brandSlug, target.branches)
+  X-->>M: BrandRevalidationSet            (0 consultas)
+  M->>DB: UPDATE "Storefront" SET "themeTokens" = $1 WHERE id = $2
+  M->>C: revalidateStores(canonicalSlugs) + revalidateStorefronts(brandSlugs)
+  M-->>R: { kind:"saved", … }
+  R-->>I: 200 (cache-control: no-store)
+```
+
+Puntos que no son adorno:
+
+1. **El orden es 403 antes que 400, siempre.** Quien no tiene cobertura no
+   aprende nada del esquema, y el 403 del criterio 22 no depende de que el
+   cuerpo sea válido —el sensor manda un cuerpo **válido** y espera 403—.
+2. **Dos consultas, ningún `$transaction`.** El pooler corre en modo transacción
+   (AGENTS.md, ficha `pooler-transaccion-deadlock`), y aquí no hay nada que
+   atomizar: una sola fila cambia.
+3. **La lectura se paga siempre, incluso en el camino del 403 de cobertura.** Es
+   el precio que HD16 pone y R43 acepta a cambio de no tener dos verdades. El 403
+   de **tienda ajena** sigue costando 0 consultas, porque `guardAdminStore` va
+   primero: una petición de un atacante contra una tienda que no es suya no toca
+   la base.
+4. **La proyección se calcula con el array que la autorización acaba de mirar.**
+   Si alguien añadiera una segunda consulta «para el revalidado», R43 se rompe y
+   con ella el caso límite más difícil de ver de esta tanda.
+5. **La revalidación vive dentro de `commitBrand()`**, no en la ruta ni en el
+   archivo de lectura (el test de fronteras del panel lo obliga: `revalidateStores`
+   solo se importa en `mutations.ts`).
+
+### Lectura de la pantalla
+
+`/admin/tiendas/{storeId}/marca` → `authorizeStore` (0 consultas; `notFound()`
+si no es suya, R7) → `loadBrandingTarget` (1 consulta) → `authorizeBrandCoverage`
+(0 consultas). **Dos consultas en total**, y la pantalla ya tiene todo: los
+tokens actuales, el nombre de la marca, cuántas sucursales alcanza y —si falta
+cobertura— el nombre y la ciudad de las que faltan. No hace falta llamar a
+`listBrandBranches`: la lectura nueva ya trae esa lista, y llamar a las dos sería
+otra vez dos verdades.
+
+`force-dynamic` literal, sin `cached()` (R9/R38): el admin tiene que ver lo que
+acaba de guardar.
+
+## Revalidación: qué se invalida y qué no
+
+| Tag                             | ¿Lo dispara un guardado de branding?    | Por qué                                                                                                                            |
+| ------------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `storeTag(canónico)` × N        | **Sí**                                  | `getStoreBySlug` lleva `themeTokens` de la marca (`src/features/catalog/server/queries.ts:129`) y el layout pinta el `<style>`.    |
+| `storeCatalogTag(canónico)` × N | **Sí** (va junto en `revalidateStores`) | Es la otra mitad de la misma función; separar los dos tags no aporta nada y sí una rama que mantener.                              |
+| `storefrontTag(marca)`          | **Sí**                                  | `getStorefrontBranding` es lo que viste el selector (`queries.ts:181-188`). Sin esto, `/marca` se queda con el color viejo 3600 s. |
+| `slugTag(valor)`                | **No**                                  | La resolución no lleva branding: ningún campo de `PublicResolution` cambia (§ Cinco cosas, punto 3).                               |
+| `productTag`                    | **No**                                  | Tag muerto (I3 del ciclo 1). Nunca se usa desde el panel.                                                                          |
+
+N = sucursales **renderizables** de la marca. Con una sola sucursal, el canónico
+**es** el slug de la marca, así que se dispara `store:<marca>` y
+`storefront:<marca>`: dos tags distintos sobre el mismo string, ambos leídos por
+lecturas distintas, y `revalidateStores` deduplica (`src/lib/cache.ts:87`).
+
+Con una sucursal que además conserva un alias vivo (`bodega-central` y
+`bodega-central-vedado`), las dos URL comparten entrada de caché por el canónico
+(ADR 0018 (c)): no hay una segunda entrada que revalidar. Es un caso a **probar**
+en el sensor, no a suponer.
+
+## Modelo de datos y migraciones
+
+**Ninguna migración, y ni una línea de `prisma/schema.prisma`.**
+`Storefront.themeTokens Json?` ya existe (`prisma/schema.prisma:142`, creada por
+F-017) y `@@index([storefrontId])` sobre `Store` (`prisma/schema.prisma:253`) es
+justo el índice que la lectura única necesita. Ninguno de los dos comandos
+prohibidos por AGENTS.md entra en el horizonte; si algo pareciera pedirlos, hay
+que parar y preguntar.
+
+Lo único que esta tanda toca de `prisma/` es el seed.
+
+### La fixture de HD18 — una marca con **tres** sucursales
+
+Una función nueva y aislada en `prisma/seed.ts`, que reutiliza `seedStorefront()`
+—ya idempotente contra el registro `Slug`, ficha
+`seed-storefront-colisiona-con-slug-ya-agrupado`— y **no toca**
+`seedStore()` ni `seedClosedStore()`, que son fixtures de F-004, F-010 y F-017:
+
+```
+seedBrandWithBranches({
+  businessId: seed-negocio-1,
+  brandSlug:  "el-trebol",           name: "El Trébol"
+  branches: [
+    { externalId: "seed-tienda-8",  ownSlug: "el-trebol-centro",  status: PUBLISHED, name: "El Trébol · Centro Habana" },
+    { externalId: "seed-tienda-9",  ownSlug: "el-trebol-playa",   status: SUSPENDED, name: "El Trébol · Playa",
+      disabledReasonCode: "VACACIONES", disabledMessage: "Volvemos en septiembre." },
+    { externalId: "seed-tienda-10", ownSlug: null,                status: DRAFT,     name: "El Trébol · Almacén" },
+  ],
+})
+```
+
+- **`themeTokens` se siembra `null` a propósito.** `seedStorefront()` solo
+  escribe branding cuando le llega algo truthy, así que un `npm run seed`
+  posterior **no pisa** lo que el sensor acaba de guardar. Es lo que deja correr
+  el smoke dos veces seguidas sin volver a sembrar, y lo que obliga a que las
+  aserciones del sensor sean **relativas** (comparar contra el valor leído antes,
+  no contra un literal).
+- **Sin productos.** El branding no necesita catálogo, y `/[slug]` ya tiene
+  estado vacío real (`src/app/[slug]/page.tsx:144-145`). Ahorra tres
+  `upsertCanonical` y no añade nada al build.
+- **Idempotencia (criterio 23).** `seedStorefront()` encuentra la marca por slug
+  y solo actualiza el nombre; cada `store.upsert` va por `externalId` y su rama
+  `update` **nunca** escribe `slug` ni `storefrontId` (la regla que F-017 ya
+  documenta dentro de `prisma/seed.ts`); cada `slug.upsert` de los dos slugs
+  propios usa `update: {}`. Segunda pasada: cero escrituras efectivas y la marca
+  conserva sus tres sucursales.
+- **De un solo uso.** Ningún otro feature lee `el-trebol*`. Las fixtures de
+  agrupar de F-017 (`bodega-uno`, `bodega-dos`) **no se tocan**: siguen
+  verificando la acción de agrupar, que es otra cosa.
+- La sucursal `DRAFT` **no lleva `Store.slug`**, y es correcto: el invariante de
+  ADR 0018 («una marca con varias sucursales exige que todas tengan slug») aplica
+  a las **renderizables**, que son las únicas para las que se calcula un canónico.
+
+**Por qué tres y no dos.** Cada una paga su sitio en el sensor:
+
+| Sucursal                       | Qué demuestra                                                                                                                                                      |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `el-trebol-centro` (PUBLISHED) | El camino feliz y la mitad obvia de E39.                                                                                                                           |
+| `el-trebol-playa` (SUSPENDED)  | Que `SUSPENDED` **cuenta** para las dos mitades. Si alguien escribiera `status: "PUBLISHED"` en vez de `{ not: "DRAFT" }`, el 403 del criterio 22 se caería a 200. |
+| `el-trebol-almacen` (DRAFT)    | Que `DRAFT` **no cuenta** para ninguna. Si alguien quitara el filtro, la cookie de dos sucursales daría 403 en vez de 200.                                         |
+
+Es decir: **las dos formas de equivocarse con la definición de «sucursal de la
+marca» ponen el sensor en rojo**, cada una en una aserción distinta. Ese es el
+motivo de la tercera fila, y no la exhaustividad.
+
+## Fixtures y cómo se verifica
+
+Cookies, con la bandera que ya existe (`scripts/mint-sso-token.mjs`):
+
+```bash
+COOKIE_UNA=$(...  --stores=seed-tienda-1)                    # criterio 2, ya en el smoke
+COOKIE_MARCA=$(... --stores=seed-tienda-8,seed-tienda-9)     # cobertura TOTAL de El Trébol → 200
+COOKIE_PARCIAL=$(... --stores=seed-tienda-8)                 # le falta la SUSPENDED → 403 (E40)
+```
+
+La sección nueva de `.agent/specs/F-011/smoke.sh`, en orden:
+
+1. `BEFORE=$(psql … SELECT "themeTokens" FROM "Storefront" WHERE slug='tienda-demo')`.
+2. Los tres cuerpos inválidos con `COOKIE_UNA` sobre la tienda propia → `400`,
+   `400`, `400`, los tres con `.issues[].path` no vacío. **Criterio 5.**
+3. `SELECT` otra vez → idéntico a `BEFORE`. **Criterio 5, la mitad que importa.**
+4. Camino feliz sobre `tienda-demo` → `200`, y
+   `curl -s $BASE/tienda-demo | grep -c -- '--color-brand:#0f62fe'` ≥ 1, sin
+   esperar el piso de ISR (R36 en el caso de una sola sucursal).
+5. `{}` → `200`, el `SELECT` devuelve `{}` (no `null`) y `/tienda-demo` deja de
+   traer `<style>`. **Criterio 19.**
+6. `{"brand":"oklch(0.62 0.17 145)"}` → `200` y el `SELECT` lo devuelve carácter
+   a carácter. **Criterio 20** (E43).
+7. Con `COOKIE_PARCIAL`, un cuerpo **válido** contra `seed-tienda-8` → `403`
+   `{"error":"FORBIDDEN"}` y el `SELECT` de `el-trebol` no cambió. **Criterio 22.**
+8. Con `COOKIE_MARCA`, el mismo cuerpo → `200`, y las **tres** URL
+   (`/el-trebol-centro`, `/el-trebol-playa`, `/el-trebol`) traen el color nuevo en
+   la petición siguiente. **Criterio 17** (E39) y la prueba de que `SUSPENDED`
+   entra en la revalidación.
+9. `npm run check:theme` → 0. **Criterio 13**, vivo desde el ciclo 1 y ahora por
+   fin ejecutable.
+
+Y fuera del smoke, en `--full`: `npx prisma validate` → 0 **sin migración
+nueva**, `git grep -n 'themeTokens' src/features/admin` solo contra `storefront`
+(criterio 18), y `npm run seed && npm run seed` → 0 con la marca intacta
+(criterio 23).
+
+## Escalabilidad y límites
+
+Números, no adjetivos. Base: 10 tiendas de seed, marcas de 1–3 sucursales.
+
+| Camino                          | Round-trips          | Crece con                | Qué se rompe primero, y cuándo                                                                                               |
+| ------------------------------- | -------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `GET /admin/tiendas/{id}/marca` | **2**                | sucursales de la marca   | 1 sesión + 1 `findUnique` con anidado por `@@index([storefrontId])`. Con 60 sucursales son 60 filas de 4 columnas: ~5 KB.    |
+| 403 de tienda ajena             | **0**                | —                        | `guardAdminStore` va primero: una petición hostil no toca la base. Igual que el criterio 2 ya verificado.                    |
+| 403 de cobertura incompleta     | **1**                | —                        | La lectura se paga y la escritura no ocurre. Es el precio de HD16 (R43).                                                     |
+| `PUT …/branding`                | **2**                | —                        | 1 lectura + 1 `UPDATE` de una fila. Sin `$transaction`.                                                                      |
+| Revalidación de un guardado     | 2N+1 `revalidateTag` | sucursales renderizables | ~10–30 ms cada una en Vercel. N=1 → 3 tags (~60 ms). N=10 → 21 tags (~0,4 s). N=60 → 121 tags (**~1,5–3,5 s** de respuesta). |
+| Regeneración de una vitrina     | igual que hoy        | —                        | El branding no añade ninguna query a la lectura pública: `themeTokens` ya viajaba en el mismo `select`.                      |
+
+**El techo duro de esta tanda no es la base: es la cookie.** HD16 exige tener
+**todas** las sucursales renderizables en `session.storeIds`, y ese array vive en
+el JWT de `qab-admin-session`: ~52 bytes por tienda tras base64url, con el límite
+de ~4 KB por cookie alrededor de **60–65 tiendas** (§ Escalabilidad del ciclo 1).
+Consecuencia concreta y nueva: **a partir de ~60 sucursales renderizables, el
+branding de esa marca no lo puede editar nadie**, porque nadie puede tener una
+sesión que las cubra —y de hecho el admin ni entra: el navegador descarta la
+cookie en silencio—. El arreglo (guardar `storeIds` en base y llevar solo el
+`adminUserId` en la cookie) es un feature de F-008, no de este. Queda escrito
+porque es el primer límite que HD16 crea y nadie lo había medido.
+
+**Segundo umbral, mucho antes**: la respuesta del `PUT` con N=60 tarda entre 1,5
+y 3,5 s solo en invalidar tags. Si alguna vez hay marcas de decenas de sucursales,
+lo correcto es mover la invalidación a un `after()` o a una cola, no reducir lo
+que se invalida (reducirlo es el bug de la ficha).
+
+**JavaScript de cliente**: `check-bundle-budget.mjs` solo recorre `*.html` de
+`.next/server/app` y ninguna página de `/admin` es estática (`force-dynamic`), así
+que la isla del branding suma **0 KB** al presupuesto. Lo que sí lo movería, y
+está prohibido: meter `themeCustomProperties` o Zod en el árbol de la vitrina. La
+fixture añade 3 páginas prerenderizadas (2 sucursales + 1 selector) más ligeras
+que `tienda-demo`, así que la página **peor** que mide el presupuesto no cambia.
+
+## Pruebas que exige la arquitectura
+
+El detalle de casos es de `tests.md`; esto es lo que el diseño no puede quedarse
+sin comprobar.
+
+- `src/features/admin/authorization.test.ts` (+, node) — `authorizeBrandCoverage`:
+  todas las sucursales en la sesión → `ok`; falta una → `FORBIDDEN` con esa
+  sucursal en `missing` y **sin `storeId`** en lo devuelto; lista vacía (marca sin
+  sucursales renderizables) → `ok`; y el resultado **no** depende del orden.
+- `src/features/storefront/server/registry.ts` → su test (node) —
+  `expandBrandRevalidation`: con un miembro sin slug propio devuelve
+  `[brandSlug]`; con tres devuelve los tres slugs propios; con un miembro sin slug
+  dentro de una marca de varios **lanza** (lo hace `canonicalSlug`), que es la
+  señal de que el invariante de ADR 0018 se rompió aguas arriba.
+- `src/features/admin/server/mutations.test.ts` (+, node, `vi.mock` de
+  `@/lib/cache`) — `saveBrandTheme` llama a `revalidateStores` **con todos** los
+  canónicos y a `revalidateStorefronts` con el slug de la marca; y **no** llama a
+  `revalidateSlugs`.
+- `src/features/admin/schemas.test.ts` (+, node) — `brandingBodySchema` **es**
+  `themeTokensSchema` (identidad de objeto, criterio 16); los tres cuerpos del
+  criterio 5 fallan; `{}` pasa; `oklch(...)` pasa; `[]`, `"azul"` y `null` fallan
+  con `issues`, no con excepción.
+- `src/features/admin/server/boundaries.test.ts` (+, node) — añadir **`slug`** a
+  `FORBIDDEN_WRITE_COLUMNS`: el panel no escribe el slug de nada, ni de la tienda
+  ni de la marca. Es una línea y cierra por `grep` la mitad de la frontera que el
+  tipo no ve (`PanelStorefrontWrite` ya impide el resto).
+- `src/features/theming/storeTheme.test.ts` (+, node) — `renderStoreTheme` sigue
+  devolviendo **exactamente** la misma cadena tras extraer
+  `themeCustomProperties()`: el refactor no puede cambiar ni un `;` (F-016,
+  `check:theme`).
+
+## Patrones a seguir / antipatrones a evitar (delta de esta tanda)
+
+**A seguir**
+
+- La primera puerta es siempre `guardAdminStore`. Todo lo que cuesta una consulta
+  va después.
+- Un tipo marcado por cada cosa que «ya se comprobó»: `AuthorizedStoreId`,
+  `AuthorizedStorefrontId`, `PublicSlug`, `BrandRevalidationSet`. El patrón ya
+  está en el repo cuatro veces; esta tanda añade dos y no inventa nada.
+- Una lectura, un valor, dos consumidores. Si un día hacen falta dos consultas,
+  primero hay que explicar por escrito cómo se impide que divergan.
+- `export const dynamic = "force-dynamic"` **literal** en la pantalla nueva.
+
+**A evitar**
+
+- **Revalidar solo la sucursal desde la que se entró.** Es la cuarta instancia de
+  `.agent/playbook/revalida-solo-lo-que-se-escribe-no-lo-que-cambia-de-significado.md`
+  y la más fácil de escribir: `commit()` está ahí, compila, y deja a las hermanas
+  y al selector con el color viejo hasta 3600 s.
+- **Armar el array de slugs a mano** (`.map`, `for`, `.reduce`, un helper con
+  nombre): AGENTS.md § Prohibiciones. Aquí, además, no compila.
+- **Dos definiciones de «sucursal de la marca»** en las dos mitades del endpoint.
+  El filtro `status: { not: "DRAFT" }` se escribe **una vez**, en la lectura
+  única, y las dos mitades consumen el mismo array.
+- **`where: { slug: … }` o `storefront: { slug: true }` en la lectura nueva**:
+  pone rojo `src/features/storefront/server/boundaries.test.ts` con un mensaje que
+  no explica por qué.
+- **Un cuerpo o un código distinto para el 403 de cobertura** (R44): le contaría a
+  quien no debe cuántas sucursales tiene una marca ajena.
+- **Un `kind` nuevo en `AdminWriteResult` para la cobertura**: segundo sitio donde
+  el 403 puede dejar de parecerse al otro.
+- **Copiar `themeTokensSchema`** en `src/features/admin/schemas.ts`: el criterio
+  literal deja de ser cierto el día que una de las dos copias cambie.
+- **Escribir `null` en `themeTokens`**: R34. No hace falta y es el único modo de
+  fallo que la columna tiene.
+- **Vestir el panel con la marca de la tienda** (R40): los tokens solo se aplican
+  dentro del contenedor de la maqueta.
+- **Tocar `seedStore`/`seedClosedStore`** para la fixture de HD18: son fixtures de
+  F-004, F-010 y F-017 y romperlas se nota tarde y lejos.
+- **Agrupar dentro del smoke** para conseguir la marca de varias sucursales
+  (HD18): agrupar no tiene vuelta y el sensor tiene que correr dos veces.
+
+## Riesgos y plan B
+
+| Riesgo                                                                               | Plan B                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ThemeTokens` (propiedades opcionales) no encaja en `Prisma.InputJsonValue`          | `as Prisma.InputJsonObject` en el `data`, jamás `any`. Si ni eso, `themeTokens: { ...tokens }`.                                                                             |
+| La lectura nueva dispara el test de fronteras del storefront por un patrón de texto  | Está previsto arriba: por `id`, y `storefront: { select: … }`. Si aun así salta, el mensaje del test dice el archivo; ficha `boundaries-guard-cruzado-por-patron-de-texto`. |
+| Extraer `themeCustomProperties` cambia una coma del `<style>` y `check:theme` se cae | Test de igualdad de cadena **antes** del refactor, sobre los casos que ya cubre `src/features/theming/storeTheme.test.ts`.                                                  |
+| La fixture de tres sucursales rompe `check:bundle` al cambiar la página medida       | Las tres páginas nuevas no tienen catálogo: menos scripts que `tienda-demo`. El smoke ya comprueba **qué** página se midió (ciclo 2).                                       |
+| `npm run seed` dos veces deja la marca a medias                                      | Criterio 23 en el sensor, y el chequeo del registro `Slug` ya está dentro de `seedStorefront()`.                                                                            |
+| Alguien «arregla» la fixture agrupando `tienda-demo` con `tienda-dos`                | Comentario en `prisma/seed.ts` que diga por qué la marca es de un solo uso, como el que ya existe para `bodega-uno`/`bodega-dos`.                                           |
+| Una marca de decenas de sucursales hace lenta la respuesta del `PUT`                 | Medido arriba (~1,5–3,5 s con 60). Se mueve la invalidación a `after()`; **no** se revalida menos.                                                                          |
+| HD16 deja marcas grandes sin branding editable                                       | Es la consecuencia de la decisión, medida y escrita (§ Escalabilidad). El arreglo es de F-008 y no de esta tanda.                                                           |
+| `check:harness` en rojo por citar archivos que aún no existen                        | Las rutas por crear van **sin** comillas invertidas y con «(por crear)». Ya mordió en F-011 y F-017 (AGENTS.md § Cosas que muerden).                                        |
+
+## ¿Hace falta una ADR?
+
+**Ninguna nueva.** ADR 0018 (e) ya decidió que el branding es de la marca, que es
+la decisión estructural de esta tanda. Lo que sí hacía falta, y se hizo en este
+mismo ciclo:
+
+1. **`docs/adr/0017-frontera-de-escritura-del-panel.md` puesta al día** (I14):
+   pasa de **Propuesta** a **Aceptada**, sus dos huecos AP5/AP6 quedan cerrados
+   con lo que el ciclo 2 implementó (`Store.sourceOptIn`, `Store.sourceUpdatedAt`),
+   y su § «Reabrir cuando» deja de mandar un mecanismo de override que ADR 0018 (e)
+   volvió innecesario: en `Storefront` no hay ninguna columna compartida con el
+   sync, así que no hay nada que precedenciar.
+2. **`docs/adr/0018-registro-de-slugs-y-slug-canonico.md` gana una decisión (g)**:
+   quién puede escribir las columnas de panel de una marca. Es lo que HD16 decide
+   y lo que ninguna ADR cubría (I10), y va ahí y no en una ADR nueva porque es la
+   ADR que subió el branding a `Storefront` y la que ya exige permiso sobre **las
+   dos** tiendas para agrupar (decisión (f)): la regla de cobertura es su hermana,
+   no una decisión aparte.
+
+No se supera ninguna otra ADR: 0007 y 0016 no se tocan; 0006 (ISR por tag) se usa
+tal cual; 0012 quedó superada en su punto de la URL por 0018 (b) y aquí no se
+vuelve a tocar.
+
+## Preguntas al humano
+
+**Ninguna que bloquee la firma del plan.** HD16–HD19 cerraron las cuatro que
+había, y las decisiones que quedaban abiertas en la spec —ruta del endpoint,
+dónde vive la cobertura, dónde vive la proyección, forma de la fixture— eran mías
+y están tomadas arriba.
+
+Dos cosas quedan como **veto de una palabra**, no como pregunta: si el humano
+prefiere otra cosa, se cambia sin tocar nada más del diseño.
+
+- **La URL de la pantalla y del endpoint** (`/admin/tiendas/{id}/marca` y
+  `PUT /api/admin/stores/{id}/branding`). El argumento está arriba; lo único que
+  no es negociable es que la marca **no** venga del cuerpo (R3).
+- **Los nombres de la fixture de HD18** (`el-trebol`, `el-trebol-centro`,
+  `el-trebol-playa`, `el-trebol-almacen`, `seed-tienda-8..10`). Lo que sí es
+  estructural es que sean **tres** sucursales con esos tres estados: con dos, las
+  dos formas de equivocarse con «sucursal renderizable» pasan el sensor en verde.
+
+Y una deuda que este capítulo **no** resuelve y deja anotada, por si el humano
+quiere convertirla en feature: `Storefront.contactPhone`, `contactWhatsapp`,
+`contactEmail`, `logoUrl` y `coverUrl` siguen siendo columnas que se leen y que
+**nadie escribe** (I15, HD17, HD19). Cuando lleguen, entran por este mismo
+embudo, con esta misma cobertura y ampliando `PanelStorefrontColumn`.

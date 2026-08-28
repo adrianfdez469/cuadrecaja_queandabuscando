@@ -10,7 +10,8 @@ process.env.ADMIN_SESSION_SECRET = "a".repeat(32);
 process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
 process.env.SUPABASE_STORAGE_BUCKET = "store-media";
 
-const { productWriteSchema, promotionBodySchema } = await import("./schemas");
+const { brandingBodySchema, productWriteSchema, promotionBodySchema } = await import("./schemas");
+const { themeTokensSchema } = await import("@/features/theming/storeTheme");
 
 const BUCKET_URL = "https://test.supabase.co/storage/v1/object/public/store-media/photo.jpg";
 
@@ -125,5 +126,41 @@ describe("promotionBodySchema", () => {
     const result = promotionBodySchema.safeParse(promotionBody({ name: "  " }));
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.name).toBeNull();
+  });
+});
+
+describe("brandingBodySchema — F-011 tanda 3 (R32, criterio 16)", () => {
+  it("is the SAME object as themeTokensSchema, not a copy", () => {
+    expect(brandingBodySchema).toBe(themeTokensSchema);
+  });
+
+  it("rejects a color the browser would not understand", () => {
+    expect(brandingBodySchema.safeParse({ brand: "no-es-un-color#" }).success).toBe(false);
+  });
+
+  it("rejects a radius outside the enum", () => {
+    expect(brandingBodySchema.safeParse({ radius: "gigante" }).success).toBe(false);
+  });
+
+  it("rejects an unknown key (.strict())", () => {
+    expect(brandingBodySchema.safeParse({ background: "#fff" }).success).toBe(false);
+  });
+
+  it("accepts an empty object — E38, quitar el branding", () => {
+    const result = brandingBodySchema.safeParse({});
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual({});
+  });
+
+  it("accepts an oklch(...) value unchanged (E43)", () => {
+    const result = brandingBodySchema.safeParse({ brand: "oklch(0.62 0.17 145)" });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.brand).toBe("oklch(0.62 0.17 145)");
+  });
+
+  it("rejects a body that is not an object", () => {
+    expect(brandingBodySchema.safeParse([]).success).toBe(false);
+    expect(brandingBodySchema.safeParse("azul").success).toBe(false);
+    expect(brandingBodySchema.safeParse(null).success).toBe(false);
   });
 });

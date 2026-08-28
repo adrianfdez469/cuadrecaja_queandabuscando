@@ -1,9 +1,16 @@
 ---
 feature: F-011
 agente: sdd-designer
-actualizado: 2026-08-26T18:12:00Z
+actualizado: 2026-08-28T02:10:00Z
 estado: listo
 ---
+
+> **Ciclo 4 (2026-08-28) — se descongela el branding, ahora sobre `Storefront`.**
+> Lo que este ciclo añade está en el capítulo final,
+> § Tanda 3 — el editor de colores de la marca, y es lo único que hay que leer
+> para construirlo. Los ciclos 1–3 no se han tocado. La sección
+> § Congelado ya **no está congelada**: su encabezado dice pieza por pieza qué
+> sobrevive, qué cambió de dueño y qué se entierra.
 
 > **Ciclo 3 — alcance nuevo: abrir y cerrar la tienda al público.** El humano
 > contestó `DP6`, `DP7` y `DP8` (§ Respuestas del humano) y añadió seis
@@ -1740,6 +1747,20 @@ queandabuscando y el negocio (impago, incumplimiento).
 
 # Congelado — diseñado y esperando a `Storefront`
 
+> **DESCONGELADO el 2026-08-28.** `Storefront` existe (F-017, ADR 0018) y la
+> migración borró `Store.themeTokens`. Este bloque **deja de ser el diseño
+> vigente del branding** y pasa a ser el material de origen: sigue aquí porque
+> la mitad de sus decisiones se reutilizan literalmente y no se vuelven a
+> discutir, pero **lo que se construye es el capítulo final**,
+> § Tanda 3 — el editor de colores de la marca, y donde los dos se contradigan
+> manda el capítulo final. El veredicto pieza por pieza está en
+> § Qué del congelado se usa tal cual, qué cambia y qué se entierra.
+>
+> Lo que **sí** sigue caducado dentro de este bloque, sin esperar a nadie: la
+> tarjeta **2c «Texto y contacto»** (cancelada por DP1, y ahora además por HD17
+> —el contacto vive en `Storefront` y nadie lo escribe todavía—) y sus cuatro
+> columnas de override, que ADR 0018 (e) volvió innecesarias.
+
 **No borrar.** Todo lo que sigue es diseño terminado del ciclo 1 que **no se
 construye ahora**:
 
@@ -2069,3 +2090,819 @@ que devuelva `{"--color-brand": "…", "--radius-md": "…", …}` con los
 `CUSTOM_PROPERTY` y `RADIUS_SCALE` que ya están ahí, y que `renderStoreTheme`
 serialice **su salida**. La maqueta la usa para su `style`. Sin eso se duplican la
 escala de radios y el mapeo de nombres: dos fuentes para la misma verdad.
+
+---
+
+# Tanda 3 — el editor de colores de la marca
+
+**Capítulo añadido el 2026-08-28.** Diseña **una sola pantalla** —el editor de
+branding sobre `Storefront`, en /admin/tiendas/{storeId}/marca (por crear)— y su
+endpoint `PUT /api/admin/stores/{storeId}/branding`, sobre
+`.agent/specs/F-011/spec.md` § «Tanda 3» (E35–E45, R31–R46) y
+`.agent/specs/F-011/architecture.md` § «Tanda 3 — el editor de branding sobre
+`Storefront`». Cubre el quinto `acceptance_criteria` y nada más.
+
+**Qué no toca.** Ni una línea de los ciclos 1–3: las pantallas de producto,
+imágenes, promociones y del interruptor al público están construidas,
+verificadas y en `main`. No se rediseña el listado, ni el hub salvo **una
+tarjeta** (§ 11), ni la tienda pública.
+
+**Numeración.** Continúa la de los tres ciclos anteriores para que dos números
+iguales no signifiquen dos cosas: comprobaciones hechas mirando **VE19+**, pasos
+de verificación **V33+**, suposiciones sobre arquitectura **B11+**, preguntas al
+humano **DP12+**.
+
+## Qué se miró antes de diseñar
+
+`.agent/specs/F-011/spec.md` entera (los dos capítulos),
+`.agent/specs/F-011/architecture.md` § Tanda 3 entera, `AGENTS.md`,
+`.agent/progress/F-011.md` (HD1–HD19 y las decisiones de diseño ya fijadas del
+ciclo 1), la sección congelada de este mismo documento, y el código de verdad:
+`src/features/theming/storeTheme.ts`, `src/theme/tokens.css`,
+`src/components/ui/` (los ocho primitivos que hay),
+`src/features/admin/components/StoreBrandCard.tsx`,
+`src/features/admin/components/GroupStoresForm.tsx`,
+`src/features/admin/components/ProductForm.tsx`,
+`src/app/admin/tiendas/[storeId]/page.tsx`,
+`src/app/admin/tiendas/[storeId]/agrupar/page.tsx`,
+`src/app/admin/layout.tsx`, `src/features/admin/server/stores.ts`,
+`src/app/api/admin/_lib/respond.ts`, `src/app/api/admin/_lib/guard.ts` y
+`.agent/specs/F-017/visual.mjs`.
+
+### Lo que verifiqué de verdad, mirando — y esta vez a 360, 768 y 1280
+
+**El hueco de tres ciclos está cerrado.** VE18 decía «no hay juicio a 360 ni a
+768» porque `resize_window` no obedecía. F-017 dejó chromium headless con
+Playwright y la etapa `--visual` de `.agent/verify.sh`; con eso levanté
+`npm run dev -- -p 3021` contra el Postgres del docker del 5433 y **medí**, en
+vez de deducir de las clases de Tailwind. Las capturas están fuera del repo (son
+efímeras); lo que sigue es lo que enseñaron.
+
+- **VE19 — El hub de una marca de dos sucursales, a 360, 768 y 1280.** Con una
+  cookie de `seed-tienda-5` (Bodega Uno) el hub renderiza las seis tarjetas y
+  `document.documentElement.scrollWidth > innerWidth` es **falso en los tres
+  anchos**. La última tarjeta es «Colores y contacto · En camino», que es
+  exactamente el hueco que esta tanda rellena (§ 11).
+- **VE20 — El panel ya enseña la hermana ajena, con nombre, y sin `storeId`.**
+  En ese mismo hub, «Tu marca» lista `Bodega Dos` con su `Badge` `Abierta` y su
+  URL pública, **sin** el enlace `Abrir en el panel` —porque esa sucursal no
+  está en la sesión— tal como promete
+  `src/features/admin/components/StoreBrandCard.tsx`. Es media pantalla de E40b
+  ya construida: lo que le falta es **la ciudad** y **el motivo**.
+- **VE21 — La vitrina con branding vivo, a 360.** `/tienda-dos`
+  (`oklch(0.62 0.17 145)`, `radius: round`) enseña: barra superior
+  `bg-brand text-brand-contrast` con el nombre de la **sucursal** y `Carrito`;
+  cinta `Destacado` en `accent`; precio en `text-brand`. **Los cinco tokens se
+  ven en una sola pantalla del comprador**, y esa pantalla es el catálogo de
+  sucursal. Es el argumento de por qué la maqueta previsualiza **esa** y no el
+  selector (§ 12b).
+- **VE22 — La página del selector de marca enseña un subconjunto estricto.**
+  `/bodega-uno` a 360: la misma barra `bg-brand`, «Elige tu sucursal», tarjetas
+  en superficies de plataforma y `Ver el catálogo →` en `text-brand`. Ni
+  `accent`, ni `accentContrast`, ni un radio que se note. Confirmado mirando: si
+  la maqueta enseña el catálogo de sucursal, **no** se pierde ningún token.
+- **VE23 — La cinta `Destacado` sigue recortada** por el `overflow-hidden` de la
+  tarjeta (VE4 del ciclo 2, intacto). La maqueta lo reproduce, y **está bien que
+  lo reproduzca**: mentir en la previsualización es peor que enseñar un borde
+  feo. Queda anotado como deuda de `src/components/store/ProductCard.tsx`, no de
+  esta tanda.
+- **VE24 — El prototipo de la pantalla nueva, medido a 360, 768 y 1280.** Como
+  la pantalla no existe todavía, armé un prototipo HTML con **los valores
+  literales de `src/theme/tokens.css`** y la geometría de los primitivos reales
+  (`Card`, `Alert`, `Button`, `Badge`, `Field`, `RadioCard`), y lo fotografié en
+  los tres anchos con el mismo chromium. Resultados: **sin desborde horizontal
+  en los tres**; alturas medidas de los controles a 360 px → chips **44**,
+  campos de texto **44**, selector de color **44**, atajos `Claro`/`Oscuro`
+  **44**, `RadioCard` **66–80**, botones **44**; separación campo↔selector de
+  color **8 px**; ancho de la maqueta a 360 px **278 px**. Todo por encima del
+  mínimo de 44.
+- **VE25 — Y lo que el prototipo corrigió**, que es para lo que sirve mirar:
+  (a) a 768 px la maqueta a todo el ancho **deja de parecer un teléfono** y las
+  tarjetas de producto se estiran a 320 px cada una; se le pone tope de 22 rem
+  en todos los anchos; (b) las muestras de esquina de los `RadioCard` en
+  `bg-surface-muted` sobre `bg-surface` **son invisibles**: se rellenan con el
+  `brand` que hay en el formulario; (c) a 1280 px con dos columnas la
+  previsualización `sticky` acompaña el scroll y la columna izquierda no pasa de
+  ~630 px, que es la anchura correcta para dos campos por fila.
+- **VE26 — `/sesion-cerrada` no existe.**
+  `src/features/admin/components/GroupStoresForm.tsx:91` hace
+  `router.push("/sesion-cerrada")` ante un 401, `src/lib/slug.ts:41` reserva ese
+  slug diciendo que «F-011 lo añadió a `src/app/`»… y en el disco no hay ninguna
+  ruta: `find src/app` no la encuentra. Hoy un 401 a mitad de la pantalla de
+  agrupar manda al admin a un **404**. No lo causa esta tanda y no lo arreglo por
+  mi cuenta: es **DP12**.
+
+### Lo que no pude verificar
+
+- **La pantalla real, porque no existe.** Todo lo que digo de ella sale del
+  prototipo medido (VE24) y de los primitivos reales, no del componente
+  construido. El paso `V41` la vuelve a medir cuando exista, y el guion visual
+  de F-011 —.agent/specs/F-011/visual.mjs (por crear), criterio 21— la deja
+  medida para siempre.
+- **El modo oscuro de la pantalla nueva.** El panel en oscuro está verificado
+  (VE2) y el prototipo lo hice en claro. Va como paso `V42`.
+- **Un `Storefront` con branding y varias sucursales a la vez.** En la base de
+  desarrollo, `tienda-dos` tiene `oklch(...)` y una sola sucursal;
+  `bodega-uno` tiene dos sucursales y `themeTokens` vacío. El cruce lo crea la
+  fixture de HD18 (`el-trebol`), que no existe hasta que se implemente.
+
+## Cómo encaja con `architecture.md`
+
+Cuatro suposiciones. Ninguna cambia la forma de la pantalla; tres cambian una
+frase y una cambia si un dato se puede enseñar.
+
+| #   | Suposición                                                                                                                                                                           | Si él decide otra cosa                                                                                                                                                                            |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B11 | La isla manda el objeto de tokens **sin envoltorio** a `PUT /api/admin/stores/{storeId}/branding` y recibe `{storefrontId, brandSlug, themeTokens, branchCount}` (§ Contratos de él) | Nada de la pantalla cambia salvo la URL, que llega por prop. Sin `branchCount` en la respuesta, el banner de éxito no puede decir «tus 2 sucursales» y se queda en «tu marca»                     |
+| B12 | El 400 trae `issues[].path` con la **clave del token** (`["brand"]`, `["radius"]`, `["background"]`), que es lo que produce `zodInvalidBody` sobre `themeTokensSchema`               | Sin `path`, los errores solo se pintan en el resumen de arriba y no debajo de cada campo. Se ve peor, no se rompe                                                                                 |
+| B13 | `BrandingTarget.branches` gana **`status`** además de `id`, `name`, `city` y `slug`. Es una columna más en el mismo `select` de `loadBrandingTarget`, **cero consultas nuevas**      | Sin `status`, la pantalla no puede decir «una de ellas está cerrada al público ahora mismo»: se cae esa línea del microcopy y nada más. No invento el dato ni pido una segunda consulta           |
+| B14 | `STOREFRONT_SELECT` de `src/features/admin/server/stores.ts:20` gana `themeTokens`, y `ManagedStoreDetail` lo expone. Es una columna más en una consulta que el hub **ya hace**      | Sin eso, la tarjeta de entrada del hub (§ 11) no puede enseñar las cuatro muestras de color y se queda en título + frase + enlace. Funciona; dice menos. **No** vale una consulta nueva en el hub |
+
+Y una petición de arquitectura que ya está escrita en su documento y que
+confirmo que la maqueta necesita: **extraer** `themeCustomProperties()` de
+`src/features/theming/storeTheme.ts` sin cambiar un carácter de la salida de
+`renderStoreTheme`. No es una reimplementación: es el mismo `CUSTOM_PROPERTY` y
+el mismo `RADIUS_SCALE`, devueltos como objeto en vez de serializados. Sin eso
+la maqueta duplica la escala de radios, que es la fuente de verdad que F-016
+costó arreglar.
+
+## Flujo de usuario
+
+Una frase: **el admin entra a su tienda, ve que los colores son de su marca y no
+de esa sucursal, elige una paleta, la ajusta mirando una maqueta del teléfono de
+su cliente, guarda, y sus clientes lo ven en todas sus sucursales en el acto — o
+descubre, antes de tocar nada, que esos colores no los puede cambiar él solo.**
+
+```
+/admin  →  hub de la tienda  →  tarjeta «Colores de tu marca»  →  /admin/tiendas/{id}/marca
+                                                                          │
+                              ┌───────────────────────────────────────────┴──────────┐
+                     cobertura completa                              cobertura incompleta (E40b)
+                              │                                                      │
+              elegir paleta → ajustar → mirar la maqueta                  se ve el editor BLOQUEADO,
+                              │                                     con los colores de hoy y con el nombre
+                        Guardar los colores                          y la ciudad de lo que falta. Cero campos
+                              │
+        ┌──────────┬──────────┼──────────┬──────────┐
+      200        400        401        403        500/red
+        │          │          │          │          │
+   banner y    resumen +   banner y   banner y   banner y
+   maqueta     error por    enlace    controles  «Reintentar»
+   guardada     campo     de volver   apagados
+                a entrar
+```
+
+**Las vueltas atrás y qué se pierde en cada una.** En **ninguna** se pierde lo
+tecleado: la isla no recarga la página en ningún camino (nada de
+`router.refresh()`, decisión del ciclo 1). Un 400 conserva los cinco valores y
+la maqueta sigue mostrando **lo que el admin escribió**, no lo de la base: si la
+maqueta volviera a lo guardado, el error dejaría de tener a qué referirse. Un
+401 conserva todo y añade la salida. Salir de la pantalla sin guardar sí pierde
+los cambios, y por eso existe la línea `Sin guardar.` junto al botón.
+
+## Inventario de pantallas y estados
+
+### 11 · El hub — la tarjeta de entrada (reemplaza «Colores y contacto»)
+
+Hoy el hub termina en una tarjeta `Colores y contacto` con un `Alert tone="muted"`
+que dice `En camino.` (`src/app/admin/tiendas/[storeId]/page.tsx:163-173`, visto
+en VE19). **Esa tarjeta se sustituye**, en el mismo sitio y con la misma forma:
+
+`<h2>Colores de tu marca</h2>`, y debajo:
+
+- Las **cuatro muestras** de lo guardado en una fila que envuelve —un cuadrado
+  de 1.25 rem con `border-border` y el valor al lado, en `text-xs`— más
+  `Esquinas · Suaves`. Sale de B14, sin consulta nueva.
+- Si no hay branding: `text-fg-muted text-sm`,
+  `Tu marca usa la paleta por defecto.`
+- Un `Button variant="secondary"` dentro de un `<Link>`: `Elegir los colores` si
+  no hay nada guardado, `Cambiar los colores` si lo hay.
+
+**La tarjeta no calcula el bloqueo de HD16.** Podría —el hub ya trae los ids de
+las sucursales renderizables de la marca en su `select`— pero exponerlos a la
+vista rompería HS12, que es justamente la razón de que `listBrandBranches` no
+devuelva `storeId`. El bloqueo lo explica la pantalla, que es donde el admin ya
+fue a hacer algo. Un botón que lleva a una explicación es mejor que un botón
+gris en una tarjeta que no la da.
+
+**Qué pasa con «y contacto».** Se cae del título: HD17 y HD19 dejan contacto,
+logo y portada fuera, y prometerlos en un `En camino.` que lleva tres ciclos
+ahí es peor que no nombrarlos. La deuda vive en la spec (I15), no en la pantalla
+del negocio.
+
+### 12 · /admin/tiendas/{storeId}/marca (por crear) — el editor
+
+Hermana de `src/app/admin/tiendas/[storeId]/agrupar/page.tsx` y por el mismo
+motivo que aquella se sacó del hub: es una pantalla con su propia pregunta, se
+comparte por URL, se vuelve con el botón atrás, y el 404 de tienda ajena la
+protege igual que al resto del panel (R7). `export const dynamic = "force-dynamic"`
+**literal** (R9/R38).
+
+**Cabecera.** `← {nombre de la tienda}` (vuelve al hub), `<h1>Colores de tu
+marca</h1>` y, debajo, en `text-fg-muted max-w-2xl`, **la frase que encuadra
+todo el resto** y que cambia con el número de sucursales renderizables:
+
+| Sucursales renderizables | Frase                                                                                                                                                       |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1                        | `Estos colores son de {marca}, tu marca. Como tienes una sola sucursal, son los de tu tienda.`                                                              |
+| N > 1                    | `Estos colores son de {marca}, tu marca: los usan tus {N} sucursales y la página que las lista. No se pueden poner distintos en una sucursal y en otra.`    |
+| 0                        | `Estos colores son de {marca}, tu marca. Todavía ninguna de tus sucursales es visible para tus clientes: elígelos ahora y ya van a estar cuando publiques.` |
+
+Esa frase es la respuesta a la pieza «Repensar» del microcopy congelado: «tu
+tienda» era falso en cuanto la marca tiene dos sucursales.
+
+#### 12a · El editor, con cobertura completa
+
+Una sola `Card`. Cuatro bloques de control y una maqueta, **en este orden en el
+DOM**, que a 360 px es también el orden visual:
+
+**(i) Paletas.** `<fieldset>` con `<legend>Paletas</legend>`, la ayuda
+`Empieza por una paleta y ajusta después.` y seis chips
+(`<button type="button">`, `min-h-11`, en `flex-wrap`): `Azul` · `Verde` ·
+`Naranja` · `Vino` · `Turquesa` · `Grafito` (DP3 → sí, del ciclo 1). Cada chip
+lleva **dos muestras redondas** —principal y acento— y su nombre.
+
+Los chips **no son un campo del formulario**: no tienen `name`, no se envían, y
+lo único que hacen es escribir en los cuatro controles de abajo. Así no hay un
+sexto valor que validar ni una clave fuera del esquema (R41). Los valores
+exactos van a src/constants/branding.ts (por crear) —AGENTS.md prohíbe cadenas
+mágicas— y son **hexadecimales**, que es lo que un dueño de negocio reconoce
+(**DP13**).
+
+**(ii) Los cuatro colores.** Cuatro `Field` (dos por par), cada uno con el mismo
+control compuesto, que es la pieza del ciclo 1 que **no ha caducado y que E43
+convierte en criterio**:
+
+- Un `<input type="text">` **con `name`** (`brand`, `brandContrast`, `accent`,
+  `accentContrast`): es el valor que se guarda.
+- A su lado, un `<input type="color">` **sin `name`**, `h-11 w-14`, que solo
+  escribe en el campo de texto. Sin `name` porque la base tiene hoy
+  `oklch(0.62 0.17 145)` (`prisma/seed.ts:331`, comprobado en VE21 mirando
+  `/tienda-dos`) y un selector de color no sabe representarlo: si se enviara,
+  mandaría `#000000` y pintaría de negro la tienda de alguien sin que lo pidiera.
+  El selector es **ayuda de entrada**, no dato.
+- Cuando el texto no es un `#rrggbb`, el selector se queda en su valor por
+  defecto y debajo aparece, en `text-fg-muted text-xs`:
+  `El selector solo entiende colores en formato #rrggbb. Tu color se guarda tal como está escrito.`
+
+Etiquetas (los dos «contraste» no se llaman contraste en pantalla):
+`Color principal` / `Texto sobre el color principal` / `Color de acento` /
+`Texto sobre el color de acento`. Los dos campos de texto-sobre-color llevan
+además dos atajos `Claro` / `Oscuro`, `min-h-11`, que escriben los dos valores
+de src/constants/branding.ts (por crear): nueve de cada diez veces la respuesta
+correcta es una de esas dos.
+
+**(iii) Esquinas.** `<fieldset>` con `<legend>Esquinas</legend>` y cuatro
+`RadioCard` (`name="radius"`): `Rectas` (`sharp`) · `Suaves` (`soft`) ·
+`Muy redondeadas` (`round`) · `Las de siempre`, que deja `radius` **sin enviar**
+(equivale a no tener la clave). Cada una lleva a la derecha una muestra de
+40 px **rellena con el `brand` que hay ahora en el formulario** y con el radio
+que promete, dentro de su propia escala inline (VE25b: en gris no se veía).
+
+**(iv) Vista previa.** `<h3>Vista previa de tu tienda</h3>` y una maqueta del
+catálogo de sucursal —la pantalla donde VE21 demostró que se ven **los cinco
+tokens a la vez**—, pintada con **lo que hay ahora en el formulario**, no con lo
+guardado:
+
+- Barra superior `bg-brand text-brand-contrast` con el nombre real de **la
+  sucursal desde la que se entró** y la palabra `Carrito`, igual que
+  `src/app/[slug]/layout.tsx`.
+- Dos tarjetas de producto en miniatura, la primera con la cinta `Destacado`
+  (`bg-accent text-accent-contrast`) —el único sitio del comprador donde se ve
+  `accent`, VE5— y su precio en `text-brand`.
+- Un rectángulo con el aspecto del botón `Agregar al carrito`
+  (`bg-brand text-brand-contrast`, `rounded-md`, `min-h-12`). **Es un `<span>`,
+  no un `<button>`**: nada de la maqueta entra en el orden de tabulación ni
+  promete ser pulsable.
+- Debajo, en `text-fg-muted text-xs`, tres líneas: el resumen en texto de lo
+  elegido (`Color principal #0f62fe · Texto sobre el principal: claro · Esquinas
+suaves`), el aviso de legibilidad (`Fíjate en que el texto del botón se lea
+bien.`, que es toda la defensa que HD8/R39 dejan) y el alcance
+  (`Así se ve el catálogo de cada sucursal. La página que lista tus {N} sucursales usa los mismos colores.`,
+  solo con N > 1).
+
+**Los nombres de los dos productos son de ejemplo y fijos**
+(`Café molido 250 g`, `Arroz 1 kg`, en src/constants/branding.ts (por crear)),
+no dos productos reales de la tienda. Es una diferencia deliberada con el diseño
+congelado: `architecture.md` fija esta pantalla en **dos consultas** y una
+tercera para dos nombres decorativos no lo vale, además de obligar a diseñar el
+caso «tienda sin productos». La maqueta dice `Ejemplo` en `text-xs` sobre las
+tarjetas para que nadie crea que su catálogo cambió.
+
+**Cómo se pinta el color sin pelear con F-016.** El contenedor de la maqueta
+lleva las **propiedades personalizadas en su `style`** (`--color-brand`,
+`--color-brand-contrast`, `--color-accent`, `--color-accent-contrast`,
+`--radius-sm|md|lg`), calculadas por `themeCustomProperties()`. Las utilidades
+de dentro siguen siendo `bg-brand`, `text-brand`, `rounded-md`, `rounded-lg` —
+**nunca** `rounded-[--radius-lg]`, que es la sintaxis que `npm run check:theme`
+persigue. Las propiedades personalizadas heredan, así que **la maqueta no emite
+`<style>` ni usa `data-store`**: dos reglas para lo mismo pelearían con la de la
+tienda real. Es lo que hace verdad el criterio 13 y el E44.
+
+**Acciones**, en este orden en el DOM: `Button` primario `Guardar los colores` ·
+`Button variant="ghost"` `Quitar los colores` · la línea `Sin guardar.` en
+`text-fg-muted text-sm` cuando algo cambió y no se ha guardado. El botón **no se
+deshabilita nunca** por «no hay cambios»: comparar estados para apagar un botón
+es la clase de listeza que falla.
+
+#### 12b · El estado bloqueado por cobertura (E40b, R45)
+
+Es la pantalla que este ciclo tenía que inventar, y la regla que la ordena es
+una: **se ve todo lo que hay, no se puede tocar nada, y se dice exactamente qué
+falta y qué hacer.** Un formulario que se deja rellenar para acabar en un 403 es
+peor que un formulario que no se puede rellenar.
+
+La misma `Card`, con **cero campos**, en este orden:
+
+1. `Alert tone="warning"` (no `danger`: no es un error, ni una culpa, ni algo
+   que se rompió), con dos frases:
+   - `Para cambiar los colores necesitas administrar las {total} sucursales de {marca}.`
+   - `Los colores son de la marca, no de una sucursal: si los cambias, cambian en todas. Hoy administras {cubiertas} de {total}.`
+2. `<h3>Te faltan estas sucursales</h3>` y una `<ul>` con una fila por sucursal
+   que falta: **nombre en negrita y ciudad debajo**, en un recuadro
+   `border-border rounded-md p-3`. **Ni `storeId`, ni URL pública, ni enlace, ni
+   botón**: `authorizeBrandCoverage` devuelve solo nombre y ciudad
+   (`architecture.md` § Autorización, propiedad 2) y la vista no puede construir
+   nada hacia una sucursal ajena aunque alguien lo intente después. Ciudad nula
+   → la línea no aparece, no un `—` (aquí la ausencia no es información: la
+   ciudad está para distinguir dos sucursales con nombre parecido).
+3. `text-fg-muted text-sm`:
+   `Pide el acceso en Cuadre de Caja y vuelve aquí. Mientras tanto, los cambia quien administre las {total}.`
+4. Un separador y `<h3>Los colores que tiene tu marca ahora</h3>`: las cuatro
+   muestras con su valor **en texto**, más `Esquinas · {etiqueta}`, y debajo la
+   **misma maqueta** de § 12a pero pintada con lo guardado y con el pie
+   `Así ven hoy tus clientes el catálogo de esta sucursal.` Enseñarla no filtra
+   nada —esos colores están en el HTML público de su propia tienda— y contesta
+   la pregunta con la que el admin llegó.
+
+**Por qué se ve la marca entera y no un 404.** La tienda **sí** es suya; lo que
+no cubre es la marca. Un 404 aquí le diría que se equivocó de sitio.
+
+**Esta pantalla no tiene isla.** Sin campos no hay estado ni eventos: es un
+componente de servidor puro, `0 KB`. La decisión de cobertura la toma el
+servidor con la misma función que decide el 403 del endpoint, así que no hay dos
+verdades (R43).
+
+#### 12c · Todos los estados
+
+| Estado                                              | Qué se ve                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Cargando** (`loading.tsx`)                        | El `<h1>` real y `<p role="status">Cargando los colores de tu marca…</p>`. Cero JS. Son dos consultas, así que casi nunca se ve; existir es lo que evita el salto en blanco                                                                                                                                                                                                |
+| **Normal, con branding guardado**                   | Los cuatro campos con su valor, el radio marcado, la maqueta pintada. Ningún banner                                                                                                                                                                                                                                                                                        |
+| **Normal, sin branding** (`{}` o `null`)            | Campos vacíos, `Las de siempre` marcado, la maqueta con la paleta por defecto de `src/theme/tokens.css`, y arriba `Alert tone="muted"`: `Tu marca usa la paleta por defecto.` + `Elige una paleta para que se parezca a tu negocio.`                                                                                                                                       |
+| **Marca de una sola sucursal**                      | Todo igual, con la frase de cabecera de una sucursal y **sin** la línea del alcance bajo la maqueta. El admin no llega a enterarse de que existe una regla de cobertura, que es el caso de casi todos los negocios                                                                                                                                                         |
+| **Marca de varias sucursales, con cobertura**       | Igual, con la frase de N sucursales y la línea del alcance. Nada de la mecánica de HD16 en pantalla: cumplirla no se explica, se explica incumplirla                                                                                                                                                                                                                       |
+| **Cobertura incompleta** (E40b)                     | § 12b entera. **Sin campos, sin botón de guardar, sin `<noscript>`**: no hay nada que activar                                                                                                                                                                                                                                                                              |
+| **Marca sin ninguna sucursal renderizable**         | El editor completo y operativo (la cobertura de una lista vacía se cumple, y guardar responde 200), con la frase de cabecera de 0 sucursales y, bajo la maqueta, `Todavía no hay ninguna sucursal publicada donde verlo.`                                                                                                                                                  |
+| **Antes de hidratar**                               | Todo visible y legible: la maqueta con lo guardado —la isla también se renderiza en el servidor—, los campos con sus valores y los radios operables, que son HTML. Lo único que no funciona son los chips, los atajos, el selector de color y el guardado                                                                                                                  |
+| **Sin JavaScript**                                  | `<noscript>` dentro de la tarjeta, `Alert tone="warning"`: `Para cambiar los colores necesitas activar JavaScript. Los que tienes guardados se ven aquí arriba.` (DP2 → sí, del ciclo 1)                                                                                                                                                                                   |
+| **Editando** (algo cambió sin guardar)              | La maqueta ya cambió; junto al botón, `Sin guardar.`                                                                                                                                                                                                                                                                                                                       |
+| **Guardando**                                       | Botón `disabled` con texto `Guardando…` y `aria-busy="true"`; el `<fieldset>` de los controles deshabilitado. Segundo clic imposible                                                                                                                                                                                                                                       |
+| **Guardado (200, E35)**                             | `Alert tone="positive"` sobre el formulario —ya es `role="status"`, no roba el foco y **no se va solo**—: `Colores guardados.` + la segunda frase según N (§ Textos). Desaparece `Sin guardar.` **Sin `router.refresh()`**: la pantalla ya muestra lo que mandó                                                                                                            |
+| **Guardado con alguna sucursal cerrada al público** | Igual, más `Una de tus sucursales está cerrada ahora mismo: cuando la abras, ya va a tener estos colores.` (depende de B13)                                                                                                                                                                                                                                                |
+| **Inválido (400, E36 — el criterio 5)**             | Resumen `Alert tone="danger"` arriba, con foco, y error debajo de cada campo. **Nada se guardó** y lo dice la primera frase. La maqueta **sigue mostrando lo tecleado**                                                                                                                                                                                                    |
+| **Clave desconocida en el 400** (`background`, E37) | No hay campo al que colgarlo: va solo al resumen, `Hay un dato que el panel no reconoce («{clave}»). Recarga la página y vuelve a intentar.` En la práctica solo lo produce un cuerpo manipulado: la isla manda cinco claves                                                                                                                                               |
+| **Sesión vencida (401)**                            | `Alert tone="danger"`: `Tu sesión se cerró.` + `Vuelve a entrar desde Cuadre de Caja y guarda otra vez. No perdimos lo que escribiste.` + enlace `Volver a entrar`. Los campos **quedan como estaban**. **No se redirige**: perder el trabajo por una cookie vencida es cruel (DP12)                                                                                       |
+| **Sin permiso a mitad de sesión (403)**             | Solo alcanzable si la marca ganó una sucursal ajena entre el render y el guardado (R46), o si el acceso cambió: `Alert tone="danger"`: `Ya no puedes cambiar los colores de esta marca.` + `Puede que le hayan agregado una sucursal que tú no administras. Recarga la página.` Los controles se deshabilitan                                                              |
+| **Marca o tienda borrada (404)**                    | `Alert tone="danger"`: `Esta tienda ya no existe.` + enlace `Volver a tus tiendas`                                                                                                                                                                                                                                                                                         |
+| **Error del servidor (500)**                        | `Alert tone="danger"`: `No pudimos guardar.` + `No se cambió nada. Vuelve a intentar en un momento.` + `Reintentar`                                                                                                                                                                                                                                                        |
+| **Red caída**                                       | Igual, con `Parece que se cortó la conexión. Revisa tu internet y vuelve a intentar.` + `Reintentar`. Es el caso probable del público objetivo, así que es un botón y no un enlace                                                                                                                                                                                         |
+| **Quitar los colores, paso 1** (E38)                | El botón se sustituye **en sitio** por una confirmación en línea —mismo patrón que `Vaciar carrito` de F-010 y que `GroupStoresForm`, sin diálogo ni foco atrapado—: `¿Quitar los colores y volver a la paleta por defecto?`, con la segunda frase `Tus {N} sucursales vuelven al azul de queandabuscando.` y los botones `Sí, quitar` / `No`. El foco pasa a `Sí, quitar` |
+| **Quitar los colores, paso 2 (200)**                | Se manda `{}` (R34: nunca `null`). Al volver: campos vacíos, `Las de siempre` marcado, la maqueta con la paleta por defecto, y `Alert tone="positive"`: `Quitamos los colores. Tu marca usa la paleta por defecto.`                                                                                                                                                        |
+| **Formulario vacío guardado a mano**                | Mismo resultado, porque es la misma petición: el servidor escribe `{}`. No hay dos comportamientos para el mismo hecho                                                                                                                                                                                                                                                     |
+| **Tienda ajena o inexistente en la URL**            | **404** de Next, sin el nombre de la tienda en el cuerpo (R7, criterio 6)                                                                                                                                                                                                                                                                                                  |
+| **Dos pestañas guardando la misma marca** (E42)     | Gana la última escritura completa y no se avisa. No hay bloqueo optimista y no se finge que lo haya; la segunda pestaña ve lo suyo hasta que recargue                                                                                                                                                                                                                      |
+
+## Errores y validación
+
+**El panel nunca imprime el mensaje de Zod**: van en inglés (AGENTS.md § Idioma)
+y la UI en español. La isla **mapea el `path`** y descarta el `message`, igual
+que `src/features/admin/components/ProductForm.tsx:24-30`:
+
+| `path`                                               | Texto debajo del campo                                                                                 |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `brand`, `brandContrast`, `accent`, `accentContrast` | `Eso no es un color que el navegador entienda. Prueba con #0f62fe.`                                    |
+| `radius`                                             | `Elige una de las cuatro opciones.` (solo alcanzable con un cuerpo manipulado)                         |
+| una clave que no es ninguna de las cinco             | Al resumen: `Hay un dato que el panel no reconoce («{clave}»). Recarga la página y vuelve a intentar.` |
+| raíz (el cuerpo no era un objeto)                    | Al resumen: `No pudimos leer lo que mandaste. Recarga la página y vuelve a intentar.`                  |
+| cualquier otro                                       | `Revisa este dato.` — un texto genérico es mejor que un mensaje en inglés                              |
+
+**El resumen** va arriba del formulario, `Alert tone="danger"` (ya lleva
+`role="alert"`) dentro de un contenedor con `tabIndex={-1}` que **recibe el foco
+por programa** tras la respuesta, con el mismo `requestAnimationFrame` que ya usa
+`ProductForm`:
+
+> `No se guardó nada. Revisa 2 datos.`
+> · `Color principal: eso no es un color que el navegador entienda.`
+> · `Texto sobre el color de acento: eso no es un color que el navegador entienda.`
+
+Cada punto es un `<a href="#brand">` al campo. **La primera frase es la
+importante y va primera**: nada cambió en la base, que es literalmente el
+criterio 5.
+
+**Cuándo se valida.** Al guardar, contra el servidor. La isla **no reimplementa
+`CSS_COLOR`**: copiar ese regex en el cliente sería la segunda fuente de verdad
+que el criterio 16 persigue en el servidor. Lo único que el HTML aporta es
+`maxLength={64}` y `autoComplete="off"`. Al corregir un campo, su error se limpia
+al escribir.
+
+**Nada de `alert()`, `confirm()`, toast ni modal.** La única confirmación
+—quitar los colores— es en línea, donde está el botón.
+
+## Estructura por breakpoint
+
+360 primero, y esta vez medido (VE24). `Container` da
+`mx-auto max-w-6xl px-4 sm:px-6` y no se toca.
+
+| Zona                        | 360                                                                                                                                                                                         | 768                                                                                              | 1280                                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Tarjeta del hub (§ 11)**  | Una columna; las cuatro muestras en `flex-wrap`; el botón a todo el ancho                                                                                                                   | Igual, botón al ancho de su contenido                                                            | Igual                                                                                                                                  |
+| **Orden del editor**        | 1 cabecera, 2 paletas, 3 colores, 4 esquinas, **5 maqueta**, 6 acciones. La maqueta va **antes del botón y después de los controles**: se mira lo que se va a guardar justo donde se guarda | Igual                                                                                            | Dos columnas `lg:grid-cols-[1fr_22rem]`: controles a la izquierda, **maqueta a la derecha con `sticky top-6`**, que acompaña el scroll |
+| **Chips de paleta**         | `flex-wrap`, `min-h-11`; caben dos por fila y se leen como tres filas                                                                                                                       | Cinco en la primera fila                                                                         | Seis en una fila                                                                                                                       |
+| **Los cuatro colores**      | Un `Field` por fila; dentro, campo de texto (`flex-1`) y selector de color (`w-14 shrink-0`) en la misma fila, con `gap-2`                                                                  | `sm:grid-cols-2`: dos `Field` por fila                                                           | Igual que 768 dentro de la columna izquierda (~630 px, medido)                                                                         |
+| **Atajos `Claro`/`Oscuro`** | Debajo del campo, en fila, `min-h-11`                                                                                                                                                       | Igual                                                                                            | Igual                                                                                                                                  |
+| **Esquinas**                | Los cuatro `RadioCard` apilados, `min-h-14`, con la muestra a la derecha                                                                                                                    | Apilados (llevan muestra y frase; en fila se estrangulan)                                        | Apilados                                                                                                                               |
+| **Maqueta**                 | A todo el ancho de la tarjeta (278 px medidos)                                                                                                                                              | **Tope de 22 rem**, alineada a la izquierda: a todo el ancho deja de parecer un teléfono (VE25a) | 22 rem, que es la columna                                                                                                              |
+| **Acciones**                | Apiladas, `Guardar los colores` arriba, a todo el ancho; `Sin guardar.` debajo                                                                                                              | En fila, con `Sin guardar.` a la derecha                                                         | Igual que 768                                                                                                                          |
+| **Bloqueado (§ 12b)**       | Una columna: aviso, lista de las que faltan (una por fila), muestras en `flex-wrap`, maqueta al final                                                                                       | Igual; la lista sigue en una columna, que es como se lee una lista de nombres                    | Igual, con la maqueta a 22 rem                                                                                                         |
+| **Banners**                 | A todo el ancho, **arriba del `<form>`**, no arriba de la página                                                                                                                            | Igual                                                                                            | Igual                                                                                                                                  |
+
+**La regla en 360:** una columna, sin scroll horizontal (comprobado), una acción
+primaria, nada fijo arriba ni abajo, y **nada que llegue tarde por encima de algo
+que ya se podía tocar** — por eso la maqueta está debajo y no arriba: cambia con
+cada tecla, y una zona que cambia de altura encima del control que estás usando
+mueve el control bajo tu dedo.
+
+## Componentes de UI
+
+**Se reutilizan tal cual:** `Container`, `Card`, `Badge`, `Alert`, `Button`,
+`Field`, `RadioCard`. Los siete existen y ninguno cambia.
+
+**Ni un primitivo nuevo en `src/components/ui/`.** El ciclo 1 proponía `TextInput`
+y `TextArea` y el implementador no los construyó: `ProductForm` escribe la cadena
+de clases a mano (`ProductForm.tsx:173`, `:213`). Esta tanda **no abre ese frente**
+—son cuatro campos— y usa la misma cadena, `border-border w-full rounded-md border
+px-3 text-sm` con `min-h-11`. Extraer el primitivo sigue siendo deuda buena y
+sigue sin ser de aquí.
+
+> **Regla que no se negocia:** en `src/components/ui/` **jamás** entra
+> `"use client"`. Esos primitivos los importan componentes de servidor de la
+> tienda pública; una directiva ahí los convertiría en módulos de cliente en
+> `/[slug]` y reventaría el presupuesto de F-013 sin que nadie lo relacione con
+> el panel.
+
+**Componentes del panel**, en `src/features/admin/components/`, junto a los nueve
+que ya viven ahí:
+
+| Componente            | Qué hace                                                                                                                               | `"use client"`                           | Archivo                                                           |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------- |
+| `BrandingForm`        | § 12a entera: chips, cuatro colores, esquinas, maqueta viva, `fetch`, banners, errores por campo, confirmación de quitar, `<noscript>` | **Sí** — es isla                         | src/features/admin/components/BrandingForm.tsx (por crear)        |
+| `StorefrontPreview`   | La maqueta. La renderizan la isla (con lo tecleado) **y el servidor** (con lo guardado, en § 12b y en la primera respuesta)            | **No** — sin estado propio               | src/features/admin/components/StorefrontPreview.tsx (por crear)   |
+| `ColorTokenField`     | `Field` + texto **con `name`** + `<input type="color">` **sin `name`** + los atajos `Claro`/`Oscuro` + la nota del `#rrggbb`           | **No** — controlado desde `BrandingForm` | src/features/admin/components/ColorTokenField.tsx (por crear)     |
+| `BrandCoverageNotice` | § 12b: el aviso, la lista de las que faltan (nombre y ciudad) y la frase de qué hacer. Lo usa la pantalla; no recibe ningún `storeId`  | **No** — servidor puro                   | src/features/admin/components/BrandCoverageNotice.tsx (por crear) |
+| `ThemeSwatches`       | Las cuatro muestras + `Esquinas · …` en texto. Lo usan la tarjeta del hub (§ 11) y el estado bloqueado (§ 12b)                         | **No**                                   | src/features/admin/components/ThemeSwatches.tsx (por crear)       |
+
+**Cambios en componentes ya existentes**, los dos mínimos y ninguno gana
+directiva:
+
+| Archivo                                    | Cambio                                                                                                                           |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `src/app/admin/tiendas/[storeId]/page.tsx` | La tarjeta `Colores y contacto · En camino` se sustituye por la de § 11, en el mismo sitio                                       |
+| `src/features/theming/storeTheme.ts`       | Se **extrae** `themeCustomProperties()`, y `renderStoreTheme` serializa su salida. Ni un carácter distinto en el `<style>` (E44) |
+
+`src/features/admin/components/StoreBrandCard.tsx` **no se toca**: ya hace su
+trabajo (VE20) y meterle los colores mezclaría dos preguntas en una tarjeta que
+ya es larga.
+
+## Tokens y tema
+
+**Ni un token nuevo.** Todo de `src/theme/tokens.css`:
+
+| Uso                                                        | Token / utilidad                                                                 |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Fondo de la pantalla, de la tarjeta, de los chips          | `bg-bg`, `bg-surface`, `bg-surface-muted`                                        |
+| Bordes de campos, recuadros de sucursal, marco de muestras | `border-border`                                                                  |
+| Texto y texto secundario                                   | `text-fg`, `text-fg-muted`                                                       |
+| `Guardar los colores`, `Reintentar`, `Sí, quitar`          | `Button` primario: `bg-brand text-brand-contrast` — **el azul de la plataforma** |
+| `Quitar los colores`, `No`, chips, atajos                  | `ghost` / `secondary`                                                            |
+| Guardado, quitado                                          | `Alert tone="positive"` (que ya es `role="status"`)                              |
+| Cobertura incompleta, sin JavaScript                       | `Alert tone="warning"`                                                           |
+| 400, 401, 403, 404, 500, red                               | `Alert tone="danger"`                                                            |
+| Sin branding todavía                                       | `Alert tone="muted"`                                                             |
+| Esquinas de la propia pantalla                             | `rounded-sm\|md\|lg` — **nunca** `rounded-[--radius-lg]` (F-016)                 |
+| Sombra de la tarjeta                                       | `shadow-card`                                                                    |
+| Foco                                                       | `focus-visible:outline-brand outline-2 outline-offset-2`                         |
+
+**El panel no se viste con la marca de la tienda (R40), y en esta pantalla es lo
+más importante de la sección.** Los cinco tokens de una marca aparecen en **un
+solo sitio**: dentro del contenedor de `StorefrontPreview`. Tres razones, y la
+segunda es una trampa real: (1) el admin tiene que distinguir «mi panel» de «mi
+vitrina» para que la maqueta signifique algo; (2) un botón `Guardar los colores`
+pintado con el `brand` que el propio admin acaba de dejar ilegible es un
+callejón sin salida en la pantalla que se lo causó; (3) el panel gestiona varias
+tiendas de varias marcas y no hay una que le corresponda. Esto vale también para
+las muestras del hub (§ 11) y del estado bloqueado: son cuadrados de color
+dentro de un borde de plataforma, no superficies pintadas.
+
+**Cómo reacciona al branding de cada marca.** Solo la maqueta, y por el mismo
+mecanismo que la tienda real: propiedades personalizadas en un ancestro y
+utilidades que las leen por `var()` gracias al `@theme` plano de
+`src/theme/tokens.css`. Diferencia única: la tienda las emite en un `<style>`
+con `[data-store="slug"]` desde el servidor y la maqueta las pone en el `style`
+del contenedor, porque su valor cambia con lo que el admin teclea.
+
+**Modo oscuro.** El panel funciona (VE2). La maqueta hereda el esquema del
+dispositivo del admin, así que en oscuro enseña la vitrina en oscuro.
+Limitación aceptada, con su frase bajo la previsualización:
+`Así se ve con el modo oscuro de este dispositivo. Tus clientes con modo claro ven los mismos colores sobre fondo claro.`
+Un conmutador claro/oscuro solo para la maqueta exigiría redefinir las
+superficies con valores literales dentro del contenedor; no lo vale para cinco
+tokens.
+
+**Riesgo que queda vivo, y es de producto:** `themeTokensSchema` valida que sea
+un color CSS, no que contraste. Una marca puede dejarse los botones ilegibles en
+**todas** sus sucursales de una sola vez. La maqueta y su frase son toda la
+defensa (HD8, DP4 → a, R39). Sigue siendo deuda anotada.
+
+## Accesibilidad
+
+**Orden de foco (Tab).**
+`Panel de administración` → `← {tienda}` → (banner, si existe) → los seis chips
+de paleta → `brand` → su selector de color → `brandContrast` → su selector →
+`Claro` → `Oscuro` → `accent` → su selector → `accentContrast` → su selector →
+`Claro` → `Oscuro` → el grupo de `radius` (**un** tab al grupo, flechas dentro,
+que es lo que da `RadioCard` por ser un `<input type="radio">` real) →
+`Guardar los colores` → `Quitar los colores`. **La maqueta no está en el
+recorrido**: es `<span>` y texto.
+
+- _Tras un 400:_ el foco salta al resumen (`tabIndex={-1}` + `focus()` en un
+  `requestAnimationFrame`) y desde sus enlaces se llega a cada campo con un tab.
+- _Tras un 200:_ **el foco no se mueve.** El banner es `role="status"`: se
+  anuncia sin interrumpir y no se va solo.
+- _Confirmación de quitar:_ al abrirse, el foco va a `Sí, quitar`; con `No` o
+  `Escape` vuelve al botón que la abrió. El foco no se cae al `<body>` en ningún
+  camino.
+- _Estado bloqueado:_ el recorrido tiene **dos paradas** (volver y, si la hay,
+  la URL pública). Es correcto que sea corto: no hay nada que hacer ahí.
+
+**Semántica.**
+
+- Un `<h1>` por pantalla, `<h2>` en la tarjeta, `<h3>` en la previsualización y
+  en los dos bloques del estado bloqueado. El `<form>` con `aria-labelledby` al
+  `id` del `<h2>`.
+- Paletas y esquinas son `<fieldset><legend>`. Los chips son
+  `<button type="button">` con texto real (`Azul`), no muestras mudas: **el
+  nombre está en el DOM**, no solo el color.
+- El `<input type="color">` lleva `aria-label` propio
+  (`Elegir el color principal`), porque su `<label>` visible pertenece al campo
+  de texto y dos controles no pueden compartir uno. Y **no** es el dato: quien
+  navegue con teclado puede ignorarlo y escribir el valor.
+- Los `RadioCard` de esquinas llevan la muestra como `aria-hidden`: la forma se
+  nombra en la etiqueta (`Suaves`), no en un cuadrado.
+- La maqueta **no** es un `role="img"` con `aria-label`: es texto real —el nombre
+  de la sucursal, dos productos, dos precios, `Destacado`, `Agregar al carrito`—
+  y se lee entera. Lo que la hace comprensible sin ver un solo color es la línea
+  de resumen que va debajo (`Color principal #0f62fe · Texto sobre el
+principal: claro · Esquinas suaves`): **esa línea no es decorativa, es la
+  versión accesible de la previsualización**, y por eso se actualiza con cada
+  cambio igual que la maqueta.
+- Las sucursales que faltan son una `<ul>` de texto. Nada de color como única
+  señal, en ninguna parte de la pantalla.
+
+**Contraste y área de toque.** Todo el texto es `text-fg`/`text-fg-muted` sobre
+`bg-bg`/`bg-surface`, y **ningún tono de estado es overridable por la marca**.
+44 px mínimos, medidos a 360 en VE24: chips 44, campos 44, selector de color 44,
+atajos 44, `RadioCard` 66–80, botones 44.
+
+**Teclado.** `Enter` en cualquier campo envía el formulario (solo hay uno).
+Ningún atajo propio, ningún `tabindex` positivo, ningún diálogo modal: sin foco
+atrapado no hay foco que se escape.
+
+## Coste de cliente
+
+**El presupuesto no mide el panel, y está comprobado** (VE3 del ciclo 2, y
+`architecture.md` § Escalabilidad lo repite): `check-bundle-budget.mjs` recorre
+los `.html` de `.next/server/app` y las páginas del panel son `force-dynamic`,
+así que no emiten `.html`.
+
+| Módulo                                 | Directiva      | Por qué la necesita, contra la regla de `AGENTS.md`                                                                                                                                        | Dónde aterriza               | Estimado (gzip) |
+| -------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- | --------------- |
+| `BrandingForm`                         | `"use client"` | Estado (cinco valores + fase de envío + errores) y eventos (`onSubmit` con `fetch`, chips, atajos, selector de color). Y **la maqueta en vivo**, que es la razón de existir de la pantalla | `/admin/tiendas/*/marca` (ƒ) | ~3 KB           |
+| `StorefrontPreview`, `ColorTokenField` | —              | Sin estado propio: los controla `BrandingForm`. Viajan en su árbol, no suman módulo                                                                                                        | ídem                         | 0               |
+| § 12b, la tarjeta del hub, `loading`   | —              | **Cero módulos de cliente.** El estado bloqueado no tiene ni un control                                                                                                                    | `/admin/**`                  | 0               |
+| La tienda pública                      | —              | **No cambia nada.** `themeCustomProperties()` se extrae en `src/features/theming/storeTheme.ts`, que ya lo importa el layout **en el servidor**                                            | `/[slug]` (● / ISR)          | **0**           |
+
+**Una isla, una justificación.** Y el HTML de la primera respuesta ya trae los
+campos con sus valores y la maqueta pintada (un componente de cliente también se
+renderiza en el servidor): en una conexión lenta el admin **ve** sus colores
+antes de que llegue el JavaScript; lo que espera es poder cambiarlos.
+
+**Lo que está prohibido y hay que vigilar en el diff:** meter
+`themeCustomProperties` o Zod en el árbol de la vitrina, y `"use client"` en
+`src/components/ui/`. Son las dos únicas vías por las que esta pantalla podría
+tocar el presupuesto de `/[slug]`.
+
+## Textos
+
+Todo el microcopy, para que nadie lo invente al programar. Los valores entre
+llaves los pone el servidor.
+
+**Cabecera**
+
+- `← {nombre de la tienda}` · `Colores de tu marca`
+- Una sucursal: `Estos colores son de {marca}, tu marca. Como tienes una sola sucursal, son los de tu tienda.`
+- Varias: `Estos colores son de {marca}, tu marca: los usan tus {N} sucursales y la página que las lista. No se pueden poner distintos en una sucursal y en otra.`
+- Ninguna publicada: `Estos colores son de {marca}, tu marca. Todavía ninguna de tus sucursales es visible para tus clientes: elígelos ahora y ya van a estar cuando publiques.`
+
+**Editor**
+
+- `Colores y forma`
+- `Paletas` · `Empieza por una paleta y ajusta después.`
+- `Azul` · `Verde` · `Naranja` · `Vino` · `Turquesa` · `Grafito`
+- `Color principal` — ayuda `Un color CSS: #0f62fe, oklch(0.62 0.17 145) o un nombre como teal.`
+- `Texto sobre el color principal` — atajos `Claro` · `Oscuro`
+- `Color de acento` — ayuda `Es el color de la etiqueta «Destacado» de tus productos.`
+- `Texto sobre el color de acento` — atajos `Claro` · `Oscuro`
+- `El selector solo entiende colores en formato #rrggbb. Tu color se guarda tal como está escrito.`
+- `Esquinas`: `Rectas` · `Suaves` · `Muy redondeadas` · `Las de siempre` (con la frase `Las esquinas que trae queandabuscando.`)
+- `Vista previa de tu tienda` · `Ejemplo`
+- `Color principal {valor} · Texto sobre el principal: {claro|oscuro} · Esquinas {etiqueta}`
+- `Fíjate en que el texto del botón se lea bien.`
+- `Así se ve el catálogo de cada sucursal. La página que lista tus {N} sucursales usa los mismos colores.`
+- `Todavía no hay ninguna sucursal publicada donde verlo.`
+- `Así se ve con el modo oscuro de este dispositivo. Tus clientes con modo claro ven los mismos colores sobre fondo claro.`
+- `Guardar los colores` → `Guardando…` · `Quitar los colores` · `Sin guardar.`
+- Sin branding: `Tu marca usa la paleta por defecto.` / `Elige una paleta para que se parezca a tu negocio.`
+- `noscript`: `Para cambiar los colores necesitas activar JavaScript. Los que tienes guardados se ven aquí arriba.`
+
+**Guardado**
+
+- `Colores guardados.`
+  - 1 sucursal: `Tus clientes ya los ven en tu tienda.`
+  - N: `Tus clientes ya los ven en tus {N} sucursales y en la página que las lista.`
+  - 0 renderables: `Se van a ver en cuanto publiques tu primera sucursal desde Cuadre de Caja.`
+- Con alguna cerrada: `Una de tus sucursales está cerrada ahora mismo: cuando la abras, ya va a tener estos colores.`
+- Quitar: `¿Quitar los colores y volver a la paleta por defecto?` / `Tus {N} sucursales vuelven al azul de queandabuscando.` / `Sí, quitar` · `No`
+- Tras quitar: `Quitamos los colores. Tu marca usa la paleta por defecto.`
+
+**Cobertura incompleta (E40b)**
+
+- `Para cambiar los colores necesitas administrar las {total} sucursales de {marca}.`
+- `Los colores son de la marca, no de una sucursal: si los cambias, cambian en todas. Hoy administras {cubiertas} de {total}.`
+- `Te faltan estas sucursales`
+- `Pide el acceso en Cuadre de Caja y vuelve aquí. Mientras tanto, los cambia quien administre las {total}.`
+- `Los colores que tiene tu marca ahora` · `Así ven hoy tus clientes el catálogo de esta sucursal.`
+
+**Errores**
+
+- `No se guardó nada. Revisa {n} datos.` (`Revisa 1 dato.` en singular)
+- `Eso no es un color que el navegador entienda. Prueba con #0f62fe.`
+- `Elige una de las cuatro opciones.`
+- `Hay un dato que el panel no reconoce («{clave}»). Recarga la página y vuelve a intentar.`
+- `No pudimos leer lo que mandaste. Recarga la página y vuelve a intentar.`
+- `Tu sesión se cerró.` / `Vuelve a entrar desde Cuadre de Caja y guarda otra vez. No perdimos lo que escribiste.` / `Volver a entrar`
+- `Ya no puedes cambiar los colores de esta marca.` / `Puede que le hayan agregado una sucursal que tú no administras. Recarga la página.`
+- `Esta tienda ya no existe.` / `Volver a tus tiendas`
+- `No pudimos guardar.` / `No se cambió nada. Vuelve a intentar en un momento.` / `Reintentar`
+- `Parece que se cortó la conexión. Revisa tu internet y vuelve a intentar.`
+
+**Hub (§ 11)**
+
+- `Colores de tu marca` · `Tu marca usa la paleta por defecto.`
+- `Elegir los colores` / `Cambiar los colores`
+
+**Cargando**
+
+- `Cargando los colores de tu marca…`
+
+## Verificación
+
+`VE19`–`VE26` **están ejecutados** (§ Qué se miró), con chromium headless a 360,
+768 y 1280 px. Lo que sigue es lo que hay que comprobar cuando la pantalla
+exista. `V33`–`V38` no necesitan navegador; `V39`–`V44` sí, y **ahora hay
+herramienta**: la etapa `--visual` de `.agent/verify.sh` con
+.agent/specs/F-011/visual.mjs (por crear), que es el criterio 21 `[nuevo]`.
+
+**Fixtures**, todas de `architecture.md` § Fixtures: la marca `el-trebol` de tres
+sucursales (HD18), `COOKIE_MARCA` (las dos renderizables) y `COOKIE_PARCIAL`
+(solo una), y `tienda-dos` con su `oklch(...)`.
+
+**Sin navegador**
+
+- **V33** — `curl -s -b $COOKIE_MARCA <hub de el-trebol-centro>` contiene
+  `Colores de tu marca` y **no** contiene `En camino.`: la tarjeta vieja se fue.
+- **V34** — `curl -s -b $COOKIE_MARCA <la pantalla>` contiene los cuatro campos
+  con `name="brand"`, `name="brandContrast"`, `name="accent"`,
+  `name="accentContrast"`, un `name="radius"`, y **cero** `name` en el
+  `type="color"`: `grep -c 'type="color"[^>]*name='` → `0`. Es VE6/E43
+  convertido en aserción.
+- **V35** — Con `COOKIE_PARCIAL`, la misma URL responde **200** (no 404, no 403)
+  y el cuerpo contiene `Te faltan estas sucursales` y el nombre de la sucursal
+  que falta, y **no** contiene `name="brand"` ni `Guardar los colores`. Es E40b
+  entero en un `curl`.
+- **V36** — Ese mismo cuerpo **no** contiene el `id` de ninguna sucursal ajena:
+  `grep -c "<id de el-trebol-playa>"` → `0`. Es la condición de HS12 aplicada a
+  esta pantalla.
+- **V37** — La pantalla de una tienda que no está en la sesión → `404`, y el
+  cuerpo no trae su nombre (R7, criterio 6).
+- **V38** — `grep -rn "use client" src/components/ui/` vacío;
+  `grep -rn "features/admin" src/app/\[slug\] src/components/store` vacío;
+  `npm run build && npm run check:bundle && npm run check:theme` en 0
+  (criterios 13 y 15).
+
+**Con navegador** (los seis entran en el guion visual)
+
+- **V39** — 360 px, editor con branding guardado: sin scroll horizontal; los
+  chips, los campos, el selector de color y los atajos miden ≥ 44 px; la maqueta
+  cabe entera; el orden vertical es paletas → colores → esquinas → maqueta →
+  acciones.
+- **V40** — 360 px, **la maqueta cambia al teclear**: escribir `#0f62fe` en
+  `brand` cambia el color de la barra de la maqueta sin recargar, y el resumen
+  de texto de debajo también. Sin eso, la isla no se justifica.
+- **V41** — 768 px: dos `Field` por fila, la maqueta con su tope de 22 rem
+  (VE25a), esquinas apiladas. 1280 px: dos columnas con la maqueta `sticky`
+  acompañando el scroll sin salirse de la tarjeta.
+- **V42** — **Modo oscuro**, a 1280: la tarjeta, los `Alert` de los cuatro tonos
+  y las cuatro muestras de color se distinguen del fondo; la maqueta enseña la
+  vitrina en oscuro y la frase que lo explica está debajo.
+- **V43** — 360 px, cobertura incompleta: se lee entera sin scroll horizontal;
+  las sucursales que faltan salen con nombre y ciudad; **no hay ni un control
+  enfocable** dentro de la tarjeta salvo enlaces.
+- **V44** — Solo teclado y con lector de pantalla: el grupo de esquinas se
+  recorre con flechas; tras un 400 el foco cae en el resumen y sus enlaces
+  llevan a cada campo; tras un 200 el foco **no** se mueve y el banner se anuncia
+  una vez; la confirmación de quitar se cancela con `Escape` y el foco vuelve al
+  botón. Y con JavaScript desactivado, la pantalla **se lee entera** con su
+  `<noscript>`.
+
+## Qué del congelado se usa tal cual, qué cambia y qué se entierra
+
+| Pieza del ciclo 1                                                            | Veredicto                                     | Dónde vive ahora                                                                                    |
+| ---------------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Las seis paletas como chips sin `name`                                       | **Se usa tal cual**                           | § 12a (i). Los valores, en **DP13**                                                                 |
+| `ColorTokenField` (texto con `name` + color sin)                             | **Se usa, y ahora es criterio**               | § 12a (ii), E43, `V34`                                                                              |
+| Los cuatro `RadioCard` de `radius`                                           | **Se usa**, con la muestra rellena de `brand` | § 12a (iii), VE25b                                                                                  |
+| `themeCustomProperties()` extraído                                           | **Se usa, y sigue sin existir**               | § Cómo encaja + `architecture.md` § Componentes                                                     |
+| La maqueta con propiedades en su `style`                                     | **Se usa tal cual**                           | § 12a (iv) y § Tokens                                                                               |
+| «La maqueta enseña la cabecera de la vitrina»                                | **Resuelto mirando**                          | Enseña la **de sucursal**: es la única donde se ven los cinco tokens (VE21 vs VE22)                 |
+| «El editor pasa a `/admin/marcas/<storefront>`»                              | **Superado**                                  | /admin/tiendas/{storeId}/marca (por crear): la sesión autoriza tiendas, no marcas (HD16, R42–R43)   |
+| «Tu tienda usa la paleta por defecto», «tus clientes ya lo ven en tu tienda» | **Reescrito**                                 | § Textos: nombra la **marca** y dice a cuántas sucursales alcanza                                   |
+| «Guardado en tienda no publicada»                                            | **Reescrito**                                 | Ahora son tres casos por número de sucursales renderizables, no por `status` de una                 |
+| `PalettePreview` en el listado de tiendas                                    | **Enterrado**                                 | El listado es de tiendas y la paleta es de la marca. Las muestras viven en el hub (§ 11) y en § 12b |
+| Tarjeta 2a «Datos de Cuadre de Caja»                                         | **Ya construida**                             | En el hub desde el ciclo 1                                                                          |
+| Tarjeta 2c «Texto y contacto» y sus overrides                                | **Enterrada**                                 | DP1 → no, y ADR 0018 (e) + HD17 la vuelven innecesaria. La deuda queda en la spec (I15)             |
+| `TextInput` / `TextArea` en `src/components/ui/`                             | **Aplazado otra vez**                         | § Componentes: cuatro campos no abren ese frente                                                    |
+| «El panel no se viste con la marca»                                          | **Sigue en pie, y es R40**                    | § Tokens                                                                                            |
+| HD8 / DP4 (a): se puede guardar ilegible                                     | **Sigue en pie, y es R39**                    | § Tokens, § 12a (iv)                                                                                |
+| «No pude juzgar 360 ni 768 px» (VE18)                                        | **Cerrado**                                   | VE24: medido con chromium a los tres anchos                                                         |
+
+## Preguntas al humano
+
+Dos. Las dos bloquean la firma del plan y las dos tienen recomendación.
+
+**DP12 — `/sesion-cerrada` no existe, y ya hay código que manda gente ahí.**
+El ciclo 1 la diseñó (§ 10), `src/lib/slug.ts:41` la reserva diciendo que
+«F-011 la añadió a `src/app/`», `src/lib/slug.test.ts:64` lo fija como test…
+y en el disco no hay ninguna ruta: hoy un 401 en la pantalla de agrupar
+(`src/features/admin/components/GroupStoresForm.tsx:91`) lleva a un **404**.
+Esta tanda tiene que decidir a dónde apunta su enlace `Volver a entrar`.
+
+- (a) **Construirla en esta tanda**: un componente de servidor, cero JavaScript,
+  con `Tu sesión se cerró.` y la explicación de que se vuelve desde Cuadre de
+  Caja. Arregla de paso el camino de agrupar y el hueco VE8 del ciclo 1.
+- (b) Dejar el enlace apuntando a `/` y anotar la deuda.
+- **Recomendación: (a).** Son quince líneas, la reserva del slug ya está pagada,
+  y (b) deja al admin que perdió la sesión en la portada de marketing sin
+  entender qué pasó. Si el humano prefiere (b), el microcopy no cambia: cambia
+  el `href`.
+
+**DP13 — ¿Se aprueban estos seis valores de paleta?** DP3 aprobó los seis
+**nombres**; los valores nunca se firmaron, y son los colores que va a tener de
+un clic un negocio real. Van a src/constants/branding.ts (por crear).
+
+| Paleta     | Principal | Texto sobre el principal | Acento    | Texto sobre el acento |
+| ---------- | --------- | ------------------------ | --------- | --------------------- |
+| `Azul`     | `#0f62fe` | `#ffffff`                | `#ff832b` | `#161616`             |
+| `Verde`    | `#198038` | `#ffffff`                | `#f1c21b` | `#161616`             |
+| `Naranja`  | `#d94f1a` | `#ffffff`                | `#1192e8` | `#ffffff`             |
+| `Vino`     | `#8a1d3b` | `#ffffff`                | `#d2a106` | `#161616`             |
+| `Turquesa` | `#007d79` | `#ffffff`                | `#ff7eb6` | `#161616`             |
+| `Grafito`  | `#3d3d3d` | `#ffffff`                | `#4589ff` | `#161616`             |
+
+Y los dos atajos: `Claro` = `#ffffff`, `Oscuro` = `#161616`.
+
+- (a) **Estos seis, literales.**
+- (b) Cambiar alguno, o cambiar la lista.
+- **Recomendación: (a).** Los seis pares tienen contraste de sobra sobre su
+  fondo —que es la única defensa que HD8 deja— y son hexadecimales de seis
+  dígitos, que es lo que el `<input type="color">` sabe representar: quien
+  arranque de una paleta puede seguir ajustando con el selector sin encontrarse
+  la nota del `#rrggbb`. Cambiarlos después es editar una constante y no toca
+  ninguna tienda ya guardada.
+
+**Y una cosa que NO pregunto, por si alguien la echa de menos:** si la maqueta
+debe previsualizar también la página del selector de marca. La spec lo dejaba
+abierto y lo cerré **mirando**: `/bodega-uno` enseña un subconjunto estricto de
+los tokens que enseña `/tienda-dos` (VE21 vs VE22), así que una segunda maqueta
+añadiría altura sin añadir información. Si algún día el selector gana un
+elemento con `accent`, esto se reabre.
