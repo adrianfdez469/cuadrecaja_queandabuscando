@@ -49,6 +49,8 @@ vi.mock("@/lib/cache", () => ({
 
 const { processCatalogBatch } = await import("./processBatch");
 
+const CALLER = { businessId: "business-1", externalId: "seed-negocio-1" };
+
 function storeEvent(eventId: string) {
   return {
     eventId,
@@ -92,7 +94,7 @@ describe("processCatalogBatch() — merges a handler's touchedSlugValues into th
       touchedSlugValues: ["bodega-uno", "bodega-uno-2", "bodega-dos"],
     });
 
-    await processCatalogBatch("business-1", events);
+    await processCatalogBatch(CALLER, events);
 
     expect([...revalidateStores.mock.calls[0][0]]).toEqual(["bodega-dos"]);
     const slugArg = [...revalidateSlugs.mock.calls[0][0]].sort();
@@ -110,7 +112,7 @@ describe("processCatalogBatch() — merges a handler's touchedSlugValues into th
       touchedBrandSlug: "tienda-sola",
     });
 
-    await processCatalogBatch("business-1", events);
+    await processCatalogBatch(CALLER, events);
 
     expect([...revalidateSlugs.mock.calls[0][0]]).toEqual(["tienda-sola"]);
   });
@@ -132,7 +134,7 @@ describe("processCatalogBatch() — merges a handler's touchedSlugValues into th
         touchedSlugValues: ["bodega-uno", "bodega-uno-2", "bodega-dos"],
       });
 
-    await processCatalogBatch("business-1", events);
+    await processCatalogBatch(CALLER, events);
 
     expect(revalidateSlugs).toHaveBeenCalledOnce();
     const slugArg = [...revalidateSlugs.mock.calls[0][0]].sort();

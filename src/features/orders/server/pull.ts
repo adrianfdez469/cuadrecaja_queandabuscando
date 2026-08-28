@@ -55,11 +55,12 @@ export type PulledOrder = {
 };
 
 export async function pullOrders(
+  businessId: string,
   since: bigint,
   limit: number,
 ): Promise<{ orders: PulledOrder[]; nextCursor: string | null }> {
   const rows = await prisma.order.findMany({
-    where: { id: { gt: since } },
+    where: { businessId, id: { gt: since } },
     orderBy: { id: "asc" },
     take: limit,
     include: {
@@ -117,7 +118,7 @@ export async function pullOrders(
   const pendingIds = rows.filter((o) => o.status === "PENDING").map((o) => o.id);
   if (pendingIds.length > 0) {
     await prisma.order.updateMany({
-      where: { id: { in: pendingIds } },
+      where: { businessId, id: { in: pendingIds } },
       data: { status: "PULLED", pulledAt: new Date() },
     });
   }

@@ -185,7 +185,12 @@ describe("createStorefrontWithStore() — criterio 8, E9, E14, E16", () => {
 describe("previewSlug() — HS7", () => {
   it("reports free when nothing owns the candidate", async () => {
     slugFindUnique.mockResolvedValue(null);
-    const result = await previewSlug({ slug: "la-rampa", name: null, storeExternalId: null });
+    const result = await previewSlug({
+      slug: "la-rampa",
+      name: null,
+      storeExternalId: null,
+      businessId: "business-1",
+    });
     expect(result).toEqual({
       candidate: "la-rampa",
       available: true,
@@ -197,13 +202,19 @@ describe("previewSlug() — HS7", () => {
 
   it("disguises a reserved word and forecasts the derived value", async () => {
     slugFindUnique.mockResolvedValue(null); // the disguised value is free
-    const result = await previewSlug({ slug: "admin", name: null, storeExternalId: null });
+    const result = await previewSlug({
+      slug: "admin",
+      name: null,
+      storeExternalId: null,
+      businessId: "business-1",
+    });
     expect(result.reason).toBe("reserved");
     expect(result.available).toBe(false);
     expect(result.resolvedSlug).toBe("admin-tienda");
   });
 
   it("reports own when the caller's storeId already holds the value", async () => {
+    storeCount.mockResolvedValue(1); // seed-tienda-1 belongs to business-1
     slugFindUnique.mockResolvedValue({
       kind: "STORE",
       retiredAt: null,
@@ -214,11 +225,13 @@ describe("previewSlug() — HS7", () => {
       slug: "tienda-demo",
       name: null,
       storeExternalId: "seed-tienda-1",
+      businessId: "business-1",
     });
     expect(result).toMatchObject({ available: true, reason: "own", resolvedSlug: "tienda-demo" });
   });
 
   it("reports taken and forecasts the next free slug when someone else owns it", async () => {
+    storeCount.mockResolvedValue(1); // seed-tienda-1 belongs to business-1
     slugFindUnique
       .mockResolvedValueOnce({
         kind: "STOREFRONT",
@@ -232,12 +245,32 @@ describe("previewSlug() — HS7", () => {
       slug: "tienda-demo",
       name: null,
       storeExternalId: "seed-tienda-1",
+      businessId: "business-1",
     });
     expect(result).toMatchObject({
       available: false,
       reason: "taken",
       resolvedSlug: "tienda-demo-2",
     });
+  });
+
+  it("treats a storeExternalId owned by ANOTHER business as unknown (R10)", async () => {
+    storeCount.mockResolvedValue(0); // seed-tienda-1 does not belong to business-2
+    slugFindUnique
+      .mockResolvedValueOnce({
+        kind: "STORE",
+        retiredAt: null,
+        storefront: null,
+        store: { externalId: "seed-tienda-1" },
+      })
+      .mockResolvedValueOnce(null); // -2 is free, for uniqueSlug's forecast
+    const result = await previewSlug({
+      slug: "tienda-demo",
+      name: null,
+      storeExternalId: "seed-tienda-1",
+      businessId: "business-2",
+    });
+    expect(result).toMatchObject({ available: false, reason: "taken", storeKnown: false });
   });
 
   it("reports retired and never returns the value to the pool (R13)", async () => {
@@ -249,13 +282,23 @@ describe("previewSlug() — HS7", () => {
         store: null,
       })
       .mockResolvedValueOnce(null); // the fallback candidate is free
-    const result = await previewSlug({ slug: "vieja-tienda", name: null, storeExternalId: null });
+    const result = await previewSlug({
+      slug: "vieja-tienda",
+      name: null,
+      storeExternalId: null,
+      businessId: "business-1",
+    });
     expect(result).toMatchObject({ available: false, reason: "retired" });
   });
 
   it("reports invalid when nothing sluggable is given", async () => {
     slugFindUnique.mockResolvedValue(null);
-    const result = await previewSlug({ slug: "¿?", name: null, storeExternalId: null });
+    const result = await previewSlug({
+      slug: "¿?",
+      name: null,
+      storeExternalId: null,
+      businessId: "business-1",
+    });
     expect(result.reason).toBe("invalid");
   });
 });

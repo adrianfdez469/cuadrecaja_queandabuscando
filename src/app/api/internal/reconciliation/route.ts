@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { guardInternalRequest } from "../_lib/guard";
+import { withInternalAuth } from "../_lib/guard";
 import { storeReconciliationHash } from "@/features/sync/server/reconciliation";
 
 export const dynamic = "force-dynamic";
@@ -10,19 +10,16 @@ export const dynamic = "force-dynamic";
  * resynced. Without this, a broken sync produces no error at all — the data
  * just quietly goes stale, which is the failure mode nobody notices for weeks.
  */
-export async function GET(request: Request) {
-  const denied = guardInternalRequest(request);
-  if (denied) return denied;
-
+export const GET = withInternalAuth(async (request, caller) => {
   const storeId = new URL(request.url).searchParams.get("storeId");
   if (!storeId) {
     return NextResponse.json({ error: "MISSING_STORE_ID" }, { status: 400 });
   }
 
-  const result = await storeReconciliationHash(storeId);
+  const result = await storeReconciliationHash(caller.businessId, storeId);
   if (!result) {
     return NextResponse.json({ error: "UNKNOWN_STORE" }, { status: 404 });
   }
 
   return NextResponse.json(result);
-}
+});

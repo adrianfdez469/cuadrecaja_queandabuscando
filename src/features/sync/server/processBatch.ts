@@ -15,6 +15,7 @@ import { markFailed, markProcessed, markSkipped, recordBatch } from "./inbox";
 import { handleProduct } from "./handlers/product";
 import { handleStore } from "./handlers/store";
 import { handleCategory, handleCurrency, handleExchangeRate } from "./handlers/misc";
+import type { InternalCaller } from "./caller";
 
 /**
  * Apply one catalog batch and report per-event outcomes.
@@ -22,12 +23,18 @@ import { handleCategory, handleCurrency, handleExchangeRate } from "./handlers/m
  * Cache invalidation happens once per affected store at the end, not per event:
  * a 500-event batch touching three stores should fire six revalidations, not a
  * thousand.
+ *
+ * F-018: `caller` is the identity the guard already resolved from the token,
+ * not the payload. `recordBatch` keeps writing `SyncEvent.businessId` as the
+ * POS's own externalId (R7, unchanged shape) — every handler below instead
+ * receives `caller.businessId`, the internal id, and none of them resolves a
+ * business from the payload anymore (C6).
  */
 export async function processCatalogBatch(
-  businessId: string,
+  caller: InternalCaller,
   events: SyncEventInput[],
 ): Promise<CatalogBatchResponse> {
-  const { fresh, duplicateIds } = await recordBatch(businessId, events);
+  const { fresh, duplicateIds } = await recordBatch(caller.externalId, events);
 
   const results: EventResult[] = duplicateIds.map((eventId) => ({
     eventId,
@@ -50,7 +57,7 @@ export async function processCatalogBatch(
 
   for (const event of fresh) {
     try {
-      const outcome = await applyEvent(event);
+      const outcome = await applyEvent(event, caller.businessId);
 
       if (outcome.touchedStoreSlug) touchedStores.add(outcome.touchedStoreSlug);
       if (outcome.touchedBrandSlug) touchedBrands.add(outcome.touchedBrandSlug);
@@ -88,17 +95,17 @@ export async function processCatalogBatch(
   return summarize(results);
 }
 
-function applyEvent(event: SyncEventInput) {
+function applyEvent(event: SyncEventInput, businessId: string) {
   switch (event.entity) {
     case "STORE":
-      return handleStore(event.payload, event.operation);
+      return handleStore(event.payload, event.operation, businessId);
     case "PRODUCT":
-      return handleProduct(event.payload, event.operation);
+      return handleProduct(event.payload, event.operation, businessId);
     case "CATEGORY":
-      return handleCategory(event.payload, event.operation);
+      return handleCategory(event.payload, event.operation, businessId);
     case "CURRENCY":
       return handleCurrency(event.payload);
     case "EXCHANGE_RATE":
-      return handleExchangeRate(event.payload);
+      return handleExchangeRate(event.payload, businessId);
   }
 }

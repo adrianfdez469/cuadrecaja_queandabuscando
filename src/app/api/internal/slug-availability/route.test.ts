@@ -4,18 +4,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * HS7, criterio propuesto: `GET /api/internal/slug-availability` con token
  * válido para libre/tomado/reservado/propio; sin token → 401; sin `slug` ni
  * `name` → 400.
+ *
+ * F-018: la identidad sale del `caller` que el guard resuelve
+ * (`@/features/sync/server/caller`, mockeado aquí), no de la variable de
+ * entorno global que F-018 borra, y se
+ * pasa a `previewSlug` como `businessId` (R10, E21, E22).
  */
 
 const previewSlug = vi.fn();
+const resolveCaller = vi.fn();
+const syncConfigured = vi.fn();
 
 vi.mock("@/features/storefront/server/registry", () => ({
   previewSlug: (...args: unknown[]) => previewSlug(...args),
 }));
 
+vi.mock("@/features/sync/server/caller", () => ({
+  resolveCaller: (...args: unknown[]) => resolveCaller(...args),
+  syncConfigured: (...args: unknown[]) => syncConfigured(...args),
+}));
+
 const { GET } = await import("./route");
 
-/** `verifySyncToken` descarta cualquier token de menos de 32 caracteres. */
 const TOKEN = "t".repeat(48);
+const CALLER = { businessId: "business-a", externalId: "seed-negocio-1" };
 
 function get(query: string, { token = TOKEN }: { token?: string | null } = {}) {
   const headers: Record<string, string> = {};
@@ -25,13 +37,22 @@ function get(query: string, { token = TOKEN }: { token?: string | null } = {}) {
 
 beforeEach(() => {
   previewSlug.mockReset();
-  process.env.SYNC_TOKEN = TOKEN;
+  resolveCaller.mockReset().mockResolvedValue({ status: "ok", caller: CALLER });
+  syncConfigured.mockReset().mockResolvedValue(true);
 });
 
 describe("GET /api/internal/slug-availability", () => {
   it("responde 401 sin token", async () => {
-    const response = await get("?slug=la-rampa", { token: null });
+    resolveCaller.mockResolvedValue({ status: "unknown" });
+    const response = await get("?slug=la-rampa", { token: "x".repeat(48) });
     expect(response.status).toBe(401);
+    expect(previewSlug).not.toHaveBeenCalled();
+  });
+
+  it("responde 503 sin cabecera y sin ningún hash configurado", async () => {
+    syncConfigured.mockResolvedValue(false);
+    const response = await get("?slug=la-rampa", { token: null });
+    expect(response.status).toBe(503);
     expect(previewSlug).not.toHaveBeenCalled();
   });
 
@@ -67,6 +88,7 @@ describe("GET /api/internal/slug-availability", () => {
       slug: "la-rampa",
       name: null,
       storeExternalId: null,
+      businessId: "business-a",
     });
   });
 
@@ -88,6 +110,7 @@ describe("GET /api/internal/slug-availability", () => {
       slug: "tienda-demo",
       name: null,
       storeExternalId: "seed-tienda-9",
+      businessId: "business-a",
     });
   });
 
@@ -120,6 +143,27 @@ describe("GET /api/internal/slug-availability", () => {
     expect(body).toMatchObject({ reason: "own", available: true, storeKnown: true });
   });
 
+  it("un storeId de otro negocio se trata como desconocido (R10, E21)", async () => {
+    previewSlug.mockResolvedValue({
+      candidate: "tienda-demo",
+      available: false,
+      reason: "taken",
+      resolvedSlug: "tienda-demo-2",
+      storeKnown: false,
+    });
+
+    const response = await get("?slug=tienda-demo&storeId=seed-tienda-de-otro-negocio");
+    const body = await response.json();
+    expect(body.storeKnown).toBe(false);
+    expect(body.reason).not.toBe("own");
+    expect(previewSlug).toHaveBeenCalledWith({
+      slug: "tienda-demo",
+      name: null,
+      storeExternalId: "seed-tienda-de-otro-negocio",
+      businessId: "business-a",
+    });
+  });
+
   it("usa name cuando no viene slug", async () => {
     previewSlug.mockResolvedValue({
       candidate: "cafe-cubita",
@@ -134,6 +178,7 @@ describe("GET /api/internal/slug-availability", () => {
       slug: null,
       name: "Café Cubita",
       storeExternalId: null,
+      businessId: "business-a",
     });
   });
 });

@@ -14,18 +14,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * Por eso el aserto no es solo `status === 400`: es **leer el cuerpo**. Un test
  * que solo mirara el código de estado seguiría pasando con el bug puesto, que
  * es justo por lo que sobrevivió hasta que alguien ejecutó la ruta.
+ *
+ * F-018: la identidad ya no sale de una variable de entorno global sino del
+ * `caller` que el
+ * guard resuelve. Este archivo mockea `@/features/sync/server/caller` — el
+ * único módulo con la consulta (AP-a) — y no `@/lib/prisma`.
  */
 
 const pullOrders = vi.fn();
+const resolveCaller = vi.fn();
+const syncConfigured = vi.fn();
 
 vi.mock("@/features/orders/server/pull", () => ({
   pullOrders: (...args: unknown[]) => pullOrders(...args),
 }));
 
+vi.mock("@/features/sync/server/caller", () => ({
+  resolveCaller: (...args: unknown[]) => resolveCaller(...args),
+  syncConfigured: (...args: unknown[]) => syncConfigured(...args),
+}));
+
 const { GET } = await import("./route");
 
-/** `verifySyncToken` descarta cualquier token de menos de 32 caracteres. */
 const TOKEN = "t".repeat(48);
+const CALLER = { businessId: "business-a", externalId: "seed-negocio-1" };
 
 function get(query: string, { token = TOKEN }: { token?: string | null } = {}) {
   const headers: Record<string, string> = {};
@@ -35,21 +47,22 @@ function get(query: string, { token = TOKEN }: { token?: string | null } = {}) {
 
 beforeEach(() => {
   pullOrders.mockReset().mockResolvedValue({ orders: [], nextCursor: null });
-  process.env.SYNC_TOKEN = TOKEN;
+  resolveCaller.mockReset().mockResolvedValue({ status: "ok", caller: CALLER });
+  syncConfigured.mockReset().mockResolvedValue(true);
 });
 
 describe("GET /api/internal/orders — query válida", () => {
-  it("traslada since y limit a pullOrders como bigint y number", async () => {
+  it("traslada since y limit a pullOrders con el businessId del caller", async () => {
     const response = await get("?since=42&limit=7");
 
     expect(response.status).toBe(200);
-    expect(pullOrders).toHaveBeenCalledWith(42n, 7);
+    expect(pullOrders).toHaveBeenCalledWith("business-a", 42n, 7);
   });
 
   it("sin parámetros usa los defaults 0 y 100", async () => {
     await get("");
 
-    expect(pullOrders).toHaveBeenCalledWith(0n, 100);
+    expect(pullOrders).toHaveBeenCalledWith("business-a", 0n, 100);
   });
 
   it("devuelve tal cual lo que pullOrders produce", async () => {
@@ -97,19 +110,44 @@ describe("GET /api/internal/orders — query inválida", () => {
   });
 });
 
-describe("GET /api/internal/orders — credencial (E8)", () => {
-  it("401 sin token, sin llegar a consultar", async () => {
+describe("GET /api/internal/orders — credencial (E2–E6)", () => {
+  it("401 sin token, sin llegar a consultar pullOrders", async () => {
     const response = await get("?since=0&limit=1", { token: null });
 
     expect(response.status).toBe(401);
     expect(pullOrders).not.toHaveBeenCalled();
   });
 
-  it("503 si el servidor no tiene SYNC_TOKEN configurado", async () => {
-    delete process.env.SYNC_TOKEN;
+  it("503 sin cabecera y sin ningún hash configurado (E6, PP3)", async () => {
+    syncConfigured.mockResolvedValue(false);
+    const response = await get("?since=0&limit=1", { token: null });
+
+    expect(response.status).toBe(503);
+    expect(pullOrders).not.toHaveBeenCalled();
+  });
+
+  it("503 con un token bien formado cuando el resolutor dice unconfigured", async () => {
+    resolveCaller.mockResolvedValue({ status: "unconfigured" });
     const response = await get("?since=0&limit=1");
 
     expect(response.status).toBe(503);
+    expect(pullOrders).not.toHaveBeenCalled();
+  });
+
+  it("401 con un token que no resuelve ningún negocio", async () => {
+    resolveCaller.mockResolvedValue({ status: "unknown" });
+    const response = await get("?since=0&limit=1");
+
+    expect(response.status).toBe(401);
+    expect(pullOrders).not.toHaveBeenCalled();
+  });
+
+  it("403 con el token de un negocio inactivo", async () => {
+    resolveCaller.mockResolvedValue({ status: "inactive" });
+    const response = await get("?since=0&limit=1");
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "BUSINESS_INACTIVE" });
     expect(pullOrders).not.toHaveBeenCalled();
   });
 });

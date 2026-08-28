@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { guardInternalRequest } from "../../_lib/guard";
+import { withInternalAuth } from "../../_lib/guard";
 import { serializableIssues } from "../../_lib/issues";
 import { catalogBatchSchema } from "@/features/sync/schemas";
 import { processCatalogBatch } from "@/features/sync/server/processBatch";
+import { findCatalogMismatch } from "@/features/sync/identity";
 
 export const dynamic = "force-dynamic";
 
@@ -12,11 +13,14 @@ export const dynamic = "force-dynamic";
  * Responds 207 with a per-event result so the POS can mark its outbox rows
  * individually — a partial failure must not force it to replay what already
  * landed. Everything in `ok` is safe to mark done; only `failed` is retried.
+ *
+ * F-018 (R5, E14): a `businessId` in the body (root or any event payload
+ * that carries one) that does not match the authenticated caller aborts the
+ * WHOLE batch with 403 before `processCatalogBatch` — and so before
+ * `recordBatch` — ever runs. No `SyncEvent` row is left for a retry to
+ * report back as `duplicate`.
  */
-export async function POST(request: Request) {
-  const denied = guardInternalRequest(request);
-  if (denied) return denied;
-
+export const POST = withInternalAuth(async (request, caller) => {
   let body: unknown;
   try {
     body = await request.json();
@@ -32,8 +36,12 @@ export async function POST(request: Request) {
     );
   }
 
+  if (findCatalogMismatch(caller.externalId, parsed.data)) {
+    return NextResponse.json({ error: "BUSINESS_MISMATCH" }, { status: 403 });
+  }
+
   try {
-    const result = await processCatalogBatch(parsed.data.businessId, parsed.data.events);
+    const result = await processCatalogBatch(caller, parsed.data.events);
     return NextResponse.json(result, { status: 207 });
   } catch (error) {
     // The batch itself blew up (database unreachable, say). Report nothing as
@@ -41,4 +49,4 @@ export async function POST(request: Request) {
     console.error("[sync/catalog] batch failed", error);
     return NextResponse.json({ error: "BATCH_FAILED" }, { status: 500 });
   }
-}
+});

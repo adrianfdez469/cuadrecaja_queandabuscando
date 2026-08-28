@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { guardInternalRequest } from "../_lib/guard";
+import { withInternalAuth } from "../_lib/guard";
 import { previewSlug } from "@/features/storefront/server/registry";
 import { publicEnv } from "@/lib/env";
 
@@ -14,15 +14,13 @@ import { publicEnv } from "@/lib/env";
  *
  * Contract, aditivo, part of the still-unsent v3 announcement of
  * `docs/sync-contract.md` (§ Propuesta v3) — see the diff proposed in
- * `architecture.md` § El diff propuesto. No `businessId` on purpose: the
- * slug namespace is global, so there is no identity to impersonate.
+ * `architecture.md` § El diff propuesto. F-018: `storeId` is checked against
+ * the caller's own business (R10) — everything else stays unscoped, because
+ * the slug namespace is global.
  */
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
-  const denied = guardInternalRequest(request);
-  if (denied) return denied;
-
+export const GET = withInternalAuth(async (request, caller) => {
   const params = new URL(request.url).searchParams;
   const slug = params.get("slug");
   const name = params.get("name");
@@ -36,6 +34,7 @@ export async function GET(request: Request) {
     slug,
     name,
     storeExternalId: storeId,
+    businessId: caller.businessId,
   });
 
   return NextResponse.json(
@@ -53,4 +52,4 @@ export async function GET(request: Request) {
     },
     { headers: { "cache-control": "no-store" } },
   );
-}
+});

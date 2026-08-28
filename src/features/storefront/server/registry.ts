@@ -139,6 +139,11 @@ export type PreviewSlugInput = {
   /** The POS's `Tienda.id` (our `Store.externalId`) — decides `own` vs
    *  `taken`. `null` when the caller does not know it yet. */
   storeExternalId: string | null;
+  /** F-018: the token's own business. `storeExternalId` is treated as
+   *  unknown (R10) unless it names a store that belongs to THIS business —
+   *  the rest of the response (`candidate`/`available`/`resolvedSlug`/`url`)
+   *  stays unscoped: the slug namespace is global and public (E21, E22). */
+  businessId: string;
 };
 
 /**
@@ -151,9 +156,16 @@ export async function previewSlug(input: PreviewSlugInput): Promise<PreviewSlugR
   const seed = input.slug || input.name || "";
   const candidate = slugify(seed);
 
-  const storeKnown = input.storeExternalId
-    ? (await prisma.store.count({ where: { externalId: input.storeExternalId } })) > 0
-    : false;
+  // R10: a storeExternalId that belongs to someone else is treated as if it
+  // had never been sent — never as an oracle of another tenant's stores.
+  const ownStoreExternalId =
+    input.storeExternalId &&
+    (await prisma.store.count({
+      where: { externalId: input.storeExternalId, businessId: input.businessId },
+    })) > 0
+      ? input.storeExternalId
+      : null;
+  const storeKnown = ownStoreExternalId !== null;
 
   if (!candidate) {
     const resolvedSlug = await uniqueSlug(seed, slugTaken, { fallback: "tienda" });
@@ -186,9 +198,9 @@ export async function previewSlug(input: PreviewSlugInput): Promise<PreviewSlugR
   }
 
   const ownedByCaller =
-    input.storeExternalId != null &&
-    (row.store?.externalId === input.storeExternalId ||
-      row.storefront?.stores.some((store) => store.externalId === input.storeExternalId) === true);
+    ownStoreExternalId != null &&
+    (row.store?.externalId === ownStoreExternalId ||
+      row.storefront?.stores.some((store) => store.externalId === ownStoreExternalId) === true);
 
   if (ownedByCaller) {
     return { candidate, available: true, reason: "own", resolvedSlug: candidate, storeKnown };
@@ -387,8 +399,14 @@ export async function regroupStoreIntoBrand(input: RegroupInput): Promise<Regrou
     // DP5: the SAME function the preview screen calls (§ Agrupar dos
     // tiendas, "de dónde sale ese qué va a cambiar") — never a second
     // derivation that could promise a string this write does not produce.
-    primaryOwnSlug = (await previewSlug({ slug: null, name: primary.name, storeExternalId: null }))
-      .resolvedSlug;
+    primaryOwnSlug = (
+      await previewSlug({
+        slug: null,
+        name: primary.name,
+        storeExternalId: null,
+        businessId: primary.businessId,
+      })
+    ).resolvedSlug;
     writes.push(
       prisma.store.update({ where: { id: primary.id }, data: { slug: primaryOwnSlug } }),
       prisma.slug.create({ data: { value: primaryOwnSlug, kind: "STORE", storeId: primary.id } }),

@@ -64,7 +64,7 @@ beforeEach(() => {
 describe("pullOrders() — v2 compatibility (criterio 19)", () => {
   it("keeps every field the current pull already emits, unchanged", async () => {
     orderFindMany.mockResolvedValue([dbOrder()]);
-    const { orders } = await pullOrders(0n, 10);
+    const { orders } = await pullOrders("business-a", 0n, 10);
     const order = orders[0];
 
     expect(order).toMatchObject({
@@ -92,7 +92,7 @@ describe("pullOrders() — v2 compatibility (criterio 19)", () => {
 
   it("adds rateSnapshot and the three original-price fields per line", async () => {
     orderFindMany.mockResolvedValue([dbOrder()]);
-    const { orders } = await pullOrders(0n, 10);
+    const { orders } = await pullOrders("business-a", 0n, 10);
     const order = orders[0];
 
     expect(order.rateSnapshot).toEqual({
@@ -110,7 +110,7 @@ describe("pullOrders() — v2 compatibility (criterio 19)", () => {
     orderFindMany.mockResolvedValue([
       dbOrder({}, { originalUnitPrice: null, originalCurrencyCode: null }),
     ]);
-    const { orders } = await pullOrders(0n, 10);
+    const { orders } = await pullOrders("business-a", 0n, 10);
     const item = orders[0].items[0];
 
     expect(item.originalUnitPrice).toBe(item.unitPrice);
@@ -123,10 +123,10 @@ describe("pullOrders() — v2 compatibility (criterio 19)", () => {
       dbOrder({ id: 1n, status: "PENDING" }),
       dbOrder({ id: 2n, status: "CONFIRMED" }),
     ]);
-    await pullOrders(0n, 10);
+    await pullOrders("business-a", 0n, 10);
     expect(orderUpdateMany).toHaveBeenCalledOnce();
     expect(orderUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: { in: [1n] } } }),
+      expect.objectContaining({ where: { businessId: "business-a", id: { in: [1n] } } }),
     );
   });
 });
@@ -138,11 +138,11 @@ describe("pullOrders() — v2 compatibility (criterio 19)", () => {
 describe("pullOrders() — el cursor (criterio 1)", () => {
   it("traslada `since` al where y `limit` al take, ordenando por id ascendente", async () => {
     orderFindMany.mockResolvedValue([]);
-    await pullOrders(42n, 7);
+    await pullOrders("business-a", 42n, 7);
 
     expect(orderFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: { gt: 42n } },
+        where: { businessId: "business-a", id: { gt: 42n } },
         orderBy: { id: "asc" },
         take: 7,
       }),
@@ -151,7 +151,7 @@ describe("pullOrders() — el cursor (criterio 1)", () => {
 
   it("devuelve el id del último pedido como nextCursor cuando la página vino llena", async () => {
     orderFindMany.mockResolvedValue([dbOrder({ id: 7n }), dbOrder({ id: 9n })]);
-    const { nextCursor } = await pullOrders(0n, 2);
+    const { nextCursor } = await pullOrders("business-a", 0n, 2);
 
     // Llena significa "puede que haya más detrás": el POS tiene que volver.
     expect(nextCursor).toBe("9");
@@ -159,7 +159,7 @@ describe("pullOrders() — el cursor (criterio 1)", () => {
 
   it("devuelve null cuando la página vino a medias, porque ya prueba que no queda nada (R2)", async () => {
     orderFindMany.mockResolvedValue([dbOrder({ id: 7n })]);
-    const { nextCursor } = await pullOrders(0n, 2);
+    const { nextCursor } = await pullOrders("business-a", 0n, 2);
 
     // Este es el aserto que se rompe si alguien "arregla" nextCursor para que
     // devuelva siempre el último id: el POS entraría en un pull infinito.
@@ -168,7 +168,7 @@ describe("pullOrders() — el cursor (criterio 1)", () => {
 
   it("con la página vacía devuelve nextCursor null y no escribe nada", async () => {
     orderFindMany.mockResolvedValue([]);
-    const { orders, nextCursor } = await pullOrders(0n, 100);
+    const { orders, nextCursor } = await pullOrders("business-a", 0n, 100);
 
     expect(orders).toEqual([]);
     expect(nextCursor).toBeNull();
@@ -190,7 +190,7 @@ describe("pullOrders() — el cursor (criterio 1)", () => {
     // El tope corta un pull infinito en vez de colgar la suite: si el cursor
     // dejara de avanzar, el fallo es "esperaba 3, obtuve 10", no un timeout.
     for (let guard = 0; guard < 10; guard += 1) {
-      const { orders, nextCursor } = await pullOrders(cursor, 1);
+      const { orders, nextCursor } = await pullOrders("business-a", cursor, 1);
       seen.push(...orders.map((order) => order.id));
       if (nextCursor === null) break;
       cursor = BigInt(nextCursor);

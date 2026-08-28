@@ -10,10 +10,11 @@ import { prisma } from "@/lib/prisma";
  * differ between the two systems and would make every store look divergent.
  */
 export async function storeReconciliationHash(
+  businessId: string,
   storeExternalId: string,
 ): Promise<{ products: number; hash: string } | null> {
-  const store = await prisma.store.findUnique({
-    where: { externalId: storeExternalId },
+  const store = await prisma.store.findFirst({
+    where: { externalId: storeExternalId, businessId },
     select: { id: true },
   });
   if (!store) return null;
