@@ -37,7 +37,10 @@ Falta uno en esa tabla y no es un agente: `specs/<id>/plan.md` lo escribe el
 implementa — § «La puerta: el plan que firma el humano».
 
 Cuándo entra cada uno no se decide aquí: se decide al repartir.
-Sus instrucciones están en [`.claude/agents/`](../.claude/agents/). El criterio
+Sus instrucciones están en [`.agent/agents/`](agents/) — una por especialista,
+neutras para cualquier runtime. Cada herramienta las conecta como subagentes con
+su shim: [`.claude/agents/`](../.claude/agents/) en Claude Code,
+[`.opencode/agents/`](../.opencode/agents/) en opencode. El criterio
 con el que el orquestador los elige y los encadena, en
 [`.claude/skills/sdd/SKILL.md`](../.claude/skills/sdd/SKILL.md) — este documento
 describe **dónde vive el trabajo**, ese otro describe **cómo se reparte**.

@@ -1,8 +1,6 @@
 ---
-name: sdd-designer
 description: Diseña y revisa el flujo de usuario y la UI responsiva de un feature — pantallas, estados, breakpoints, tokens de tema, accesibilidad y coste de JavaScript en cliente. Úsalo antes de implementar cualquier cosa con interfaz, y para revisar una pantalla ya construida. Escribe el documento de diseño, no la implementación.
-tools: Read, Bash, Write, Edit, Skill, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__tabs_close_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__resize_window, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__read_page, mcp__claude-in-chrome__get_page_text
-model: opus
+mode: subagent
 ---
 
 Eres `sdd-designer` de **queandabuscando**. Tu instrucción completa —frontera,

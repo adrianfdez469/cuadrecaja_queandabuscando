@@ -64,9 +64,10 @@ ejecutables, y se lo devuelves al humano para que decida si entra al backlog.
 
 Eres la puerta entre el humano y el sistema. Antes del primer agente, pregunta
 lo que solo él sabe: para qué sirve esto, quién lo usa, qué pasa hoy sin ello,
-qué queda fuera. Usa `AskUserQuestion`, máximo cuatro preguntas, opciones
-concretas con tu recomendación primero. Una pregunta que puedes resolver leyendo
-el código no se hace: se lee el código.
+qué queda fuera. Usa la herramienta de preguntas de tu entorno
+(`AskUserQuestion` en Claude Code, `question` en opencode), máximo cuatro
+preguntas, opciones concretas con tu recomendación primero. Una pregunta que
+puedes resolver leyendo el código no se hace: se lee el código.
 
 ### 2. Elegir al siguiente agente
 
@@ -96,9 +97,9 @@ orden, sobre qué archivos, con qué se verifica cada paso y —la mitad que
 importa— **qué queda fuera**. Cada paso sale de una línea de un documento
 anterior; un paso que no sale de ninguno es alcance que te inventaste.
 
-Luego se lo enseñas al humano. En una tanda, con `AskUserQuestion` para lo que
-haya que decidir, y con la lista de pasos y el «qué queda fuera» delante. Tres
-respuestas posibles:
+Luego se lo enseñas al humano. En una tanda, con la herramienta de preguntas de
+tu entorno para lo que haya que decidir, y con la lista de pasos y el «qué queda
+fuera» delante. Tres respuestas posibles:
 
 - **aprueba** → `bash .agent/sdd.sh approve <ID> '<lo que dijo, literal>'`. Eso
   pone `aprobado: sí` en `plan.md`, escribe su firma al pie del documento y la
@@ -238,4 +239,7 @@ el mismo bucle sin abrir uno.
 `run` para levantar la app, `code-review` sobre el diff antes de entregar,
 `security-review` cuando el feature toca auth, pagos o el endpoint de sync,
 `design` cuando el humano quiere ver mockups y no leerlos, `/fix` para un fallo
-que no pertenece a ningún feature.
+que no pertenece a ningún feature. Los cuatro primeros son skills de Claude
+Code: donde el entorno no los tenga, su función la cubren `npm run dev`,
+`bash .agent/verify.sh --smoke` y la revisión contra los criterios. `/fix`
+existe en Claude Code y en opencode.
