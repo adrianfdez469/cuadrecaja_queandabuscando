@@ -18,7 +18,7 @@
  * All three are the same failure: prose that no longer matches the code, with
  * nothing to notice. Each check below turns one class of that drift red.
  *
- * Reads only .agent/, .claude/, AGENTS.md and package.json — no build needed.
+ * Reads only .agent/, .claude/, .opencode/, AGENTS.md and package.json — no build needed.
  */
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
@@ -40,6 +40,7 @@ function harnessDocs() {
   };
   walk(".agent");
   walk(".claude");
+  walk(".opencode");
   found.push("AGENTS.md", "CLAUDE.md");
   return found.filter(existsSync);
 }
