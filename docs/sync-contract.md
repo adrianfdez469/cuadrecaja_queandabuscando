@@ -1,9 +1,32 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 3** · 27 de agosto de 2026
+**Versión 4** · 28 de agosto de 2026
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
 existe y está verificado contra los casos de abajo.
+
+## Cambios respecto a la v3
+
+**Esta versión NO es aditiva en el `payload` de `PRODUCT`** (F-024, mismo
+motivo que la v3 no lo fue en autenticación: HD5, en cuadrecaja no hay nada
+desarrollado de esta integración todavía, así que no hay consumidor vivo al
+que migrar sin cortar). Lo que cambia:
+
+- **`barcodes` (lista) reemplaza a `barcode` (uno solo).** El producto llega
+  con **todos** sus códigos de barras, no con uno elegido a ciegas. `[]` es
+  válido cuando el producto no tiene ninguno.
+- **La clave `barcode` (singular) queda prohibida, no solo ausente.** Un
+  evento `PRODUCT` cuyo `payload` la incluya —con cualquier valor, incluido
+  `null`— hace que el **lote entero** responda `400 INVALID_BATCH` y no
+  escriba nada, ni siquiera los demás eventos del mismo lote (§ Vocabulario
+  de errores). Un POS que siga enviando la v3 no sincroniza catálogo en
+  absoluto hasta migrar (§ Modos de falla).
+- **La fusión de productos entre negocios sigue usando un solo código: el
+  menor de los válidos, en orden lexicográfico de cadenas.** Guardar todos
+  los códigos y decidir la identidad canónica por uno solo son decisiones
+  separadas a propósito ([ADR 0020](adr/0020-todos-los-codigos-una-sola-fusion.md)):
+  el resto del comportamiento de "Resolver identidad canónica" (§
+  Transformación en queandabuscando) no cambia.
 
 ## Cambios respecto a la v2
 
@@ -93,19 +116,21 @@ toca ninguna ruta.
 | `GET`  | `/api/internal/reconciliation?storeId=`                | —                                 | 200 `{ products, hash }`                                                         |
 | `GET`  | `/api/internal/slug-availability?slug=&name=&storeId=` | —                                 | 200 `{ candidate, available, reason, resolvedSlug, url, storeKnown, reserving }` |
 
-### Vocabulario de errores (v3)
+### Vocabulario de errores (v4)
 
-Válido para las seis rutas de arriba. Los tres primeros ya existían con otro
-nombre de variable; los tres últimos son nuevos en esta versión.
+Válido para las seis rutas de arriba. Los tres primeros de `503`/`401` ya
+existían con otro nombre de variable; los siguientes son de la v3; la fila de
+`400 INVALID_BATCH` es de la v4 (F-024).
 
-| Código | Cuerpo                            | Cuándo                                                                                                                        |
-| ------ | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `503`  | `{"error":"SYNC_NOT_CONFIGURED"}` | Ningún negocio tiene un token acuñado todavía                                                                                 |
-| `401`  | `{"error":"UNAUTHORIZED"}`        | Sin cabecera, esquema distinto de `Bearer`, token vacío/corto, o token que no resuelve ningún negocio                         |
-| `403`  | `{"error":"BUSINESS_INACTIVE"}`   | **Nuevo.** El token es válido pero ese negocio está dado de baja                                                              |
-| `403`  | `{"error":"BUSINESS_MISMATCH"}`   | **Nuevo.** El `businessId` del cuerpo (① o ②) no es el del negocio autenticado — el lote entero se rechaza, no se aplica nada |
-| `404`  | `{"error":"UNKNOWN_ORDER"}`       | **Nuevo en su causa:** el `orderId` no existe **o pertenece a otro negocio** — el mismo código en los dos casos, a propósito  |
-| `404`  | `{"error":"UNKNOWN_STORE"}`       | **Nuevo en su causa:** el `storeId` de ⑤ no existe **o pertenece a otro negocio**                                             |
+| Código | Cuerpo                                     | Cuándo                                                                                                                                                                                                                                                            |
+| ------ | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `503`  | `{"error":"SYNC_NOT_CONFIGURED"}`          | Ningún negocio tiene un token acuñado todavía                                                                                                                                                                                                                     |
+| `401`  | `{"error":"UNAUTHORIZED"}`                 | Sin cabecera, esquema distinto de `Bearer`, token vacío/corto, o token que no resuelve ningún negocio                                                                                                                                                             |
+| `400`  | `{"error":"INVALID_BATCH","issues":[...]}` | **Nuevo (v4).** El cuerpo no cumple el schema — incluida la clave `barcode` (singular) en cualquier `payload` de `PRODUCT`. Rechaza el **lote entero**, ninguna `SyncEvent` queda escrita, ni siquiera la de los demás eventos del mismo lote que sí eran válidos |
+| `403`  | `{"error":"BUSINESS_INACTIVE"}`            | El token es válido pero ese negocio está dado de baja                                                                                                                                                                                                             |
+| `403`  | `{"error":"BUSINESS_MISMATCH"}`            | El `businessId` del cuerpo (① o ②) no es el del negocio autenticado — el lote entero se rechaza, no se aplica nada                                                                                                                                                |
+| `404`  | `{"error":"UNKNOWN_ORDER"}`                | El `orderId` no existe **o pertenece a otro negocio** — el mismo código en los dos casos, a propósito                                                                                                                                                             |
+| `404`  | `{"error":"UNKNOWN_STORE"}`                | El `storeId` de ⑤ no existe **o pertenece a otro negocio**                                                                                                                                                                                                        |
 
 Un recurso de otro negocio nunca responde distinto de uno inexistente: ni
 `/orders/status`, ni `/reconciliation`, ni `/slug-availability` (que además
@@ -174,21 +199,21 @@ el lote entero se rechaza con `403 BUSINESS_MISMATCH` y no se escribe nada.
 
 #### Mapeo de nombres
 
-| Wire (inglés)        | cuadrecaja (español)                                    |
-| -------------------- | ------------------------------------------------------- |
-| `storeProductId`     | `ProductoTienda.id`                                     |
-| `productId`          | `Producto.id`                                           |
-| `storeId`            | `Tienda.id`                                             |
-| `businessId`         | `Negocio.id`                                            |
-| `localName`          | `Producto.nombre`                                       |
-| `barcode`            | `CodigoProducto.codigo`                                 |
-| `price` / `currency` | `ProductoTienda.precio` / `monedaPrecioCode`            |
-| `canonicalProductId` | `Producto.productoCanonicoId`                           |
-| `publishToStore`     | `Producto.publicarEnTienda` / `Tienda.publicarEnTienda` |
-| `availability`       | derivado de `existencia` y `umbralBajo`                 |
-| `updatedAt`          | `updatedAt` de la fila de origen                        |
+| Wire (inglés)        | cuadrecaja (español)                                        |
+| -------------------- | ----------------------------------------------------------- |
+| `storeProductId`     | `ProductoTienda.id`                                         |
+| `productId`          | `Producto.id`                                               |
+| `storeId`            | `Tienda.id`                                                 |
+| `businessId`         | `Negocio.id`                                                |
+| `localName`          | `Producto.nombre`                                           |
+| `barcodes`           | `CodigoProducto.codigo` de **todas** las filas del producto |
+| `price` / `currency` | `ProductoTienda.precio` / `monedaPrecioCode`                |
+| `canonicalProductId` | `Producto.productoCanonicoId`                               |
+| `publishToStore`     | `Producto.publicarEnTienda` / `Tienda.publicarEnTienda`     |
+| `availability`       | derivado de `existencia` y `umbralBajo`                     |
+| `updatedAt`          | `updatedAt` de la fila de origen                            |
 
-#### `payload` de `PRODUCT`
+#### `payload` de `PRODUCT` (v4)
 
 ```jsonc
 {
@@ -197,7 +222,7 @@ el lote entero se rechaza con `403 BUSINESS_MISMATCH` y no se escribe nada.
   "businessId": "uuid",
   "storeId": "uuid",
   "localName": "Refresco de cola 1.5 L",
-  "barcode": "7501031311309", // null si no tiene
+  "barcodes": ["7501031311309", "7501031311316"], // v4: lista, obligatoria, [] si no tiene ninguno
   "localCategoryId": "uuid", // null
   "price": 450,
   "currency": "CUP",
@@ -207,6 +232,19 @@ el lote entero se rechaza con `403 BUSINESS_MISMATCH` y no se escribe nada.
   "updatedAt": "2026-08-25T14:03:00.000Z", // guarda anti-rancio
 }
 ```
+
+| Campo      | Tipo       | Obligatorio   | Notas                                                                                                                                                                                         |
+| ---------- | ---------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `barcodes` | `string[]` | **sí**        | `[]` es válido. Cada elemento es texto — un GTIN con cero inicial no sobrevive a un número. Los que no son un GTIN válido (8/12/13/14 dígitos) se descartan en silencio, sin fallar el evento |
+| `barcode`  | —          | **prohibido** | Su sola presencia en el `payload` — con cualquier valor, incluido `null` — responde `400 INVALID_BATCH` del lote entero (v3 → v4, ver § Cambios respecto a la v3)                             |
+
+**La fusión sigue usando un solo código: el menor de los válidos**, en orden
+lexicográfico de cadenas — nunca por orden numérico ni por cuál llegó
+primero en la lista. Enviar los mismos códigos en otro orden no crea un
+producto canónico nuevo. Todos los códigos válidos se guardan (no solo el que
+decide la fusión); el resto del diseño de esa tabla y por qué el mismo código
+puede terminar en dos canónicos distintos está en
+[ADR 0020](adr/0020-todos-los-codigos-una-sola-fusion.md).
 
 **Nunca se envía** `costo`, `margen`, el entero de `existencia`, `Venta`,
 `MovimientoStock`, `CierrePeriodo`, `Usuario`, `Rol`, credenciales ni
@@ -343,22 +381,38 @@ la publique.
 ### Transformación en queandabuscando
 
 1. `publishToStore: false` → borrado suave del `StoreProduct`. Fin.
-2. Resolver identidad canónica:
-   - `canonicalProductId` presente → usarlo
-   - ausente pero con código de barras válido (GTIN de 8/12/13/14 dígitos) →
-     buscar o crear el canónico por EAN
+2. Resolver identidad canónica, a partir de `barcodes` normalizados
+   (espacios/guiones fuera, solo los GTIN de 8/12/13/14 dígitos válidos),
+   deduplicados y ordenados ascendente por cadena:
+   - `canonicalProductId` presente → usarlo (los códigos igual se guardan
+     contra ese canónico, paso 4)
+   - ausente pero con al menos un código válido → buscar o crear el canónico
+     por el **menor** de ellos
    - ninguno de los dos → crear canónico **huérfano** con `isExclusive: true`
 3. Crear o actualizar `StoreProduct` por `(storeId, canonicalProductId)`
-4. Crear o actualizar `ProductAlias`, `useCount++`
-5. Si el alias es **nuevo** → recalcular el `searchDocument` del canónico
+4. **(v4, F-024)** Guardar cada código válido de `barcodes` contra el
+   canónico resuelto en el paso 2, en `CanonicalBarcode`. Aditivo: se
+   insertan los que falten y no se borra ninguno, ni siquiera si un envío
+   posterior deja de mencionarlo. No aplica en la rama huérfana (no hay
+   ningún código válido que guardar) ni en el paso 1 (borrado suave: fin
+   antes de llegar aquí).
+5. Crear o actualizar `ProductAlias`, `useCount++`
+6. Si el alias es **nuevo** → recalcular el `searchDocument` del canónico
 
 El paso 2 es la degradación elegante del diseño: **nunca hay un producto que no
 se pueda publicar**. Un producto sin identidad resuelta se publica igual en su
 propia tienda, con su nombre local, y solo queda fuera del marketplace.
 
-El paso 5 es el fácil de olvidar y degrada la búsqueda en silencio. Está
+El paso 4 es deliberadamente independiente del paso 2: guardar todos los
+códigos y decidir la identidad por uno solo son decisiones separadas
+([ADR 0020](adr/0020-todos-los-codigos-una-sola-fusion.md)). Un código que ya
+es el `ean` de OTRO canónico no fusiona nada — puede terminar viviendo en dos
+canónicos a la vez, a propósito: relacionarlos es un feature futuro, no este.
+
+El paso 6 es el fácil de olvidar y degrada la búsqueda en silencio. Está
 implementado como efecto explícito del handler, no como responsabilidad de quien
-llama.
+llama. `CanonicalBarcode` nunca entra en el `searchDocument` ni en el
+`searchVector`: buscar por código de barras no es parte de este contrato.
 
 ### Respuesta
 
@@ -634,14 +688,15 @@ Más: el índice parcial de divergencia con `CREATE INDEX CONCURRENTLY`, el cron
 
 ## Modos de falla
 
-| Falla                            | Qué le pasa al usuario                                                      | Recuperación                                                                                                     |
-| -------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| La tienda está caída             | Nada: el POS sigue vendiendo                                                | La outbox no se drena, `intentos++`. Se recupera solo                                                            |
-| El POS está caído                | La tienda sirve el último snapshot y **acepta pedidos igual**               | Los pedidos esperan a que el POS vuelva a hacer pull                                                             |
-| El cron no corre                 | Precios y disponibilidad se atrasan                                         | La reconciliación lo detecta. Alerta a los 30 min                                                                |
-| Evento con payload inválido      | Ese producto queda viejo; el resto fluye                                    | `intentos > 5` → DLQ + alerta                                                                                    |
-| Se perdió `dispPublicada`        | Resincroniza todo el stock una vez                                          | Idempotente, sin intervención                                                                                    |
-| El token de un negocio se filtró | Alguien podría escribir catálogo falso a nombre de ESE negocio, ninguno más | Re-acuñar el token de ese negocio (invalida el viejo al instante, no toca a los demás). Motivo para pasar a HMAC |
+| Falla                                               | Qué le pasa al usuario                                                                                                                                                                        | Recuperación                                                                                                                                                            |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| La tienda está caída                                | Nada: el POS sigue vendiendo                                                                                                                                                                  | La outbox no se drena, `intentos++`. Se recupera solo                                                                                                                   |
+| El POS está caído                                   | La tienda sirve el último snapshot y **acepta pedidos igual**                                                                                                                                 | Los pedidos esperan a que el POS vuelva a hacer pull                                                                                                                    |
+| El cron no corre                                    | Precios y disponibilidad se atrasan                                                                                                                                                           | La reconciliación lo detecta. Alerta a los 30 min                                                                                                                       |
+| Evento con payload inválido                         | Ese producto queda viejo; el resto fluye                                                                                                                                                      | `intentos > 5` → DLQ + alerta                                                                                                                                           |
+| Se perdió `dispPublicada`                           | Resincroniza todo el stock una vez                                                                                                                                                            | Idempotente, sin intervención                                                                                                                                           |
+| El token de un negocio se filtró                    | Alguien podría escribir catálogo falso a nombre de ESE negocio, ninguno más                                                                                                                   | Re-acuñar el token de ese negocio (invalida el viejo al instante, no toca a los demás). Motivo para pasar a HMAC                                                        |
+| **Un POS todavía en v3 envía `barcode` (singular)** | **No sincroniza catálogo en absoluto**: el lote entero responde `400 INVALID_BATCH` y ni siquiera queda una `SyncEvent` para reintentar — no es un producto el que falla, es el lote completo | Migrar el payload de `PRODUCT` a `barcodes: string[]` (v4). No hay periodo de gracia ni modo de compatibilidad: es el mismo corte que hizo la v3 en autenticación (HD5) |
 
 ---
 
@@ -657,6 +712,12 @@ node scripts/send-catalog-batch.mjs --repeat        # duplicate
 node scripts/send-catalog-batch.mjs --bad-token     # 401
 node scripts/send-catalog-batch.mjs --unknown-store # skipped_not_published
 node scripts/send-catalog-batch.mjs --stale         # stale
+node scripts/send-catalog-batch.mjs --singular-barcode  # 400 INVALID_BATCH (v4, F-024)
 node scripts/send-availability-batch.mjs OUT_OF_STOCK
 node scripts/send-catalog-batch.mjs --token=<otro-token-de-otro-negocio>  # 403 BUSINESS_MISMATCH
 ```
+
+El criterio 6 de F-024 —cuántos productos canónicos comparten códigos entre
+negocios distintos— se mide con `npm run count:barcodes`
+(`scripts/count-canonical-barcodes.ts`), no con una petición HTTP: imprime
+cinco cifras y un histograma sobre la base local.

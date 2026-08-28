@@ -27,6 +27,17 @@ const THIS_FILE = fileURLToPath(import.meta.url);
  *      file's own source) so that a REAL literal `grep` for it — the exact
  *      command the criterion runs — never trips over this test file
  *      itself, the one place it is legitimately allowed to be absent.
+ *   5. F-024 G6 (C11): the v4 contract cut. `barcode` (singular) never comes
+ *      back as a payload key outside a test that exists specifically to
+ *      prove it gets rejected (`route.test.ts`'s E10 cases,
+ *      `product.db.test.ts`'s C1 case) or the schema line that declares the
+ *      prohibition itself (`schemas.ts`). TypeScript already catches a typed
+ *      `.ts` fixture that regresses this (`barcode?: never` on
+ *      `ProductPayload`, spec.md N3); this guard is for what the compiler
+ *      cannot see — `scripts/*.mjs`, raw JSON, prose.
+ *   6. F-024 G7: `CanonicalBarcode` has exactly one writer in the whole repo
+ *      — `features/sync/server/canonicalBarcodes.ts` — same discipline as
+ *      F-015's `searchVector.ts` for `searchDocument`/`searchVector`.
  */
 
 const ROOT = process.cwd();
@@ -34,13 +45,45 @@ const INTERNAL_ROUTES_DIR = join(ROOT, "src/app/api/internal");
 const HANDLERS_DIR = join(ROOT, "src/features/sync/server/handlers");
 const SRC_DIR = join(ROOT, "src");
 const SCRIPTS_DIR = join(ROOT, "scripts");
+const PRISMA_DIR = join(ROOT, "prisma");
 const ENV_EXAMPLE = join(ROOT, ".env.example");
+/** Generated Prisma client code: not our code, not linted (AGENTS.md), and
+ *  it spells every model's delegate name — including `canonicalBarcode` —
+ *  as part of its own typed API. Excluded from G6/G7 below the same way
+ *  `src/features/marketplace/server/boundaries.test.ts` excludes it. */
+const GENERATED_DIR = join(SRC_DIR, "generated");
 
 /** The identity field a handler must never read off the raw payload. */
 const PAYLOAD_BUSINESS_ID = ["payload", ".businessId"].join("");
 /** The removed global env var (C16) — halved so this file cannot itself
  *  trip the literal `grep` the criterion runs. */
 const REMOVED_GLOBAL_TOKEN_VAR = ["SYNC", "_TOKEN"].join("");
+/** F-024 (G6): the forbidden v4 payload key, as a regex so `barcodes:`
+ *  (after `barcode` comes an `s`) never matches. The `\s*` between the two
+ *  halves also means this file's OWN source — which spells the pattern out
+ *  for documentation — never satisfies the literal `grep -rn "barcode:"`
+ *  criterion C11 runs, the same trick `REMOVED_GLOBAL_TOKEN_VAR` uses above. */
+const FORBIDDEN_BARCODE_KEY = /\bbarcode\s*:/;
+/** F-024 (G6): files where the singular key legitimately appears — the
+ *  schema line that declares the prohibition (R2) — never a "forgotten
+ *  fixture". Test files are excluded from the scan entirely below: a typed
+ *  `.test.ts` fixture that regresses is already a compile error (N3), and
+ *  the handful that deliberately send the OLD shape to prove it 400s
+ *  (`route.test.ts`, `product.db.test.ts`) are the point of those tests, not
+ *  an oversight. */
+const SYNC_SCHEMAS_FILE = join(SRC_DIR, "features/sync/schemas.ts");
+/** F-024 (G6): the smoke script's `--singular-barcode` flag deliberately
+ *  sends the removed v3 shape to demonstrate the whole-batch 400 (E10) —
+ *  the same kind of legitimate exception as `SYNC_SCHEMAS_FILE` above, not a
+ *  fixture that forgot to migrate. */
+const SEND_CATALOG_BATCH_SCRIPT = join(SCRIPTS_DIR, "send-catalog-batch.mjs");
+/** F-024 (G7): the one file allowed to name the `canonicalBarcode` Prisma
+ *  delegate or the `"CanonicalBarcode"` table. */
+const CANONICAL_BARCODE_WRITER_FILE = join(SRC_DIR, "features/sync/server/canonicalBarcodes.ts");
+/** F-024 (G7): the delegate access (`db.canonicalBarcode.foo`) or the raw
+ *  table name in quotes — never the module PATH, which every legitimate
+ *  caller (`product.ts`, `dbFixtures.ts`, `prisma/seed.ts`) imports by. */
+const CANONICAL_BARCODE_TABLE_TOUCH = /\.canonicalBarcode\b|"CanonicalBarcode"/;
 
 function listFiles(dir: string): string[] {
   const out: string[] = [];
@@ -107,6 +150,47 @@ describe("/api/internal/* boundaries (F-018)", () => {
 
     const offenders = files.filter((file) =>
       readFileSync(file, "utf8").includes(REMOVED_GLOBAL_TOKEN_VAR),
+    );
+    expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
+  });
+
+  it("G6 (F-024, C11): the removed singular `barcode` payload key never reappears outside a test or the schema that forbids it", () => {
+    const files = [
+      ...listFiles(SRC_DIR),
+      ...listFiles(SCRIPTS_DIR),
+      ...listFiles(PRISMA_DIR).filter((f) => f.endsWith(".ts")),
+    ].filter(
+      (file) =>
+        file !== THIS_FILE &&
+        file !== SYNC_SCHEMAS_FILE &&
+        file !== SEND_CATALOG_BATCH_SCRIPT &&
+        !file.startsWith(GENERATED_DIR) &&
+        !file.endsWith(".test.ts") &&
+        !file.endsWith(".test.tsx"),
+    );
+    // Not vacuous: there is a real, non-empty set of files to scan.
+    expect(files.length).toBeGreaterThan(0);
+
+    const offenders = files.filter((file) =>
+      FORBIDDEN_BARCODE_KEY.test(readFileSync(file, "utf8")),
+    );
+    expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
+  });
+
+  it("G7 (F-024): exactly one production file touches CanonicalBarcode — the dedicated writer/reader module", () => {
+    const files = listFiles(SRC_DIR).filter(
+      (file) =>
+        !file.startsWith(GENERATED_DIR) &&
+        !file.endsWith(".test.ts") &&
+        !file.endsWith(".test.tsx"),
+    );
+    // Not vacuous: there is a real, non-empty set of files to scan.
+    expect(files.length).toBeGreaterThan(0);
+
+    const offenders = files.filter(
+      (file) =>
+        file !== CANONICAL_BARCODE_WRITER_FILE &&
+        CANONICAL_BARCODE_TABLE_TOUCH.test(readFileSync(file, "utf8")),
     );
     expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
   });

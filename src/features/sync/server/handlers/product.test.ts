@@ -26,6 +26,7 @@ const productAliasFindUnique = vi.fn();
 const productAliasUpdate = vi.fn();
 const productAliasCreate = vi.fn();
 const writeSearchDocumentMock = vi.fn();
+const canonicalBarcodeCreateMany = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -37,6 +38,9 @@ vi.mock("@/lib/prisma", () => ({
     canonicalProduct: {
       findUnique: (...a: unknown[]) => canonicalProductFindUnique(...a),
       create: (...a: unknown[]) => canonicalProductCreate(...a),
+    },
+    canonicalBarcode: {
+      createMany: (...a: unknown[]) => canonicalBarcodeCreateMany(...a),
     },
     localCategory: { findUnique: (...a: unknown[]) => localCategoryFindUnique(...a) },
     productAlias: {
@@ -60,7 +64,7 @@ function payload(overrides: Partial<Record<string, unknown>> = {}) {
     businessId: "seed-negocio-1",
     storeId: "seed-tienda-1",
     localName: "Refresco de cola 1.5 L",
-    barcode: "7501031311309",
+    barcodes: ["7501031311309"],
     localCategoryId: null,
     price: 499,
     currency: "CUP",
@@ -96,6 +100,7 @@ beforeEach(() => {
   productAliasUpdate.mockReset().mockResolvedValue({ id: "alias-1" });
   productAliasCreate.mockReset();
   writeSearchDocumentMock.mockReset().mockResolvedValue(1);
+  canonicalBarcodeCreateMany.mockReset().mockResolvedValue({ count: 1 });
 });
 
 const PANEL_COLUMNS = [
@@ -202,5 +207,77 @@ describe("handleProduct() search indexing (F-015, E1-E4)", () => {
       "canon-1",
       buildSearchDocument("Refresco de cola 1.5 L", ["Coca-Cola 1.5L"]),
     );
+  });
+});
+
+describe("handleProduct() barcode recording (F-024, R10)", () => {
+  it("records the normalized barcodes against the resolved canonical, between the offer write and the alias", async () => {
+    const callOrder: string[] = [];
+    storeProductUpdate.mockImplementation(async () => {
+      callOrder.push("storeProduct.update");
+      return { id: "product-1" };
+    });
+    canonicalBarcodeCreateMany.mockImplementation(async () => {
+      callOrder.push("canonicalBarcode.createMany");
+      return { count: 1 };
+    });
+    productAliasUpdate.mockImplementation(async () => {
+      callOrder.push("productAlias.update");
+      return { id: "alias-1" };
+    });
+
+    const outcome = await handleProduct(
+      payload({ barcodes: ["7501031311309", "7501031311316"] }),
+      "UPDATE",
+      "business-1",
+    );
+
+    expect(outcome.status).toBe("processed");
+    expect(canonicalBarcodeCreateMany).toHaveBeenCalledWith({
+      data: [
+        { canonicalProductId: "canon-1", ean: "7501031311309" },
+        { canonicalProductId: "canon-1", ean: "7501031311316" },
+      ],
+      skipDuplicates: true,
+    });
+    expect(callOrder).toEqual([
+      "storeProduct.update",
+      "canonicalBarcode.createMany",
+      "productAlias.update",
+    ]);
+  });
+
+  it("a stale event never calls the barcode writer (E15)", async () => {
+    storeProductFindUnique.mockResolvedValue({
+      id: "product-1",
+      sourceUpdatedAt: new Date("2026-08-26T12:00:00.000Z"),
+      canonicalProductId: "canon-1",
+    });
+
+    const outcome = await handleProduct(payload(), "UPDATE", "business-1");
+
+    expect(outcome.status).toBe("stale");
+    expect(canonicalBarcodeCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("a DELETE never calls the barcode writer, even with barcodes in the payload (E14)", async () => {
+    const outcome = await handleProduct(payload(), "DELETE", "business-1");
+
+    expect(outcome.status).toBe("processed");
+    expect(canonicalBarcodeCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("publishToStore: false never calls the barcode writer (E14)", async () => {
+    const outcome = await handleProduct(payload({ publishToStore: false }), "UPDATE", "business-1");
+
+    expect(outcome.status).toBe("processed");
+    expect(canonicalBarcodeCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("an empty barcodes list never calls the writer — no round trip (E9)", async () => {
+    const outcome = await handleProduct(payload({ barcodes: [] }), "UPDATE", "business-1");
+
+    expect(outcome.status).toBe("processed");
+    expect(canonicalBarcodeCreateMany).not.toHaveBeenCalled();
   });
 });

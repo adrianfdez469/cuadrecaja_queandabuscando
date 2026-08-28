@@ -2,9 +2,13 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
-import { buildSearchDocument } from "../src/lib/canonical";
+import { buildSearchDocument, normalizeBarcodes } from "../src/lib/canonical";
 import { RESERVED_SLUGS, slugify } from "../src/lib/slug";
 import { writeSearchDocument } from "../src/features/marketplace/server/searchVector";
+import {
+  countCanonicalBarcodes,
+  recordCanonicalBarcodes,
+} from "../src/features/sync/server/canonicalBarcodes";
 import { mintSyncToken } from "../src/lib/syncAuth";
 
 /**
@@ -40,6 +44,13 @@ const RATES = [
 type SeedProduct = {
   name: string;
   ean?: string;
+  /** F-024: extra barcodes the same physical product also carries, beyond
+   *  `ean` (still the fusion key — never turned into an `eans: string[]`,
+   *  which would force twenty fixtures to pick which entry is the key and
+   *  could move a canonical C9 requires invariant). Recorded through the
+   *  same writer the sync uses (`recordCanonicalBarcodes`), never a bespoke
+   *  `createMany`. */
+  extraEans?: readonly string[];
   category: string;
   price: string;
   currency: string;
@@ -55,6 +66,11 @@ const DEMO_PRODUCTS: SeedProduct[] = [
   {
     name: "Refresco de cola 1.5 L",
     ean: "7501031311309",
+    // F-024 (architecture.md § Qué cambia en los datos sembrados): the demo
+    // product with three codes, so criterio 6's histogram has a hole at 3
+    // without moving the canonical/StoreProduct counts C4/C9 require
+    // invariant — these two never collide with any other `ean` in this file.
+    extraEans: ["7501031318888", "7501031319999"],
     category: "Bebidas",
     price: "450",
     currency: "CUP",
@@ -516,6 +532,7 @@ async function main() {
     canonical: await prisma.canonicalProduct.count(),
     aliases: await prisma.productAlias.count(),
     products: await prisma.storeProduct.count(),
+    barcodes: await countCanonicalBarcodes(prisma),
   };
   console.log("Done:", counts);
 }
@@ -898,6 +915,15 @@ async function upsertCanonical(product: SeedProduct, businessId: string): Promis
       canonical.name,
       aliases.map((alias) => alias.text),
     ),
+  );
+
+  // F-024: same writer the sync uses (never a bespoke `createMany`), fed
+  // `ean` plus whatever `extraEans` this fixture declares. Additive and
+  // idempotent (R6/R8): a second `npm run seed` inserts 0 new rows (E17).
+  await recordCanonicalBarcodes(
+    prisma,
+    canonical.id,
+    normalizeBarcodes([product.ean, ...(product.extraEans ?? [])]),
   );
 
   return canonical.id;

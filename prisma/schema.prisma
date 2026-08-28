@@ -318,9 +318,29 @@ model CanonicalProduct {
   globalCategory GlobalCategory? @relation(fields: [globalCategoryId], references: [id])
   aliases        ProductAlias[]
   storeProducts  StoreProduct[]
+  barcodes       CanonicalBarcode[]
 
   @@index([globalCategoryId])
   @@index([isExclusive])
+}
+
+/// Every valid barcode of a canonical product (F-024). ADDITIVE: rows are
+/// inserted and never deleted, not even when the POS stops sending a code —
+/// no `businessId` here means a row does not say WHO contributed it, so
+/// deleting on one business's behalf would delete another's (R6, ADR 0020).
+/// `ean` is unique PER canonical, never globally: the same code living in two
+/// canonicals is the fact the F-024 measurement exists to count (R7).
+model CanonicalBarcode {
+  id                 String   @id @default(uuid())
+  canonicalProductId String
+  /// Already normalized: digits only, length 8/12/13/14.
+  ean                String
+  createdAt          DateTime @default(now())
+
+  canonicalProduct CanonicalProduct @relation(fields: [canonicalProductId], references: [id], onDelete: Cascade)
+
+  @@unique([canonicalProductId, ean])
+  @@index([ean])
 }
 
 /// How each business names a canonical product. Feeds `searchDocument`.

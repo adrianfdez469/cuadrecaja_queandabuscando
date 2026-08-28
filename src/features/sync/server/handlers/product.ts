@@ -3,6 +3,7 @@ import { buildSearchDocument, resolveCanonicalIdentity } from "@/lib/canonical";
 import { uniqueSlug } from "@/lib/slug";
 import { canonicalSlug } from "@/lib/publicSlug";
 import { writeSearchDocument } from "@/features/marketplace/server/searchVector";
+import { recordCanonicalBarcodes } from "../canonicalBarcodes";
 import type { ProductPayload } from "../../schemas";
 import { SKIPPED, STALE, type HandlerOutcome } from "./types";
 
@@ -12,16 +13,22 @@ import { SKIPPED, STALE, type HandlerOutcome } from "./types";
  *   1. publishToStore = false  -> soft-delete and stop
  *   2. resolve canonical identity (explicit id | EAN | orphan)
  *   3. upsert StoreProduct by (storeId, canonicalProductId)
- *   4. upsert ProductAlias, useCount++
- *   5. if the alias is new, recompute the canonical's searchDocument
+ *   4. record every valid barcode against the resolved canonical (F-024)
+ *   5. upsert ProductAlias, useCount++
+ *   6. if the alias is new, recompute the canonical's searchDocument
  *
- * Step 5 is the one that is easy to forget and degrades search silently, so it
+ * Step 6 is the one that is easy to forget and degrades search silently, so it
  * lives here as an explicit effect rather than as the caller's responsibility.
  * F-015: every write of `searchDocument` (the three canonical creates below,
  * and the alias-recompute at the end of `recordAlias`) goes through
  * `writeSearchDocument` (`@/features/marketplace/server/searchVector`), which
  * writes `searchDocument` AND `searchVector` in the same UPDATE — there is no
  * separate reindex pass, and no other place in the repo writes either column.
+ *
+ * F-024 (R10): step 4 goes AFTER the StoreProduct write and BEFORE the alias,
+ * never before the stale-write guard and never on the DELETE/unpublish path
+ * (both return earlier, above where identity is even resolved) — a stale
+ * event or a soft delete must not write any barcode (E14, E15).
  *
  * Note the absence of a $transaction: the Supavisor pooler runs in transaction
  * mode, where a query on the global client inside $transaction deadlocks. Each
@@ -87,7 +94,7 @@ export async function handleProduct(
     };
   }
 
-  const canonicalId = await resolveCanonical(payload, store.id);
+  const { canonicalId, barcodes } = await resolveCanonical(payload, store.id);
   const localCategoryId = await resolveLocalCategory(payload, store.businessId);
 
   const synced = {
@@ -130,6 +137,12 @@ export async function handleProduct(
         select: { id: true },
       });
 
+  // F-024 (R10): between the StoreProduct write and the alias, so a stale
+  // event or a soft delete (both returned above) never write a barcode, and
+  // so a StoreProduct that failed to write (a `@unique` clash) never leaves
+  // codes attached to an offer that does not exist.
+  await recordCanonicalBarcodes(prisma, canonicalId, barcodes);
+
   await recordAlias(canonicalId, payload.localName, store.businessId);
 
   return {
@@ -145,50 +158,63 @@ export async function handleProduct(
  * canonical id nor a usable barcode still gets published, as an orphan
  * canonical that is excluded from the marketplace. There is never a product
  * that cannot be published.
+ *
+ * F-024: also returns the normalized/deduplicated/sorted barcode list so the
+ * caller can record it against whichever canonical id this resolves to —
+ * including the explicit-id branch, where the identity does not come from
+ * the list at all but the codes still get stored (E13). Never write
+ * `CanonicalProduct.ean` here beyond what already happens on create: setting
+ * it to `barcodes[0]` on the explicit branch could collide with another
+ * canonical's `@unique` and strand the event in `failed` forever, since a
+ * retry hits the same collision (§ Antipatrones, architecture.md).
  */
-async function resolveCanonical(payload: ProductPayload, storeId: string): Promise<string> {
+async function resolveCanonical(
+  payload: ProductPayload,
+  storeId: string,
+): Promise<{ canonicalId: string; barcodes: readonly string[] }> {
   const resolution = resolveCanonicalIdentity({
     canonicalProductId: payload.canonicalProductId,
-    barcode: payload.barcode,
+    barcodes: payload.barcodes,
   });
+  const { identity, barcodes } = resolution;
 
-  if (resolution.strategy === "explicit") {
+  if (identity.strategy === "explicit") {
     const found = await prisma.canonicalProduct.findUnique({
-      where: { id: resolution.canonicalProductId },
+      where: { id: identity.canonicalProductId },
       select: { id: true },
     });
-    if (found) return found.id;
+    if (found) return { canonicalId: found.id, barcodes };
     // The POS pointed at a canonical this side has never seen. Create it with
     // the id the POS chose, so both systems agree on the identity.
     const created = await prisma.canonicalProduct.create({
       data: {
-        id: resolution.canonicalProductId,
+        id: identity.canonicalProductId,
         name: payload.localName,
         imageUrl: payload.imageUrl ?? null,
       },
       select: { id: true },
     });
     await writeSearchDocument(prisma, created.id, buildSearchDocument(payload.localName, []));
-    return created.id;
+    return { canonicalId: created.id, barcodes };
   }
 
-  if (resolution.strategy === "by-ean") {
+  if (identity.strategy === "by-ean") {
     const existing = await prisma.canonicalProduct.findUnique({
-      where: { ean: resolution.ean },
+      where: { ean: identity.ean },
       select: { id: true },
     });
-    if (existing) return existing.id;
+    if (existing) return { canonicalId: existing.id, barcodes };
 
     const created = await prisma.canonicalProduct.create({
       data: {
-        ean: resolution.ean,
+        ean: identity.ean,
         name: payload.localName,
         imageUrl: payload.imageUrl ?? null,
       },
       select: { id: true },
     });
     await writeSearchDocument(prisma, created.id, buildSearchDocument(payload.localName, []));
-    return created.id;
+    return { canonicalId: created.id, barcodes };
   }
 
   // Orphan. Reuse the one already attached to this product if there is one,
@@ -208,7 +234,7 @@ async function resolveCanonical(payload: ProductPayload, storeId: string): Promi
     where: { storeId, externalId: payload.storeProductId },
     select: { canonicalProductId: true },
   });
-  if (reusable) return reusable.canonicalProductId;
+  if (reusable) return { canonicalId: reusable.canonicalProductId, barcodes };
 
   const created = await prisma.canonicalProduct.create({
     data: {
@@ -219,7 +245,7 @@ async function resolveCanonical(payload: ProductPayload, storeId: string): Promi
     select: { id: true },
   });
   await writeSearchDocument(prisma, created.id, buildSearchDocument(payload.localName, []));
-  return created.id;
+  return { canonicalId: created.id, barcodes };
 }
 
 async function resolveLocalCategory(

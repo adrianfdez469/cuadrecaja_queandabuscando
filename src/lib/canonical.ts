@@ -10,30 +10,72 @@
  * id nor a barcode still gets published, as an "orphan" canonical that is
  * visible in its own store and excluded from the marketplace. There is never a
  * product that cannot be published.
+ *
+ * F-024 (ADR 0020): the POS sends every barcode a product has, not one. The
+ * fusion still resolves by a SINGLE code — the smallest in ascending string
+ * order of the valid ones — but every valid code is returned alongside the
+ * identity so the caller can persist all of them. `barcodes[0]` IS that
+ * smallest code because the list arrives already normalized/deduplicated/
+ * sorted, so R4 (identity by one code) and the reorder-invariance criterion
+ * hold by construction, not by caller discipline.
  */
 
-export type CanonicalResolution =
+/** The three branches of ADR 0004. Was `CanonicalResolution["strategy"]`
+ *  fields before F-024; renamed because `CanonicalResolution` now names the
+ *  pair below. */
+export type CanonicalIdentity =
   | { strategy: "explicit"; canonicalProductId: string }
   | { strategy: "by-ean"; ean: string }
   | { strategy: "orphan"; isExclusive: true };
 
+/** The identity AND what to store. Returned together because they come out
+ *  of the same computation: normalizing the list is what picks the fusion
+ *  code (R4). Invariant: `identity.strategy === "orphan"` implies
+ *  `barcodes.length === 0` (E7/E9 — nothing survives normalization). */
+export type CanonicalResolution = {
+  identity: CanonicalIdentity;
+  /** Normalized, deduplicated, sorted ascending (R3). `[]` when nothing in
+   *  the input was a usable GTIN. */
+  barcodes: readonly string[];
+};
+
 export type CanonicalInput = {
   canonicalProductId?: string | null;
-  barcode?: string | null;
+  /** F-024 v4: the full list. Elements `normalizeBarcode` rejects are
+   *  dropped here, not by the caller. */
+  barcodes?: readonly (string | null | undefined)[] | null;
 };
 
 export function resolveCanonicalIdentity(input: CanonicalInput): CanonicalResolution {
+  const barcodes = normalizeBarcodes(input.barcodes);
   const explicit = input.canonicalProductId?.trim();
   if (explicit) {
-    return { strategy: "explicit", canonicalProductId: explicit };
+    return { identity: { strategy: "explicit", canonicalProductId: explicit }, barcodes };
   }
 
-  const ean = normalizeBarcode(input.barcode);
-  if (ean) {
-    return { strategy: "by-ean", ean };
+  if (barcodes.length > 0) {
+    return { identity: { strategy: "by-ean", ean: barcodes[0] }, barcodes };
   }
 
-  return { strategy: "orphan", isExclusive: true };
+  return { identity: { strategy: "orphan", isExclusive: true }, barcodes };
+}
+
+/**
+ * R3: `normalizeBarcode` element by element, drops the `null`s, deduplicates
+ * and sorts with `Array.prototype.sort()` with NO comparator — codeunit
+ * comparison, never numeric, never `localeCompare`. That is what makes
+ * reordering the same list resolve to the same identity (E3).
+ */
+export function normalizeBarcodes(
+  raw: readonly (string | null | undefined)[] | null | undefined,
+): string[] {
+  if (!raw) return [];
+  const seen = new Set<string>();
+  for (const candidate of raw) {
+    const normalized = normalizeBarcode(candidate);
+    if (normalized) seen.add(normalized);
+  }
+  return [...seen].sort();
 }
 
 /**
