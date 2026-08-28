@@ -7,6 +7,7 @@ import {
 } from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
 import { publicEnv } from "@/lib/env";
+import { CATALOG_EAGER_IMAGE_COUNT } from "@/constants/media";
 import { Container } from "@/components/ui/Container";
 import { Alert } from "@/components/ui/Alert";
 import { ProductCard } from "@/components/store/ProductCard";
@@ -147,13 +148,15 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
           <p className="text-fg-muted mt-10">Esta tienda todavía no tiene productos publicados.</p>
         ) : (
           <ul className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {products.map((product) => (
+            {products.map((product, index) => (
               <li key={product.id}>
                 <ProductCard
                   product={product}
                   storeSlug={store.canonicalSlug}
                   displayCurrency={store.baseCurrencyCode}
                   rates={rates}
+                  eager={index < CATALOG_EAGER_IMAGE_COUNT}
+                  priority={index === 0}
                 />
               </li>
             ))}

@@ -1,5 +1,8 @@
 // Loaded explicitly: `tsx prisma/seed.ts` does not go through prisma.config.ts.
 import "dotenv/config";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { buildSearchDocument, normalizeBarcodes } from "../src/lib/canonical";
@@ -11,6 +14,10 @@ import {
   recordCanonicalBarcodes,
 } from "../src/features/sync/server/canonicalBarcodes";
 import { mintSyncToken } from "../src/lib/syncAuth";
+import { detectImageMime, extensionForMime, isAllowedImageMime } from "../src/lib/imageType";
+import { encodeImageVariants } from "../src/lib/imageEncoder";
+import { publicUrlFor, storageAvailability, uploadStoreObjects } from "../src/lib/supabase/storage";
+import { IMAGE_ORIGINAL_BASENAME } from "../src/constants/media";
 
 /**
  * Development seed.
@@ -366,6 +373,11 @@ async function main() {
     categories,
     globalCategories,
   });
+
+  // F-023 (I5, criterio 3): the ONLY store whose products get a real image —
+  // exactly the 15 of `tienda-demo`, the catalog the 300 KB budget's own
+  // arithmetic (300 KB ÷ 15 ≈ 20 KB/variante) is written against.
+  await seedProductImages("seed-tienda-1");
 
   await seedStore({
     businessId: business.id,
@@ -903,6 +915,107 @@ async function seedBrandWithBranches(input: {
       });
     }
   }
+}
+
+/**
+ * F-023 (I5, architecture.md § Sembrar una imagen de verdad): uploads the
+ * SAME encoded fixture (`prisma/fixtures/producto-demo.jpg`) under every
+ * product of `tienda-demo`, by the panel's own pipeline (encode once, upload
+ * the full five-object set per image). Two things that make this survive a
+ * repeated `npm run seed` and a CI with no Storage at all:
+ *
+ * 1. **Skips entirely when Storage isn't reachable** — the same discipline
+ *    `.agent/init.sh` already applies to the emulator: a warning, never a
+ *    failed seed. The CI runs `npm run seed` twice and has no `docker
+ *    compose` at all.
+ * 2. **A deterministic directory per product** (`deterministicImageUuid`,
+ *    NOT `randomUUID()`) plus `{ upsert: true }` and an ASSIGNED array
+ *    (`imageUrls: [url]`, never `push`): the second run re-writes the exact
+ *    same five objects per product and leaves `imageUrls` exactly as long as
+ *    the first run did.
+ */
+async function seedProductImages(storeExternalId: string): Promise<void> {
+  const availability = storageAvailability();
+  if (!availability.ok) {
+    console.log(
+      `Seed: Storage no disponible (${availability.reason}) — se omiten las imágenes de ${storeExternalId}.`,
+    );
+    return;
+  }
+
+  const store = await prisma.store.findUnique({
+    where: { externalId: storeExternalId },
+    select: { id: true },
+  });
+  if (!store) return;
+
+  const fixturePath = path.join(__dirname, "fixtures", "producto-demo.jpg");
+  const bytes = await readFile(fixturePath);
+  const mime = detectImageMime(bytes);
+  if (!mime || !isAllowedImageMime(mime)) {
+    console.error(`Seed: ${fixturePath} no es una imagen reconocida — se omite.`);
+    return;
+  }
+
+  const encoded = await encodeImageVariants(bytes, mime);
+  if (!encoded.ok) {
+    console.error(`Seed: no se pudo codificar el fixture de imagen (${encoded.reason}).`);
+    return;
+  }
+  const ext = extensionForMime(mime);
+
+  const products = await prisma.storeProduct.findMany({
+    where: { storeId: store.id },
+    select: { id: true },
+  });
+
+  for (const product of products) {
+    const uuid = deterministicImageUuid(product.id);
+    const dir = `stores/${store.id}/products/${product.id}/${uuid}/`;
+    const originalPath = `${dir}${IMAGE_ORIGINAL_BASENAME}.${ext}`;
+
+    const uploaded = await uploadStoreObjects([
+      { path: originalPath, bytes, contentType: mime, upsert: true },
+      ...encoded.variants.map((variant) => ({
+        path: `${dir}w${variant.width}.${variant.format}`,
+        bytes: variant.bytes,
+        contentType: variant.contentType,
+        upsert: true,
+      })),
+    ]);
+    if (!uploaded.ok) {
+      console.error(`Seed: fallo subiendo imágenes de ${product.id}: ${uploaded.reason}`);
+      continue;
+    }
+
+    await prisma.storeProduct.update({
+      where: { id: product.id },
+      // Assignment, never `push` (architecture.md): a second seed run must
+      // land on the SAME single-element array, not grow it.
+      data: { imageUrls: [publicUrlFor(originalPath)] },
+    });
+  }
+}
+
+/**
+ * Deterministic, UUID v4-SHAPED directory name derived from `seed` (never
+ * `randomUUID()`, which would make every seed run produce a fresh, growing
+ * set of orphaned objects). `deriveImageVariants` (`src/lib/imageVariants.ts`)
+ * requires the exact v4 nibbles (version `4`, variant `8`/`9`/`a`/`b`) to
+ * recognize a directory as a F-023 image — this mirrors that shape by
+ * construction, from a SHA-256 of the input, so two runs with the same
+ * `storeProductId` always produce the same directory.
+ */
+function deterministicImageUuid(seed: string): string {
+  const hex = createHash("sha256").update(seed).digest("hex");
+  const variantNibble = "89ab"[parseInt(hex[16], 16) % 4];
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    `4${hex.slice(13, 16)}`,
+    `${variantNibble}${hex.slice(17, 20)}`,
+    hex.slice(20, 32),
+  ].join("-");
 }
 
 async function ensureSyncToken(business: { id: string; externalId: string }): Promise<void> {

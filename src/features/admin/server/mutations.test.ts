@@ -13,7 +13,8 @@ const promotionDelete = vi.fn();
 const revalidateStores = vi.fn();
 const revalidateStorefronts = vi.fn();
 const revalidateSlugs = vi.fn();
-const uploadStoreObject = vi.fn();
+const uploadStoreObjects = vi.fn();
+const removeStoreObjects = vi.fn();
 const storefrontFindUnique = vi.fn();
 const storefrontUpdate = vi.fn();
 const regroupStoreIntoBrand = vi.fn();
@@ -50,8 +51,16 @@ vi.mock("@/lib/cache", () => ({
   revalidateStorefronts: (...a: unknown[]) => revalidateStorefronts(...a),
   revalidateSlugs: (...a: unknown[]) => revalidateSlugs(...a),
 }));
+const FAKE_BUCKET_PREFIX = "https://bucket/";
 vi.mock("@/lib/supabase/storage", () => ({
-  uploadStoreObject: (...a: unknown[]) => uploadStoreObject(...a),
+  uploadStoreObjects: (...a: unknown[]) => uploadStoreObjects(...a),
+  removeStoreObjects: (...a: unknown[]) => removeStoreObjects(...a),
+  // Real enough to round-trip with the REAL (unmocked) `deriveImageVariants`:
+  // `appendProductImage` builds a URL with `publicUrlFor`, feeds it straight
+  // back through `deriveImageVariants`, and needs `objectPathOf` to invert it.
+  publicUrlFor: (path: string) => `${FAKE_BUCKET_PREFIX}${path}`,
+  objectPathOf: (url: string) =>
+    url.startsWith(FAKE_BUCKET_PREFIX) ? url.slice(FAKE_BUCKET_PREFIX.length) : null,
 }));
 vi.mock("@/features/storefront/server/registry", async (importOriginal) => {
   // `expandBrandTouch` is pure (no Prisma, no I/O) — keep the REAL
@@ -118,7 +127,8 @@ beforeEach(() => {
   revalidateStores.mockReset();
   revalidateStorefronts.mockReset();
   revalidateSlugs.mockReset();
-  uploadStoreObject.mockReset();
+  uploadStoreObjects.mockReset();
+  removeStoreObjects.mockReset().mockResolvedValue({ ok: true, removed: 0 });
   storefrontFindUnique.mockReset();
   storefrontUpdate.mockReset();
   regroupStoreIntoBrand.mockReset();
@@ -159,6 +169,7 @@ describe("saveProduct()", () => {
       id: "product-1",
       deletedAt: null,
       syncedPriceCurrency: "USD",
+      imageUrls: [],
       store: { slug: null, storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] } },
     });
     update.mockResolvedValue(
@@ -180,6 +191,7 @@ describe("saveProduct()", () => {
       id: "product-1",
       deletedAt: null,
       syncedPriceCurrency: "USD",
+      imageUrls: [],
       store: { slug: null, storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] } },
     });
     update.mockResolvedValue(row());
@@ -196,6 +208,7 @@ describe("saveProduct()", () => {
       id: "product-1",
       deletedAt: null,
       syncedPriceCurrency: "USD",
+      imageUrls: [],
       store: { slug: null, storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] } },
     });
     update.mockResolvedValue(row());
@@ -207,12 +220,37 @@ describe("saveProduct()", () => {
   });
 });
 
-describe("appendProductImage()", () => {
-  const file = { bytes: Buffer.from("fake"), mime: "image/jpeg" as const };
+/** A successful `EncodeResult` shaped exactly like the real encoder's:
+ *  4 variants (two widths × two formats). */
+function encodedFixture(warning?: "heavy_image") {
+  return {
+    ok: true as const,
+    heaviestCardBytes: 100,
+    warning,
+    variants: [
+      { width: 400, format: "avif" as const, contentType: "image/avif", bytes: Buffer.from("a") },
+      { width: 400, format: "webp" as const, contentType: "image/webp", bytes: Buffer.from("b") },
+      { width: 800, format: "avif" as const, contentType: "image/avif", bytes: Buffer.from("c") },
+      { width: 800, format: "webp" as const, contentType: "image/webp", bytes: Buffer.from("d") },
+    ],
+  };
+}
 
-  it("uploads, pushes the url, and revalidates — in that order", async () => {
-    uploadStoreObject.mockResolvedValue({ ok: true, url: "https://bucket/obj.jpg" });
-    update.mockResolvedValue({ imageUrls: ["https://bucket/obj.jpg"] });
+describe("appendProductImage() (F-023)", () => {
+  const file = {
+    bytes: Buffer.from("fake"),
+    mime: "image/jpeg" as const,
+    encoded: encodedFixture(),
+  };
+
+  it("uploads the original AND all four variants in one batch, pushes the original's url, and revalidates — in that order", async () => {
+    uploadStoreObjects.mockImplementation(
+      async (objects: { path: string; bytes: Buffer; contentType: string }[]) => ({
+        ok: true,
+        urls: objects.map((o) => `https://bucket/${o.path}`),
+      }),
+    );
+    update.mockResolvedValue({ imageUrls: ["will be overwritten below"] });
 
     const result = await appendProductImage(
       "store-1" as never,
@@ -221,15 +259,55 @@ describe("appendProductImage()", () => {
       file,
     );
 
-    expect(result).toEqual({
-      kind: "created",
-      value: { url: "https://bucket/obj.jpg", imageUrls: ["https://bucket/obj.jpg"] },
-    });
+    expect(uploadStoreObjects).toHaveBeenCalledOnce();
+    const uploadedObjects = uploadStoreObjects.mock.calls[0][0] as { path: string }[];
+    expect(uploadedObjects).toHaveLength(5);
+    expect(uploadedObjects[0].path).toMatch(/\/original\.jpg$/);
+    expect(
+      uploadedObjects
+        .slice(1)
+        .map((o) => o.path)
+        .sort(),
+    ).toEqual(
+      [
+        uploadedObjects[0].path.replace("original.jpg", "w400.avif"),
+        uploadedObjects[0].path.replace("original.jpg", "w400.webp"),
+        uploadedObjects[0].path.replace("original.jpg", "w800.avif"),
+        uploadedObjects[0].path.replace("original.jpg", "w800.webp"),
+      ].sort(),
+    );
+
+    expect(result.kind).toBe("created");
+    if (result.kind !== "created") throw new Error("unreachable");
+    expect(result.value.url).toBe(`https://bucket/${uploadedObjects[0].path}`);
     expect(revalidateStores).toHaveBeenCalledExactlyOnceWith(["tienda-demo"]);
   });
 
-  it("never writes or revalidates when Storage rejects the upload", async () => {
-    uploadStoreObject.mockResolvedValue({ ok: false, reason: "unreachable" });
+  it("carries the E3 warning through when the encoder flagged a heavy card variant", async () => {
+    uploadStoreObjects.mockResolvedValue({ ok: true, urls: [] });
+    update.mockResolvedValue({ imageUrls: [] });
+
+    const result = await appendProductImage(
+      "store-1" as never,
+      "product-1",
+      "tienda-demo" as never,
+      {
+        ...file,
+        encoded: encodedFixture("heavy_image"),
+      },
+    );
+
+    expect(result.kind).toBe("created");
+    if (result.kind !== "created") throw new Error("unreachable");
+    expect(result.value.warning).toBe("heavy_image");
+  });
+
+  it("never writes or revalidates when Storage rejects the batch, and cleans up whatever DID land (R6/E2)", async () => {
+    uploadStoreObjects.mockResolvedValue({
+      ok: false,
+      reason: "unreachable",
+      uploadedPaths: ["stores/store-1/products/product-1/uuid/original.jpg"],
+    });
 
     const result = await appendProductImage(
       "store-1" as never,
@@ -241,6 +319,67 @@ describe("appendProductImage()", () => {
     expect(result).toEqual({ kind: "storage_unavailable", reason: "unreachable" });
     expect(update).not.toHaveBeenCalled();
     expect(revalidateStores).not.toHaveBeenCalled();
+    expect(removeStoreObjects).toHaveBeenCalledExactlyOnceWith([
+      "stores/store-1/products/product-1/uuid/original.jpg",
+    ]);
+  });
+
+  it("never calls removeStoreObjects when nothing landed before the failure", async () => {
+    uploadStoreObjects.mockResolvedValue({ ok: false, reason: "unreachable", uploadedPaths: [] });
+
+    await appendProductImage("store-1" as never, "product-1", "tienda-demo" as never, file);
+
+    expect(removeStoreObjects).not.toHaveBeenCalled();
+  });
+});
+
+describe("saveProduct() — purging removed images (F-023 R9/R14)", () => {
+  // Real UUID v4 shape — `deriveImageVariants` requires it (R11's second
+  // condition) to tell a F-023 directory image apart from a legacy one.
+  const REMOVED_UUID = "b6f1c2a4-7e3d-4a10-9c2e-1f0a5d6e7b8c";
+  const KEPT_UUID = "c7f2d3b5-8e4e-4b21-ad3f-2f1b6e7f8c9d";
+  const REMOVED_URL = `https://bucket/stores/store-1/products/product-1/${REMOVED_UUID}/original.jpg`;
+  const KEPT_URL = `https://bucket/stores/store-1/products/product-1/${KEPT_UUID}/original.jpg`;
+
+  function existingRow(imageUrls: string[]) {
+    return {
+      id: "product-1",
+      deletedAt: null,
+      syncedPriceCurrency: "USD",
+      imageUrls,
+      store: { slug: null, storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] } },
+    };
+  }
+
+  it("purges exactly the URLs (and their derived variants) that disappeared, AFTER commit", async () => {
+    findFirst.mockResolvedValue(existingRow([REMOVED_URL, KEPT_URL]));
+    update.mockResolvedValue(row({ imageUrls: [KEPT_URL] }));
+
+    const callOrder: string[] = [];
+    revalidateStores.mockImplementation(() => callOrder.push("revalidate"));
+    removeStoreObjects.mockImplementation(async () => {
+      callOrder.push("purge");
+      return { ok: true, removed: 5 };
+    });
+
+    await saveProduct("store-1" as never, "product-1", { ...WRITE_BODY, imageUrls: [KEPT_URL] });
+
+    expect(removeStoreObjects).toHaveBeenCalledOnce();
+    const purgedKeys = removeStoreObjects.mock.calls[0][0] as string[];
+    // The removed URL derives 5 keys (original + 4 variants); the kept one
+    // contributes none.
+    expect(purgedKeys).toHaveLength(5);
+    expect(purgedKeys.every((k) => k.includes(REMOVED_UUID))).toBe(true);
+    expect(callOrder).toEqual(["revalidate", "purge"]);
+  });
+
+  it("never calls removeStoreObjects when no URL was removed", async () => {
+    findFirst.mockResolvedValue(existingRow([KEPT_URL]));
+    update.mockResolvedValue(row({ imageUrls: [KEPT_URL] }));
+
+    await saveProduct("store-1" as never, "product-1", { ...WRITE_BODY, imageUrls: [KEPT_URL] });
+
+    expect(removeStoreObjects).not.toHaveBeenCalled();
   });
 });
 

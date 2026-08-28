@@ -37,8 +37,13 @@ export function forbidden(): NextResponse {
   return NextResponse.json({ error: "FORBIDDEN" }, { status: 403, headers: NO_STORE });
 }
 
-/** Every mime/size rejection of the image endpoint (E22). */
-export function invalidFile(reason: "mime" | "too_large" | "empty"): NextResponse {
+/**
+ * Every mime/size rejection of the image endpoint (E22). F-023 adds
+ * `"decode"` — a mime-sniffed file the encoder still couldn't decode (a
+ * corrupt file, or one past `IMAGE_MAX_PIXELS`) — a type change, not a shape
+ * change: the body is still `{ error, reason }`.
+ */
+export function invalidFile(reason: "mime" | "too_large" | "empty" | "decode"): NextResponse {
   return NextResponse.json({ error: "INVALID_FILE", reason }, { status: 400, headers: NO_STORE });
 }
 

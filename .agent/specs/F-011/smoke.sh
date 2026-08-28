@@ -271,7 +271,13 @@ contains "featured del panel sigue intacto" "$WORKDIR/edit_after_sync.html" '"fe
 contains "priceOverride del panel sigue intacto" "$WORKDIR/edit_after_sync.html" '"priceOverride":"111.11"'
 contains "priceOverrideCurrency del panel sigue intacto" "$WORKDIR/edit_after_sync.html" '"priceOverrideCurrency":"CUP"'
 
-echo "== criterio 4: subir una imagen la guarda en Supabase Storage y next/image la sirve =="
+echo "== criterio 4 (F-023, AP1 aprobada): subir una imagen la guarda en Supabase Storage y se sirve directo del CDN =="
+# F-023 apagó el optimizador (images.unoptimized: true, R1): /_next/image ya
+# no existe para servir esto — el criterio que este bloque comprobaba está
+# sustituido por el de F-023 (regla 3: se protege el criterio, no el guion).
+# Lo que sigue viviendo aquí: la subida real deja un objeto legible en el
+# emulador, y ahora TAMBIÉN su variante AVIF (F-023 R2), sin pasar por
+# ningún optimizador.
 UPLOAD_CODE=$(curl -sS -o "$WORKDIR/upload.json" -w '%{http_code}' \
   -b "$WORKDIR/cookie_a.jar" \
   -F "file=@.agent/specs/F-011/fixtures/sample.jpg;type=image/jpeg" \
@@ -281,31 +287,25 @@ IMG_URL=$(json_field "$WORKDIR/upload.json" url)
 
 if [ -n "$IMG_URL" ] && [ "$IMG_URL" != "<undefined>" ]; then
   DIRECT_CODE=$(curl -sS -o /dev/null -w '%{http_code}' "$IMG_URL")
-  check "lectura directa del emulador" 200 "$DIRECT_CODE"
+  check "lectura directa del original desde el CDN del emulador" 200 "$DIRECT_CODE"
 
-  ENCODED_URL=$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "$IMG_URL")
-  NEXT_IMAGE_HEADERS=$(curl -sS -D - -o "$WORKDIR/next_image.bin" \
-    -H "Accept: image/avif,image/webp,image/*,*/*;q=0.8" \
-    "$BASE/_next/image?url=${ENCODED_URL}&w=640&q=75")
-  NEXT_IMAGE_CODE=$(printf '%s' "$NEXT_IMAGE_HEADERS" | node -e "
-    const s = require('fs').readFileSync(0, 'utf8');
-    const m = s.match(/^HTTP\/[\d.]+ (\d+)/);
-    process.stdout.write(m ? m[1] : '');
-  ")
-  check "/_next/image responde 200" 200 "$NEXT_IMAGE_CODE"
-  NEXT_IMAGE_CTYPE=$(printf '%s' "$NEXT_IMAGE_HEADERS" | node -e "
+  # F-023: el original vive en `.../<uuid>/original.<ext>`; su variante de
+  # tarjeta AVIF es el mismo directorio con `w400.avif` en vez del basename.
+  AVIF_URL=$(node -e "
+    process.stdout.write(process.argv[1].replace(/[^/]+$/, 'w400.avif'));
+  " "$IMG_URL")
+  AVIF_CODE=$(curl -sS -o /dev/null \
+    -H 'Accept: image/avif,image/webp,image/*,*/*;q=0.8' \
+    -w '%{http_code}' "$AVIF_URL")
+  check "la variante AVIF de tarjeta responde 200 directo del CDN, sin optimizador" 200 "$AVIF_CODE"
+  AVIF_CTYPE=$(curl -sS -I "$AVIF_URL" | tr -d '\r' | node -e "
     const s = require('fs').readFileSync(0, 'utf8').toLowerCase();
-    const m = s.match(/content-type:\s*([^\r\n]+)/);
+    const m = s.match(/content-type:\s*([^\n]+)/);
     process.stdout.write(m ? m[1].trim() : '');
   ")
-  if [ "$NEXT_IMAGE_CTYPE" = "image/avif" ] || [ "$NEXT_IMAGE_CTYPE" = "image/webp" ]; then
-    printf '  ok   /_next/image convierte a avif/webp (obtuvo %s)\n' "$NEXT_IMAGE_CTYPE"
-  else
-    printf 'SMOKE FAIL /_next/image no convirtió a avif/webp — obtuvo %s\n' "$NEXT_IMAGE_CTYPE"
-    FAILS=$((FAILS + 1))
-  fi
+  check "content-type de la variante AVIF" "image/avif" "$AVIF_CTYPE"
 else
-  echo "SMOKE FAIL la subida no devolvió una url utilizable — se omiten las comprobaciones de next/image"
+  echo "SMOKE FAIL la subida no devolvió una url utilizable — se omiten las comprobaciones del CDN"
   FAILS=$((FAILS + 1))
 fi
 
@@ -331,27 +331,43 @@ check "text/plain renombrado a .jpg" 400 "$FAKE_CODE"
 
 # Ocho subidas válidas llenan el tope (PRODUCT_MAX_IMAGES); la novena tiene
 # que responder 409 y dejar imageUrls sin la novena.
+#
+# F-023: un JPEG con solo el encabezado mágico (FF D8 FF E0) y basura detrás
+# pasaba el sniff de mime de F-011 pero, desde que la subida decodifica de
+# verdad (SP1), sharp no puede decodificarlo y la respuesta pasa a ser 400
+# "reason":"decode" en vez de 201 — un fixture minúsculo pero REAL de sharp
+# es la única forma de seguir probando el tope de 8, no la del mime.
+#
+# F-023 (I5): `prisma/seed.ts::seedProductImages` deja SIEMPRE una imagen ya
+# puesta en los 15 productos de tienda-demo — PROD_A2 arranca con 1, no con
+# 0. Siete subidas más (no ocho) llegan al tope de 8; la octava es la que
+# tiene que dar 409 ("novena" en el nombre de la variable, heredado del
+# conteo de F-011, ahora la 8.ª subida de este guion pero la 9.ª imagen real).
 NINTH_CODE=0
-for i in 1 2 3 4 5 6 7 8; do
+for i in 1 2 3 4 5 6 7; do
   node -e "
-    const fs = require('fs');
+    const sharp = require('sharp');
     const n = Number(process.argv[2]);
-    const buf = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200 + n, 0x10 + n)]);
-    fs.writeFileSync(process.argv[1], buf);
+    sharp({ create: { width: 4, height: 4, channels: 3, background: { r: n * 10, g: 0, b: 0 } } })
+      .jpeg()
+      .toFile(process.argv[1])
+      .catch((e) => { console.error(e); process.exit(1); });
   " "$WORKDIR/fill$i.jpg" "$i"
   ROUND_CODE=$(curl -sS -o "$WORKDIR/fill_upload_$i.json" -w '%{http_code}' \
     -b "$WORKDIR/cookie_a.jar" \
     -F "file=@$WORKDIR/fill$i.jpg;type=image/jpeg" \
     "$BASE/api/admin/stores/$STORE_A_ID/products/$PROD_A2/images")
   if [ "$ROUND_CODE" != "201" ]; then
-    echo "SMOKE FAIL subida $i/8 para llenar el tope no respondió 201 (obtuvo $ROUND_CODE)"
+    echo "SMOKE FAIL subida $i/7 para llenar el tope (arrancando de 1 imagen ya sembrada) no respondió 201 (obtuvo $ROUND_CODE)"
     FAILS=$((FAILS + 1))
   fi
 done
 node -e "
-  const fs = require('fs');
-  const buf = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(300, 0x40)]);
-  fs.writeFileSync(process.argv[1], buf);
+  const sharp = require('sharp');
+  sharp({ create: { width: 4, height: 4, channels: 3, background: { r: 0, g: 0, b: 200 } } })
+    .jpeg()
+    .toFile(process.argv[1])
+    .catch((e) => { console.error(e); process.exit(1); });
 " "$WORKDIR/ninth.jpg"
 NINTH_CODE=$(curl -sS -o "$WORKDIR/ninth_upload.json" -w '%{http_code}' \
   -b "$WORKDIR/cookie_a.jar" \

@@ -26,6 +26,7 @@ const revalidateStores = vi.fn();
 const revalidateSlugs = vi.fn();
 const revalidateStorefronts = vi.fn();
 const revalidateProducts = vi.fn();
+const removeStoreObjectsUnder = vi.fn();
 
 vi.mock("./handlers/store", () => ({ handleStore: (...a: unknown[]) => handleStore(...a) }));
 vi.mock("./handlers/product", () => ({ handleProduct: (...a: unknown[]) => handleProduct(...a) }));
@@ -45,6 +46,9 @@ vi.mock("@/lib/cache", () => ({
   revalidateSlugs: (...a: unknown[]) => revalidateSlugs(...a),
   revalidateStorefronts: (...a: unknown[]) => revalidateStorefronts(...a),
   revalidateProducts: (...a: unknown[]) => revalidateProducts(...a),
+}));
+vi.mock("@/lib/supabase/storage", () => ({
+  removeStoreObjectsUnder: (...a: unknown[]) => removeStoreObjectsUnder(...a),
 }));
 
 const { processCatalogBatch } = await import("./processBatch");
@@ -79,6 +83,7 @@ beforeEach(() => {
   revalidateSlugs.mockReset();
   revalidateStorefronts.mockReset();
   revalidateProducts.mockReset();
+  removeStoreObjectsUnder.mockReset().mockResolvedValue({ ok: true, removed: 0 });
 });
 
 describe("processCatalogBatch() — merges a handler's touchedSlugValues into the SAME revalidateSlugs call", () => {
@@ -139,5 +144,84 @@ describe("processCatalogBatch() — merges a handler's touchedSlugValues into th
     expect(revalidateSlugs).toHaveBeenCalledOnce();
     const slugArg = [...revalidateSlugs.mock.calls[0][0]].sort();
     expect(slugArg).toEqual(["bodega-dos", "bodega-uno", "bodega-uno-2"]);
+  });
+});
+
+describe("processCatalogBatch() — drains purgeObjectPrefix AFTER revalidating (F-023 R9/R13/R14)", () => {
+  it("purges the prefix a handler reported, after revalidateStores/Slugs/Storefronts", async () => {
+    const events = [storeEvent("evt-a")];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+    handleStore.mockResolvedValue({
+      status: "processed",
+      touchedStoreSlug: "tienda-sola",
+      touchedBrandSlug: "tienda-sola",
+      purgeObjectPrefix: "stores/store-1/products/product-1/",
+    });
+
+    const callOrder: string[] = [];
+    revalidateStores.mockImplementation(() => callOrder.push("revalidateStores"));
+    revalidateSlugs.mockImplementation(() => callOrder.push("revalidateSlugs"));
+    revalidateStorefronts.mockImplementation(() => callOrder.push("revalidateStorefronts"));
+    removeStoreObjectsUnder.mockImplementation(async () => {
+      callOrder.push("removeStoreObjectsUnder");
+      return { ok: true, removed: 5 };
+    });
+
+    await processCatalogBatch(CALLER, events);
+
+    expect(removeStoreObjectsUnder).toHaveBeenCalledExactlyOnceWith(
+      "stores/store-1/products/product-1/",
+    );
+    expect(callOrder).toEqual([
+      "revalidateStores",
+      "revalidateSlugs",
+      "revalidateStorefronts",
+      "removeStoreObjectsUnder",
+    ]);
+  });
+
+  it("deduplicates the same prefix reported by two events into ONE removal call", async () => {
+    const events = [storeEvent("evt-a"), storeEvent("evt-b")];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+    handleStore.mockResolvedValue({
+      status: "processed",
+      touchedStoreSlug: "tienda-sola",
+      touchedBrandSlug: "tienda-sola",
+      purgeObjectPrefix: "stores/store-1/products/product-1/",
+    });
+
+    await processCatalogBatch(CALLER, events);
+
+    expect(removeStoreObjectsUnder).toHaveBeenCalledOnce();
+  });
+
+  it("never calls removeStoreObjectsUnder when nothing reported a prefix", async () => {
+    const events = [storeEvent("evt-a")];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+    handleStore.mockResolvedValue({
+      status: "processed",
+      touchedStoreSlug: "tienda-sola",
+      touchedBrandSlug: "tienda-sola",
+    });
+
+    await processCatalogBatch(CALLER, events);
+
+    expect(removeStoreObjectsUnder).not.toHaveBeenCalled();
+  });
+
+  it("a Storage failure during the drain does not change any event's already-built result (R13)", async () => {
+    const events = [storeEvent("evt-a")];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+    handleStore.mockResolvedValue({
+      status: "processed",
+      touchedStoreSlug: "tienda-sola",
+      touchedBrandSlug: "tienda-sola",
+      purgeObjectPrefix: "stores/store-1/products/product-1/",
+    });
+    removeStoreObjectsUnder.mockResolvedValue({ ok: false, reason: "unreachable" });
+
+    const summary = await processCatalogBatch(CALLER, events);
+
+    expect(summary.results[0]).toEqual({ eventId: "evt-a", status: "processed" });
   });
 });

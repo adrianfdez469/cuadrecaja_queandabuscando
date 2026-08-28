@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ProductCard } from "@/components/store/ProductCard";
+import { CATALOG_EAGER_IMAGE_COUNT } from "@/constants/media";
 import type { StoreSearchResult } from "@/features/catalog/server/search";
 import type { PublicSlug } from "@/lib/publicSlug";
 
@@ -46,13 +47,15 @@ export function StoreSearchResults({
         <>
           <h2 className="sr-only">Coincidencias con tu búsqueda</h2>
           <ul className={`mt-8 ${GRID_CLASSES}`}>
-            {matched.map((item) => (
+            {matched.map((item, index) => (
               <li key={item.id}>
                 <ProductCard
                   product={item}
                   storeSlug={storeSlug}
                   displayCurrency={displayCurrency}
                   rates={rates}
+                  eager={index < CATALOG_EAGER_IMAGE_COUNT}
+                  priority={index === 0}
                 />
               </li>
             ))}

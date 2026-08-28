@@ -266,6 +266,42 @@ describe("handleProduct() store search reindex (F-021, R3, E9)", () => {
   });
 });
 
+describe("handleProduct() image lifecycle (F-023 E11/E12/R10) — the handler never calls Storage", () => {
+  it("a terminal DELETE empties imageUrls and reports the product's bucket prefix", async () => {
+    const outcome = await handleProduct(payload(), "DELETE", "business-1");
+
+    expect(outcome.status).toBe("processed");
+    expect(outcome.purgeObjectPrefix).toBe("stores/store-1/products/product-1/");
+
+    const data = storeProductUpdate.mock.calls[0][0].data;
+    expect(data.imageUrls).toEqual([]);
+  });
+
+  it("publishToStore: false conserves the images — no imageUrls write, no prefix to purge (R10)", async () => {
+    const outcome = await handleProduct(payload({ publishToStore: false }), "UPDATE", "business-1");
+
+    expect(outcome.status).toBe("processed");
+    expect(outcome.purgeObjectPrefix).toBeUndefined();
+
+    const data = storeProductUpdate.mock.calls[0][0].data;
+    expect(Object.keys(data)).not.toContain("imageUrls");
+  });
+
+  it("a stale DELETE never reaches the update, so nothing is purged (E13)", async () => {
+    storeProductFindUnique.mockResolvedValue({
+      id: "product-1",
+      sourceUpdatedAt: new Date("2026-08-26T12:00:00.000Z"),
+      canonicalProductId: "canon-1",
+    });
+
+    const outcome = await handleProduct(payload(), "DELETE", "business-1");
+
+    expect(outcome.status).toBe("stale");
+    expect(outcome.purgeObjectPrefix).toBeUndefined();
+    expect(storeProductUpdate).not.toHaveBeenCalled();
+  });
+});
+
 describe("handleProduct() barcode recording (F-024, R10)", () => {
   it("records the normalized barcodes against the resolved canonical, between the offer write and the alias", async () => {
     const callOrder: string[] = [];

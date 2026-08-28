@@ -3,8 +3,16 @@ import { revalidateSlugs, revalidateStorefronts, revalidateStores } from "@/lib/
 import { canonicalSlug, type PublicSlug } from "@/lib/publicSlug";
 import type { Prisma } from "@/generated/prisma/client";
 import { extensionForMime } from "@/lib/imageType";
-import type { AllowedImageMime } from "@/constants/media";
-import { uploadStoreObject } from "@/lib/supabase/storage";
+import type { AllowedImageMime, ImageVariantFormat } from "@/constants/media";
+import {
+  objectPathOf,
+  publicUrlFor,
+  removeStoreObjects,
+  uploadStoreObjects,
+  type UploadObjectInput,
+} from "@/lib/supabase/storage";
+import { deriveImageVariants, type ImageVariantSet } from "@/lib/imageVariants";
+import type { EncodeResult } from "@/lib/imageEncoder";
 import { reindexStoreProduct } from "@/features/catalog/server/searchIndex";
 import {
   expandBrandTouch,
@@ -189,6 +197,9 @@ export async function saveProduct(
       id: true,
       deletedAt: true,
       syncedPriceCurrency: true,
+      // F-023 R9/R14: the ONE extra column, read so the purge below knows
+      // which URLs disappeared — zero extra round-trips (still one `select`).
+      imageUrls: true,
       store: { select: STORE_CANONICAL_SELECT },
     },
   });
@@ -223,41 +234,145 @@ export async function saveProduct(
     return row;
   });
 
+  // F-023 R9/R14: purge AFTER the write and its revalidation — never inside
+  // `commit()` — so the window where a cached page still points at a
+  // just-deleted object is the smallest it can be. `await`, never `void`
+  // (a serverless function's process can end the moment the response goes
+  // out, and a loose promise would lose the race the other half of the time).
+  const removedUrls = existing.imageUrls.filter((url) => !body.imageUrls.includes(url));
+  if (removedUrls.length > 0) {
+    await purgeImageUrls(removedUrls);
+  }
+
   return { kind: "saved", value: toAdminProductRow(updated) };
 }
 
-export type UploadedImage = { bytes: Buffer; mime: AllowedImageMime };
+/**
+ * F-023 R9/R13: best-effort object deletion for every URL a product's
+ * `imageUrls` stopped referencing. Never throws and never blocks the caller
+ * on a Storage outage — a fresh log line and an orphaned object are the
+ * accepted cost (E14), not a failed write.
+ *
+ * `deriveImageVariants` decides how many objects a URL is worth: four more
+ * for a F-023 image (R11 tells them apart from a legacy F-011 object,
+ * cheaply, without ever asking the bucket).
+ */
+async function purgeImageUrls(urls: string[]): Promise<void> {
+  const keys: string[] = [];
+  for (const url of urls) {
+    const variants = deriveImageVariants(url);
+    const urlsToRemove = variants
+      ? [url, ...variants.avif.map((v) => v.url), ...variants.webp.map((v) => v.url)]
+      : [url];
+    for (const candidate of urlsToRemove) {
+      const path = objectPathOf(candidate);
+      // `null` = a URL outside our own bucket (a foreign URL slipped past
+      // the schema's `.refine()` some other way, or a pre-F-011 fixture) —
+      // nothing of ours to delete.
+      if (path) keys.push(path);
+    }
+  }
+  if (keys.length === 0) return;
+
+  const removed = await removeStoreObjects(keys);
+  if (!removed.ok) {
+    console.error("[admin] failed to purge removed image objects:", removed.reason);
+  }
+}
+
+export type UploadedImage = {
+  bytes: Buffer;
+  mime: AllowedImageMime;
+  /** F-023: the already-encoded variant set (route.ts runs the encoder
+   *  before calling this — R6 wants the codification, the expensive and
+   *  most failure-prone step, done BEFORE anything touches Storage). */
+  encoded: Extract<EncodeResult, { ok: true }>;
+};
 
 /**
- * E20: subir y DESPUÉS escribir. If the write below fails after the object
- * is already in the bucket, the result is an orphan object and no broken
- * URL — the safer of the two possible half-failures.
+ * E20/R6: encode → upload the WHOLE set → THEN write. If the write below
+ * fails after the objects are already in the bucket, the result is orphan
+ * objects and no broken URL — the safer of the two possible half-failures,
+ * same call F-011 made. If ANY of the five uploads fails, the ones that DID
+ * land are cleaned up immediately (E2) and `imageUrls` is never touched.
  *
  * Ownership (E24), the soft-delete guard and the E23 image cap are all
  * checked by the caller (`getProductForEdit` in `server/products.ts`)
  * BEFORE the request body is even read, which is what makes the 403 of
  * E24 happen "before reading the file". This function trusts that check
- * and only does the two writes: the Storage upload and the atomic push.
+ * and only does the storage writes and the atomic push.
  */
 export async function appendProductImage(
   storeId: AuthorizedStoreId,
   storeProductId: string,
   storeSlug: PublicSlug,
   file: UploadedImage,
-): Promise<AdminWriteResult<{ url: string; imageUrls: string[] }>> {
-  const path = objectPathFor({ storeId, storeProductId, ext: extensionForMime(file.mime) });
-  const uploaded = await uploadStoreObject(path, file.bytes, file.mime);
-  if (!uploaded.ok) return { kind: "storage_unavailable", reason: uploaded.reason };
+): Promise<AdminWriteResult<{ url: string; imageUrls: string[]; warning?: "heavy_image" }>> {
+  const originalPath = objectPathFor({ storeId, storeProductId, ext: extensionForMime(file.mime) });
+  const originalUrl = publicUrlFor(originalPath);
+  // `objectPathFor`'s own shape (`<uuid>/original.<ext>`) is exactly what
+  // `deriveImageVariants` recognizes — the SAME pure function the tienda
+  // uses to render, now run once forward to know what to upload. Never a
+  // second, parallel way of naming the four variant objects.
+  const variantSet = deriveImageVariants(originalUrl);
+  if (!variantSet) {
+    console.error(
+      "[admin] objectPathFor produced a URL deriveImageVariants could not read:",
+      originalUrl,
+    );
+    return { kind: "storage_unavailable", reason: "rejected" };
+  }
+
+  const objects: UploadObjectInput[] = [
+    { path: originalPath, bytes: file.bytes, contentType: file.mime },
+    ...file.encoded.variants.map((variant) => {
+      const url = variantUrl(variantSet, variant.width, variant.format);
+      // Guaranteed non-null: `url` was just built from our own bucket prefix.
+      const path = objectPathOf(url) as string;
+      return { path, bytes: variant.bytes, contentType: variant.contentType };
+    }),
+  ];
+
+  const uploaded = await uploadStoreObjects(objects);
+  if (!uploaded.ok) {
+    if (uploaded.uploadedPaths.length > 0) {
+      const cleanup = await removeStoreObjects(uploaded.uploadedPaths);
+      if (!cleanup.ok) {
+        console.error("[admin] failed to clean up a partial image upload:", cleanup.reason);
+      }
+    }
+    return { kind: "storage_unavailable", reason: uploaded.reason };
+  }
 
   const updated = await commit(storeSlug, () =>
     prisma.storeProduct.update({
       where: { id: storeProductId },
-      data: { imageUrls: { push: uploaded.url } },
+      data: { imageUrls: { push: originalUrl } },
       select: { imageUrls: true },
     }),
   );
 
-  return { kind: "created", value: { url: uploaded.url, imageUrls: updated.imageUrls } };
+  return {
+    kind: "created",
+    value: {
+      url: originalUrl,
+      imageUrls: updated.imageUrls,
+      ...(file.encoded.warning ? { warning: file.encoded.warning } : {}),
+    },
+  };
+}
+
+function variantUrl(
+  variantSet: ImageVariantSet,
+  width: number,
+  format: ImageVariantFormat,
+): string {
+  const list = format === "avif" ? variantSet.avif : variantSet.webp;
+  const match = list.find((v) => v.width === width);
+  // `variantSet` is derived from the SAME `src/constants/media.ts` widths and
+  // formats the encoder itself uses — this cannot miss.
+  if (!match) throw new Error(`No ${format} variant of width ${width} in derived set`);
+  return match.url;
 }
 
 /**

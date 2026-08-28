@@ -1,7 +1,7 @@
-import Image from "next/image";
 import Link from "next/link";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
+import { ResponsiveImage } from "@/components/ui/ResponsiveImage";
 import { AVAILABILITY_LABEL, AVAILABILITY_TONE } from "@/lib/availability";
 import type { AdminProductRow } from "../types";
 
@@ -65,17 +65,17 @@ export function ProductTable({
           >
             <div className="bg-surface-muted relative size-12 shrink-0 overflow-hidden rounded">
               {product.imageUrls[0] ? (
-                <Image
+                <ResponsiveImage
                   src={product.imageUrls[0]}
                   alt=""
-                  fill
-                  sizes="48px"
-                  className="object-cover"
+                  variant="card"
+                  fetchPriority="low"
                 />
               ) : (
-                <span className="text-fg-muted flex h-full items-center justify-center text-[10px]">
-                  Sin imagen
-                </span>
+                // design.md § 4 Accesibilidad: `text-[10px]` in a 48px box
+                // does not read on screen — visually a clean gray box, still
+                // announced to screen readers.
+                <span className="sr-only">Sin imagen</span>
               )}
             </div>
             <div className="min-w-0 flex-1">

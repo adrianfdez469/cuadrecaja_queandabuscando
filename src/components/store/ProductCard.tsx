@@ -1,10 +1,10 @@
-import Image from "next/image";
 import Link from "next/link";
 import { AVAILABILITY_LABEL, AVAILABILITY_TONE, shouldShowBadge } from "@/lib/availability";
 import { resolvePrice, type ResolvedPrice } from "@/lib/pricing";
 import { formatMoney } from "@/lib/money";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
+import { ResponsiveImage } from "@/components/ui/ResponsiveImage";
 import type { CatalogProduct } from "@/features/catalog/server/queries";
 
 /**
@@ -16,11 +16,18 @@ export function ProductCard({
   storeSlug,
   displayCurrency,
   rates,
+  eager = false,
+  priority = false,
 }: {
   product: CatalogProduct;
   storeSlug: string;
   displayCurrency: string;
   rates: Record<string, string>;
+  /** F-023 design.md § 1: above the fold (`CATALOG_EAGER_IMAGE_COUNT`) — the
+   *  caller knows the card's position in the grid, this component does not. */
+  eager?: boolean;
+  /** F-023 design.md § 1: the page's own LCP candidate (index 0 only). */
+  priority?: boolean;
 }) {
   const resolved = safeResolve(product, displayCurrency, rates);
   const image = product.imageUrls[0];
@@ -35,14 +42,12 @@ export function ProductCard({
       <Link href={`/${storeSlug}/p/${product.slug}`} className="block">
         <div className="bg-surface-muted relative aspect-square">
           {image ? (
-            <Image
+            <ResponsiveImage
               src={image}
               alt={product.name}
-              fill
-              // Two columns on phones, four on desktop. Getting this wrong is
-              // the single easiest way to waste bandwidth on a slow connection.
-              sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-              className="object-cover"
+              variant="card"
+              eager={eager}
+              priority={priority}
             />
           ) : (
             <div className="text-fg-muted flex h-full items-center justify-center text-sm">

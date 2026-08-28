@@ -4,6 +4,7 @@ import {
   revalidateStorefronts,
   revalidateStores,
 } from "@/lib/cache";
+import { removeStoreObjectsUnder } from "@/lib/supabase/storage";
 import type { PublicSlug } from "@/lib/publicSlug";
 import {
   summarize,
@@ -51,6 +52,9 @@ export async function processCatalogBatch(
   // `revalidateSlugs` call below, not a second one, so a 500-event batch
   // still fires one deduplicated invalidation per tag family.
   const touchedSlugValues = new Set<string>();
+  // F-023 R9/R14: prefixes to purge, deduplicated — a lot with 500 DELETEs of
+  // the same product (a reentried outbox) fires exactly ONE removal call.
+  const purgePrefixes = new Set<string>();
   const processed: string[] = [];
   const skipped: string[] = [];
   const failed: { eventId: string; error: string }[] = [];
@@ -65,6 +69,7 @@ export async function processCatalogBatch(
       if (outcome.touchedSlugValues) {
         for (const value of outcome.touchedSlugValues) touchedSlugValues.add(value);
       }
+      if (outcome.purgeObjectPrefix) purgePrefixes.add(outcome.purgeObjectPrefix);
 
       if (outcome.status === "processed") processed.push(event.eventId);
       else skipped.push(event.eventId);
@@ -91,6 +96,18 @@ export async function processCatalogBatch(
   // arrives in etapa 2 — so the sync is touched once, not twice.
   revalidateStorefronts(touchedBrands);
   revalidateProducts(touchedProducts);
+
+  // F-023 R14: purged AFTER every revalidation above, on purpose — the
+  // window where a still-cached page points at a just-deleted object is the
+  // smallest it can be. `results` is already built, so a Storage outage here
+  // (best-effort, R13) can never turn an already-`processed` event into
+  // `failed` — the array closed above, before this loop even starts.
+  for (const prefix of purgePrefixes) {
+    const removed = await removeStoreObjectsUnder(prefix);
+    if (!removed.ok) {
+      console.error("[sync] failed to purge product image objects:", prefix, removed.reason);
+    }
+  }
 
   return summarize(results);
 }

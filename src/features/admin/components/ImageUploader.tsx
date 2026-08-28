@@ -1,11 +1,24 @@
 "use client";
 
 import { useRef, useState } from "react";
-import Image from "next/image";
 import { Alert } from "@/components/ui/Alert";
+import { Badge } from "@/components/ui/Badge";
+import { ResponsiveImage } from "@/components/ui/ResponsiveImage";
 import { PRODUCT_MAX_IMAGES } from "@/constants/media";
+import { publicEnv } from "@/lib/env";
+import { deriveImageVariants } from "@/lib/imageVariants";
 
-type FileState = { name: string; status: "uploading" | "done" | "error"; message?: string };
+type FileState = {
+  name: string;
+  status: "uploading" | "done" | "error";
+  message?: string;
+  /** E3: the card variant came out over its weight cap, but the image still
+   *  saved — never a failure. */
+  heavy?: boolean;
+};
+
+const HEAVY_IMAGE_ADVICE =
+  "Se guardó igual. Si puedes, vuelve a subirla más chica o con menos detalle de fondo.";
 
 /**
  * The image gallery + uploader (E20–E26). A controlled child of
@@ -14,6 +27,12 @@ type FileState = { name: string; status: "uploading" | "done" | "error"; message
  * cambios"), and reports the resulting array up through `onChange` so the
  * product form's own `PUT` — which replaces `imageUrls` too — never sends a
  * stale array back and undoes an upload that just happened.
+ *
+ * F-023: `handleRemove` still only edits the array in memory — the actual
+ * object deletion happens server-side, in `saveProduct`, AFTER that `PUT`
+ * commits and revalidates (R14). This component only has to stop promising
+ * the old (now false) thing: quitting a photo here really does delete the
+ * file, permanently (I1).
  */
 export function ImageUploader({
   storeId,
@@ -35,6 +54,7 @@ export function ImageUploader({
   const [banner, setBanner] = useState<{
     tone: "positive" | "warning" | "danger";
     text: string;
+    advice?: string;
   } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -45,6 +65,7 @@ export function ImageUploader({
     setFiles(list.map((file) => ({ name: file.name, status: "uploading" })));
 
     let succeeded = 0;
+    let heavy = 0;
     let current = imageUrls;
     for (const [index, file] of list.entries()) {
       const form = new FormData();
@@ -55,11 +76,19 @@ export function ImageUploader({
           { method: "POST", body: form },
         );
         if (response.ok) {
-          const data = (await response.json()) as { url: string; imageUrls: string[] };
+          const data = (await response.json()) as {
+            url: string;
+            imageUrls: string[];
+            warning?: "heavy_image";
+          };
           current = data.imageUrls;
           onChange(current);
           succeeded += 1;
-          setFiles((prev) => prev.map((f, i) => (i === index ? { ...f, status: "done" } : f)));
+          const isHeavy = data.warning === "heavy_image";
+          if (isHeavy) heavy += 1;
+          setFiles((prev) =>
+            prev.map((f, i) => (i === index ? { ...f, status: "done", heavy: isHeavy } : f)),
+          );
         } else {
           const message = await uploadErrorMessage(response);
           setFiles((prev) =>
@@ -76,10 +105,7 @@ export function ImageUploader({
     }
 
     if (succeeded === list.length) {
-      setBanner({
-        tone: "positive",
-        text: succeeded === 1 ? "Subimos 1 imagen." : `Subimos ${succeeded} imágenes.`,
-      });
+      setBanner(heavy > 0 ? heavyImageBanner(succeeded, heavy) : successBanner(succeeded));
     } else if (succeeded > 0) {
       setBanner({ tone: "warning", text: `Subimos ${succeeded} de ${list.length} imágenes.` });
     }
@@ -89,7 +115,7 @@ export function ImageUploader({
   async function handleRemove(url: string) {
     setRemoving(null);
     onChange(imageUrls.filter((u) => u !== url));
-    setBanner({ tone: "positive", text: "Quitamos la imagen de tu producto." });
+    setBanner({ tone: "positive", text: "Quitamos la imagen y borramos el archivo." });
   }
 
   const atLimit = imageUrls.length >= PRODUCT_MAX_IMAGES;
@@ -106,7 +132,8 @@ export function ImageUploader({
 
       {banner && (
         <Alert tone={banner.tone} className="mt-3">
-          {banner.text}
+          <p>{banner.text}</p>
+          {banner.advice && <p className="mt-1">{banner.advice}</p>}
         </Alert>
       )}
 
@@ -119,18 +146,21 @@ export function ImageUploader({
           {imageUrls.map((url, index) => (
             <div key={url} className="relative">
               <div className="bg-surface-muted relative aspect-square overflow-hidden rounded">
-                <Image
+                <ResponsiveImage
                   src={url}
                   alt={`Imagen ${index + 1} de ${imageUrls.length}`}
-                  fill
-                  sizes="120px"
-                  className="object-cover"
+                  variant="card"
                 />
               </div>
               {index === 0 && (
                 <span className="bg-brand text-brand-contrast absolute top-1 left-1 rounded px-1.5 py-0.5 text-[10px]">
                   Principal
                 </span>
+              )}
+              {isForeignImageUrl(url) && (
+                <div className="mt-1">
+                  <Badge tone="muted">Imagen externa</Badge>
+                </div>
               )}
               <div className="mt-1 flex justify-between text-xs">
                 {index !== 0 && (
@@ -143,13 +173,20 @@ export function ImageUploader({
                   </button>
                 )}
                 {removing === url ? (
-                  <span className="flex gap-1">
-                    <button type="button" className="text-danger" onClick={() => handleRemove(url)}>
-                      Sí, quitar
-                    </button>
-                    <button type="button" onClick={() => setRemoving(null)}>
-                      No
-                    </button>
+                  <span className="flex flex-col items-end gap-1">
+                    <span className="text-fg-muted">Se borra el archivo.</span>
+                    <span className="flex gap-1">
+                      <button
+                        type="button"
+                        className="text-danger"
+                        onClick={() => handleRemove(url)}
+                      >
+                        Sí, quitar
+                      </button>
+                      <button type="button" onClick={() => setRemoving(null)}>
+                        No
+                      </button>
+                    </span>
                   </span>
                 ) : (
                   <button type="button" onClick={() => setRemoving(url)}>
@@ -166,7 +203,7 @@ export function ImageUploader({
         JPG, PNG, WebP o AVIF. Hasta 4 MB cada una y 8 en total.
       </p>
       <p className="text-fg-muted text-xs">
-        Quitar una imagen la saca de tu tienda; el archivo se queda guardado en el almacenamiento.
+        Quitar una imagen la saca de tu tienda y borra el archivo. No se puede deshacer.
       </p>
 
       <div className="mt-3">
@@ -201,7 +238,9 @@ export function ImageUploader({
               {file.status === "uploading"
                 ? "Subiendo…"
                 : file.status === "done"
-                  ? "Lista"
+                  ? file.heavy
+                    ? "Lista, pero pesada"
+                    : "Lista"
                   : file.message}
             </li>
           ))}
@@ -217,6 +256,48 @@ export function ImageUploader({
   );
 }
 
+function successBanner(succeeded: number): { tone: "positive"; text: string } {
+  return {
+    tone: "positive",
+    text: succeeded === 1 ? "Subimos 1 imagen." : `Subimos ${succeeded} imágenes.`,
+  };
+}
+
+/** design.md § Textos — E3: never "error", never "danger". The image saved;
+ *  it's just heavy. */
+function heavyImageBanner(
+  succeeded: number,
+  heavy: number,
+): { tone: "warning"; text: string; advice: string } {
+  if (succeeded === 1) {
+    return {
+      tone: "warning",
+      text: "Subimos 1 imagen, pero quedó pesada y puede verse lenta con datos móviles.",
+      advice: HEAVY_IMAGE_ADVICE,
+    };
+  }
+  const heavyText = heavy === 1 ? "1 quedó pesada" : `${heavy} quedaron pesadas`;
+  const verb = heavy === 1 ? "puede verse lenta" : "pueden verse lentas";
+  return {
+    tone: "warning",
+    text: `Subimos ${succeeded} imágenes. ${heavyText} y ${verb} con datos móviles.`,
+    advice: HEAVY_IMAGE_ADVICE,
+  };
+}
+
+/**
+ * design.md § 3: a URL from our own bucket but without a F-023 variant set is
+ * a legitimate F-011 leftover — no badge. A URL that isn't even under our
+ * bucket gets "Imagen externa". Never calls `@/lib/supabase/storage.ts`
+ * (server-only secrets): `publicEnv.supabaseUrl` is the one piece of that
+ * module's config already safe in a client bundle.
+ */
+function isForeignImageUrl(url: string): boolean {
+  if (deriveImageVariants(url)) return false;
+  const ourStoragePrefix = `${publicEnv.supabaseUrl}/storage/v1/object/public/`;
+  return !url.startsWith(ourStoragePrefix);
+}
+
 async function uploadErrorMessage(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { error?: string; reason?: string };
@@ -224,6 +305,8 @@ async function uploadErrorMessage(response: Response): Promise<string> {
       return "Ese archivo no es una imagen. Solo JPG, PNG, WebP o AVIF.";
     if (response.status === 400 && body.reason === "too_large")
       return "Pesa más de 4 MB. Manda una foto más pequeña.";
+    if (response.status === 400 && body.reason === "decode")
+      return "No pudimos leer esa imagen. Prueba con otro archivo.";
     if (response.status === 409) return "Ya tienes 8 imágenes, que es el máximo.";
     if (response.status === 503)
       return "No pudimos guardar la imagen: el almacenamiento no está disponible.";

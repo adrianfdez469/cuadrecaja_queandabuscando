@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { buildSearchDocument, resolveCanonicalIdentity } from "@/lib/canonical";
 import { uniqueSlug } from "@/lib/slug";
 import { canonicalSlug } from "@/lib/publicSlug";
+import { productObjectPrefix } from "@/lib/imageVariants";
 import { writeSearchDocument } from "@/features/marketplace/server/searchVector";
 import { reindexStoreProductsOfCanonical } from "@/features/catalog/server/searchIndex";
 import { recordCanonicalBarcodes } from "../canonicalBarcodes";
@@ -94,15 +95,36 @@ export async function handleProduct(
 
   if (operation === "DELETE" || !payload.publishToStore) {
     if (!existing) return SKIPPED;
+    // F-023 R10: only a terminal DELETE empties `imageUrls` and reports a
+    // prefix to purge. `publishToStore: false` is a reversible, everyday
+    // switch — destroying the admin's photos every time a tendero unchecks
+    // "publicar en la tienda" would be a surprise nobody asked for. This is
+    // the ONE exception to ADR 0007/0017 this feature introduces (the sync
+    // otherwise never writes `imageUrls`): the column is emptied because its
+    // content stopped existing, not because the sync claims ownership of it.
+    const terminal = operation === "DELETE";
     await prisma.storeProduct.update({
       where: { id: existing.id },
-      data: { deletedAt: new Date(), visible: false, sourceUpdatedAt: payloadUpdatedAt },
+      data: {
+        deletedAt: new Date(),
+        visible: false,
+        sourceUpdatedAt: payloadUpdatedAt,
+        ...(terminal ? { imageUrls: [] } : {}),
+      },
     });
     return {
       status: "processed",
       touchedStoreSlug: canonical,
       touchedBrandSlug: store.storefront.slug,
       touchedProductId: existing.id,
+      ...(terminal
+        ? {
+            purgeObjectPrefix: productObjectPrefix({
+              storeId: store.id,
+              storeProductId: existing.id,
+            }),
+          }
+        : {}),
     };
   }
 
