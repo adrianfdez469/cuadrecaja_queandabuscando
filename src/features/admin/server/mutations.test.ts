@@ -17,6 +17,7 @@ const uploadStoreObject = vi.fn();
 const storefrontFindUnique = vi.fn();
 const storefrontUpdate = vi.fn();
 const regroupStoreIntoBrand = vi.fn();
+const reindexStoreProductMock = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -62,6 +63,13 @@ vi.mock("@/features/storefront/server/registry", async (importOriginal) => {
     regroupStoreIntoBrand: (...a: unknown[]) => regroupStoreIntoBrand(...a),
   };
 });
+// F-021: the store's own reindexer is mocked as a unit here — the SQL it
+// runs (W3) is only verifiable against Postgres, in
+// `src/features/catalog/server/search.db.test.ts`. This file only holds the
+// line on whether `saveProduct` calls it, once, after its own typed update.
+vi.mock("@/features/catalog/server/searchIndex", () => ({
+  reindexStoreProduct: (...a: unknown[]) => reindexStoreProductMock(...a),
+}));
 
 const {
   saveProduct,
@@ -114,6 +122,7 @@ beforeEach(() => {
   storefrontFindUnique.mockReset();
   storefrontUpdate.mockReset();
   regroupStoreIntoBrand.mockReset();
+  reindexStoreProductMock.mockReset().mockResolvedValue(1);
 });
 
 const WRITE_BODY = {
@@ -180,6 +189,21 @@ describe("saveProduct()", () => {
     const data = update.mock.calls[0][0].data;
     expect(data.priceOverride).toBeNull();
     expect(data.priceOverrideCurrency).toBeNull();
+  });
+
+  it("F-021 (R3, E8): reindexes this offer's own search index once, after the typed update", async () => {
+    findFirst.mockResolvedValue({
+      id: "product-1",
+      deletedAt: null,
+      syncedPriceCurrency: "USD",
+      store: { slug: null, storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] } },
+    });
+    update.mockResolvedValue(row());
+
+    await saveProduct("store-1" as never, "product-1", WRITE_BODY);
+
+    expect(reindexStoreProductMock).toHaveBeenCalledOnce();
+    expect(reindexStoreProductMock).toHaveBeenCalledWith(expect.anything(), "product-1");
   });
 });
 

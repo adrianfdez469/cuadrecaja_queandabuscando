@@ -13,6 +13,7 @@ import { ProductCard } from "@/components/store/ProductCard";
 import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
 import { BranchBar } from "@/components/store/BranchBar";
 import { BranchList } from "@/components/store/BranchList";
+import { StoreSearchBox } from "@/components/store/StoreSearchBox";
 
 /**
  * Pre-render every published store at build time. New stores that appear later
@@ -138,7 +139,8 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
         isOpen
       />
       <Container className="py-8">
-        <h1 className="text-2xl font-semibold">Catálogo</h1>
+        <StoreSearchBox storeSlug={store.canonicalSlug} storeName={store.name} />
+        <h1 className="mt-8 text-2xl font-semibold">Catálogo</h1>
         {store.description && <p className="text-fg-muted mt-2 max-w-2xl">{store.description}</p>}
 
         {products.length === 0 ? (

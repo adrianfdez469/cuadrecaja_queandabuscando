@@ -27,6 +27,7 @@ const productAliasUpdate = vi.fn();
 const productAliasCreate = vi.fn();
 const writeSearchDocumentMock = vi.fn();
 const canonicalBarcodeCreateMany = vi.fn();
+const reindexStoreProductsOfCanonicalMock = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -53,6 +54,15 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/features/marketplace/server/searchVector", () => ({
   writeSearchDocument: (...a: unknown[]) => writeSearchDocumentMock(...a),
+}));
+
+// F-021: the store's own reindexer is mocked as a unit here — the SQL it
+// runs (W3, a real UPDATE against a real tsvector) is only verifiable
+// against Postgres, in `product.db.test.ts`. What this file holds the
+// line on: whether `handleProduct` calls it at all, and never on the
+// STALE/soft-delete paths.
+vi.mock("@/features/catalog/server/searchIndex", () => ({
+  reindexStoreProductsOfCanonical: (...a: unknown[]) => reindexStoreProductsOfCanonicalMock(...a),
 }));
 
 const { handleProduct } = await import("./product");
@@ -101,6 +111,7 @@ beforeEach(() => {
   productAliasCreate.mockReset();
   writeSearchDocumentMock.mockReset().mockResolvedValue(1);
   canonicalBarcodeCreateMany.mockReset().mockResolvedValue({ count: 1 });
+  reindexStoreProductsOfCanonicalMock.mockReset().mockResolvedValue(1);
 });
 
 const PANEL_COLUMNS = [
@@ -207,6 +218,51 @@ describe("handleProduct() search indexing (F-015, E1-E4)", () => {
       "canon-1",
       buildSearchDocument("Refresco de cola 1.5 L", ["Coca-Cola 1.5L"]),
     );
+  });
+});
+
+describe("handleProduct() store search reindex (F-021, R3, E9)", () => {
+  it("a normal UPDATE reindexes this business's offers of the resolved canonical", async () => {
+    const outcome = await handleProduct(
+      payload({ localName: "Refresco de pomo" }),
+      "UPDATE",
+      "business-1",
+    );
+
+    expect(outcome.status).toBe("processed");
+    expect(reindexStoreProductsOfCanonicalMock).toHaveBeenCalledOnce();
+    expect(reindexStoreProductsOfCanonicalMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "canon-1",
+      "business-1",
+    );
+  });
+
+  it("a stale event never calls the store reindexer", async () => {
+    storeProductFindUnique.mockResolvedValue({
+      id: "product-1",
+      sourceUpdatedAt: new Date("2026-08-26T12:00:00.000Z"),
+      canonicalProductId: "canon-1",
+    });
+
+    const outcome = await handleProduct(payload(), "UPDATE", "business-1");
+
+    expect(outcome.status).toBe("stale");
+    expect(reindexStoreProductsOfCanonicalMock).not.toHaveBeenCalled();
+  });
+
+  it("a DELETE (soft delete) never calls the store reindexer", async () => {
+    const outcome = await handleProduct(payload(), "DELETE", "business-1");
+
+    expect(outcome.status).toBe("processed");
+    expect(reindexStoreProductsOfCanonicalMock).not.toHaveBeenCalled();
+  });
+
+  it("publishToStore: false (soft delete) never calls the store reindexer", async () => {
+    const outcome = await handleProduct(payload({ publishToStore: false }), "UPDATE", "business-1");
+
+    expect(outcome.status).toBe("processed");
+    expect(reindexStoreProductsOfCanonicalMock).not.toHaveBeenCalled();
   });
 });
 

@@ -7,6 +7,7 @@ import {
   type FixtureSession,
 } from "@/features/marketplace/server/dbFixtures";
 import { searchCanonicalProducts } from "@/features/marketplace/server/search";
+import { searchStoreProducts } from "@/features/catalog/server/search";
 import { handleProduct } from "./product";
 import { POST } from "@/app/api/internal/sync/catalog/route";
 import type { ProductPayload } from "../../schemas";
@@ -351,6 +352,72 @@ describe("handleProduct against real Postgres", () => {
 });
 
 /**
+ * F-021 (criterio 10, E9, R3): the sync owns `StoreProduct.localName`, so an
+ * UPDATE that renames a product also has to change what the STORE's own
+ * search finds — the half of the reindex the panel's `saveProduct` cannot
+ * cover, since the panel never touches `localName`.
+ */
+describe("handleProduct — store search reindex on rename (F-021, criterio 10, E9)", () => {
+  let session: FixtureSession;
+
+  beforeAll(async () => {
+    session = await createFixtureSession();
+  });
+
+  afterAll(async () => {
+    await session.cleanup();
+  });
+
+  it("renaming localName via the sync makes the new word findable in the store's own search", async () => {
+    const store = await session.createStore();
+    const ean = deriveEan(session.token, 200);
+    const storeProductId = `${session.token}-sp-c10`;
+    const t0 = new Date();
+
+    const created = await handleProduct(
+      payload({
+        storeProductId,
+        storeId: store.externalId,
+        businessId: session.businessId,
+        localName: "Refresco de cola",
+        ean,
+        updatedAt: t0.toISOString(),
+      }),
+      "CREATE",
+      session.businessId,
+    );
+    expect(created.status).toBe("processed");
+    const canonical = await prisma.canonicalProduct.findUniqueOrThrow({ where: { ean } });
+    session.trackCanonical(canonical.id);
+
+    const before = await searchStoreProducts({ storeId: store.id, term: "pomo" });
+    expect(before.items).toHaveLength(0);
+
+    const renamed = await handleProduct(
+      payload({
+        storeProductId,
+        storeId: store.externalId,
+        businessId: session.businessId,
+        localName: "Refresco de pomo",
+        ean,
+        updatedAt: new Date(t0.getTime() + 60_000).toISOString(),
+      }),
+      "UPDATE",
+      session.businessId,
+    );
+    expect(renamed.status).toBe("processed");
+
+    const after = await searchStoreProducts({ storeId: store.id, term: "pomo" });
+    expect(after.items.length).toBeGreaterThan(0);
+    // The old name is no longer the only entry in the document — searching
+    // for it still works (a superset, not a replacement) but "pomo" now
+    // does too, which is the point of the test.
+    const oldNameStill = await searchStoreProducts({ storeId: store.id, term: "Refresco" });
+    expect(oldNameStill.items.length).toBeGreaterThan(0);
+  });
+});
+
+/**
  * F-024: `barcodes` (list) against real Postgres. Notation from spec.md:
  * cod1 < cod2 < cod3 are the ascending-order valid GTINs derived below;
  * `INVALID_CODE` is what `normalizeBarcode` rejects.
@@ -687,7 +754,14 @@ describe("handleProduct — F-024 CanonicalBarcode (barcodes list)", () => {
   it("C1 (E10), through the real POST: a batch with the singular `barcode` key writes NOTHING", async () => {
     const store = await session.createStore();
     const eventsBefore = await prisma.syncEvent.count();
-    const barcodesBefore = await prisma.canonicalBarcode.count();
+    // F-021: scoped to the ONE literal ean this payload carries, not a raw
+    // global table count — `search.db.test.ts` (F-021) runs its own
+    // fixtures in the same `db` project, in parallel files, and each one
+    // legitimately adds unrelated `CanonicalBarcode` rows of its own. A
+    // global count here would be racy against that, not against a bug.
+    const barcodesBefore = await prisma.canonicalBarcode.count({
+      where: { ean: "7501031311309" },
+    });
 
     const response = await POST(
       new Request("http://localhost/api/internal/sync/catalog", {
@@ -728,6 +802,8 @@ describe("handleProduct — F-024 CanonicalBarcode (barcodes list)", () => {
     expect(response.status).toBe(400);
     expect((await response.json()).error).toBe("INVALID_BATCH");
     expect(await prisma.syncEvent.count()).toBe(eventsBefore);
-    expect(await prisma.canonicalBarcode.count()).toBe(barcodesBefore);
+    expect(await prisma.canonicalBarcode.count({ where: { ean: "7501031311309" } })).toBe(
+      barcodesBefore,
+    );
   });
 });
