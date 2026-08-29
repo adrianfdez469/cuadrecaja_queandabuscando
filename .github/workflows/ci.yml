@@ -122,9 +122,23 @@ jobs:
       - name: Visual verification (F-010 — carrito y checkout)
         run: bash .agent/verify.sh F-010 --visual
 
-      - name: Upload screenshots on failure
-        if: failure()
+      # Siempre, pase o falle la etapa: no hay ventana headless que mirar en
+      # vivo, así que esto es lo único que deja ver la corrida después.
+      - name: Upload screenshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: visual-shots-F-010
           path: .agent/runs/F-010/shots/
+          retention-days: 14
+
+      # Traces de Playwright (uno por contexto): timeline navegable — DOM,
+      # red, consola, una captura por acción — que se abre localmente con
+      # `npx playwright show-trace <archivo>` tras descargar el artifact.
+      - name: Upload traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-traces-F-010
+          path: .agent/runs/F-010/traces/
+          retention-days: 14

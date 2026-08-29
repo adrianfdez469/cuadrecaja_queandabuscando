@@ -1,6 +1,7 @@
 // Verificación visual del feature F-010 (carrito y checkout). La ejecuta
 // `bash .agent/verify.sh F-010 --visual` con la app ya levantada;
-// $VISUAL_BASE_URL apunta a ella y $VISUAL_SHOTS es la carpeta de capturas.
+// $VISUAL_BASE_URL apunta a ella, $VISUAL_SHOTS es la carpeta de capturas y
+// $VISUAL_TRACES la carpeta de traces de Playwright (uno por contexto).
 //
 // Traduce los pasos V7–V22 de design.md § Verificación — los que necesitan
 // navegador porque `curl` no puede verlos: si la lista salta al llegar la
@@ -18,6 +19,12 @@ import { chromium } from "playwright";
 
 const BASE = process.env.VISUAL_BASE_URL ?? "http://localhost:3101";
 const SHOTS = process.env.VISUAL_SHOTS ?? ".agent/runs/_libre/shots";
+// Un trace por contexto: timeline navegable (DOM, red, consola, una captura
+// por acción) que se abre con `npx playwright show-trace <archivo>`. Más
+// pesado que una captura suelta, pero es lo único que deja "reproducir" la
+// corrida entera en vez de mirar fotos aisladas — headless no tiene ventana
+// que ver en vivo, esto es el sustituto.
+const TRACES = process.env.VISUAL_TRACES ?? ".agent/runs/_libre/traces";
 
 const MOVIL = { width: 360, height: 740 };
 const TABLET = { width: 768, height: 1024 };
@@ -124,6 +131,7 @@ async function quitarRuta(page, patron) {
 
 const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: MOVIL });
+await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
 const page = await context.newPage();
 prepararPagina(page, "sesión principal");
 
@@ -692,6 +700,7 @@ try {
     "V20 — localStorage bloqueado: agregar, aviso, llegar a confirmar sin errores",
     async () => {
       const ctxPrivado = await browser.newContext({ viewport: MOVIL });
+      await ctxPrivado.tracing.start({ screenshots: true, snapshots: true, sources: true });
       const paginaPrivada = await ctxPrivado.newPage();
       vigilarConsola(paginaPrivada, "localStorage bloqueado");
 
@@ -742,6 +751,7 @@ try {
         .catch(() => false);
       check("se puede llegar a Confirmar habilitado sin localStorage", true, confirmarHabilitado);
 
+      await ctxPrivado.tracing.stop({ path: `${TRACES}/V20-localStorage-bloqueado.zip` });
       await ctxPrivado.close();
     },
   );
@@ -749,6 +759,7 @@ try {
   // ---------------------------------------------------------------- V21 ----
   await paso("V21 — sin JavaScript: catálogo, ficha, carrito y pedido legibles", async () => {
     const ctxSinJs = await browser.newContext({ viewport: MOVIL, javaScriptEnabled: false });
+    await ctxSinJs.tracing.start({ screenshots: true, snapshots: true, sources: true });
     const paginaSinJs = await ctxSinJs.newPage();
 
     await paginaSinJs.goto(`${BASE}/tienda-demo`);
@@ -786,6 +797,7 @@ try {
       fail("no hay ordenCodigo disponible todavía para comprobar /pedido sin JS");
     }
 
+    await ctxSinJs.tracing.stop({ path: `${TRACES}/V21-sin-js.zip` });
     await ctxSinJs.close();
   });
 
@@ -830,6 +842,7 @@ try {
 } catch (e) {
   fail(`el guion visual se rompió: ${e.message}`);
 } finally {
+  await context.tracing.stop({ path: `${TRACES}/V07-V19-V22-sesion-principal.zip` });
   await browser.close();
 }
 
