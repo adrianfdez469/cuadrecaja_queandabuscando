@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { Field } from "@/components/ui/Field";
 import { RadioCard } from "@/components/ui/RadioCard";
 import { add, formatMoney, money, subtract } from "@/lib/money";
+import { getAccountProfile } from "@/features/account/accountStore";
 import {
   CONTACT_NAME_MAX_LENGTH,
   CONTACT_NAME_MIN_LENGTH,
@@ -74,9 +76,33 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
   const [quoteState, setQuoteState] = useState<QuoteState>("loading");
   const [slow, setSlow] = useState(false);
 
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
+  // `null` means "still nothing" — distinct from "" (a field the shopper
+  // cleared on purpose). What renders is `typed ?? profile value ?? ""`
+  // (design.md § 5, DA1): derived in render, never a `setState` inside the
+  // effect that fetches the profile.
+  const [name, setNameState] = useState<string | null>(null);
+  const [phone, setPhoneState] = useState<string | null>(null);
+  const [email, setEmailState] = useState<string | null>(null);
+  const nameRef = useRef<string | null>(null);
+  const phoneRef = useRef<string | null>(null);
+  const emailRef = useRef<string | null>(null);
+  function setName(value: string | null) {
+    nameRef.current = value;
+    setNameState(value);
+  }
+  function setPhone(value: string | null) {
+    phoneRef.current = value;
+    setPhoneState(value);
+  }
+  function setEmail(value: string | null) {
+    emailRef.current = value;
+    setEmailState(value);
+  }
+  const [contactStatus, setContactStatus] = useState<"initial" | "applied" | "signed_in_no_fill">(
+    "initial",
+  );
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const hasLoadedProfileRef = useRef(false);
   const [notes, setNotes] = useState("");
   const [fulfillment, setFulfillment] = useState<Fulfillment>("PICKUP");
   const [deliveryAddress, setDeliveryAddress] = useState("");
@@ -102,6 +128,12 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
   const storageKey = `${CHECKOUT_KEY_STORAGE_PREFIX}${storeId}`;
 
   const itemsKey = cart.items.map((item) => `${item.storeProductId}:${item.qty}`).join(",");
+
+  // `lo tecleado ?? lo del perfil ?? ""` (design.md § 5): derived every
+  // render, never written into a `setState` of its own.
+  const displayName = name ?? "";
+  const displayPhone = phone ?? "";
+  const displayEmail = email ?? "";
 
   async function fetchQuote() {
     if (cart.items.length === 0) return;
@@ -156,6 +188,33 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, itemsKey]);
 
+  // DA1 (architecture.md): fetched once, in parallel with the quote — never
+  // in `src/app/[slug]/checkout/page.tsx`, which is what keeps the fila 4 of
+  // F-010's grep clean. Deferred to a timer for the same reason as
+  // `fetchQuote` above: nothing here may run synchronously in the effect
+  // body. If it never resolves, or resolves to "no session", the line under
+  // "Tus datos de contacto" simply never changes (E16, E17) — nobody waits
+  // and nobody sees an error for this.
+  useEffect(() => {
+    if (!hydrated || hasLoadedProfileRef.current) return undefined;
+    hasLoadedProfileRef.current = true;
+    const timer = setTimeout(() => {
+      void getAccountProfile().then((state) => {
+        if (!state.signedIn || !state.profile) return;
+        const profile = state.profile;
+        const applied =
+          (nameRef.current === null && Boolean(profile.name)) ||
+          (phoneRef.current === null && Boolean(profile.phone)) ||
+          (emailRef.current === null && Boolean(profile.email));
+        if (nameRef.current === null && profile.name) setName(profile.name);
+        if (phoneRef.current === null && profile.phone) setPhone(profile.phone);
+        if (emailRef.current === null && profile.email) setEmail(profile.email);
+        setContactStatus(applied ? "applied" : "signed_in_no_fill");
+      });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [hydrated]);
+
   useEffect(() => {
     if (quoteState !== "loading") return undefined;
     const timer = setTimeout(() => setSlow(true), CART_QUOTE_SLOW_MS);
@@ -207,7 +266,7 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
 
   function validate(): FieldErrors {
     const errors: FieldErrors = {};
-    const trimmedName = name.trim();
+    const trimmedName = displayName.trim();
     if (!trimmedName) errors.name = "Escribe tu nombre.";
     else if (trimmedName.length < CONTACT_NAME_MIN_LENGTH)
       errors.name = "El nombre es demasiado corto.";
@@ -215,13 +274,14 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
       errors.name = "El nombre no puede pasar de 80 caracteres.";
     }
 
-    const digits = phone.replace(/\D/g, "");
-    if (!phone.trim()) errors.phone = "Escribe un teléfono para que la tienda pueda contactarte.";
+    const digits = displayPhone.replace(/\D/g, "");
+    if (!displayPhone.trim())
+      errors.phone = "Escribe un teléfono para que la tienda pueda contactarte.";
     else if (digits.length < CONTACT_PHONE_MIN_DIGITS || digits.length > CONTACT_PHONE_MAX_DIGITS) {
       errors.phone = "El teléfono tiene que tener entre 8 y 15 dígitos.";
     }
 
-    if (email.trim() && !emailLooksValid(email.trim()))
+    if (displayEmail.trim() && !emailLooksValid(displayEmail.trim()))
       errors.email = "Ese correo no parece válido.";
 
     if (fulfillment === "DELIVERY") {
@@ -276,9 +336,9 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
         };
       }),
       contact: {
-        name: name.trim(),
-        phone: phone.trim(),
-        ...(email.trim() ? { email: email.trim() } : {}),
+        name: displayName.trim(),
+        phone: displayPhone.trim(),
+        ...(displayEmail.trim() ? { email: displayEmail.trim() } : {}),
       },
       fulfillment,
       ...(fulfillment === "DELIVERY" ? { deliveryAddress: deliveryAddress.trim() } : {}),
@@ -543,6 +603,52 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
           </Alert>
         )}
 
+        <div>
+          <h2 className="font-medium">Tus datos de contacto</h2>
+          <p className="text-fg-muted min-h-10 text-xs" aria-live="polite">
+            {contactStatus === "applied" ? (
+              "Rellenamos tus datos guardados. Puedes cambiarlos."
+            ) : contactStatus === "signed_in_no_fill" ? (
+              "La tienda te va a contactar por aquí."
+            ) : (
+              <>
+                La tienda te va a contactar por aquí. Si ya tienes cuenta,{" "}
+                <Link
+                  href={`/cuenta/entrar?next=/${storeSlug}/checkout`}
+                  className="underline"
+                  onClick={(event) => {
+                    const hasSomethingTyped = Boolean(
+                      displayName.trim() || displayPhone.trim() || displayEmail.trim(),
+                    );
+                    if (hasSomethingTyped) {
+                      event.preventDefault();
+                      setShowLeaveConfirm(true);
+                    }
+                  }}
+                >
+                  entra
+                </Link>{" "}
+                y los rellenamos.
+              </>
+            )}
+          </p>
+          {showLeaveConfirm && (
+            <p className="text-fg-muted mt-1 text-xs">
+              Si entras ahora se pierde lo que escribiste aquí.{" "}
+              <Link href={`/cuenta/entrar?next=/${storeSlug}/checkout`} className="underline">
+                Sí, entrar
+              </Link>{" "}
+              <button
+                type="button"
+                className="underline"
+                onClick={() => setShowLeaveConfirm(false)}
+              >
+                No
+              </button>
+            </p>
+          )}
+        </div>
+
         <fieldset disabled={submitting} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field id="field-name" label="Nombre y apellidos" error={fieldErrors.name}>
@@ -551,7 +657,10 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
                   {...props}
                   type="text"
                   autoComplete="name"
-                  value={name}
+                  value={displayName}
+                  onFocus={() => {
+                    if (name === null) setName(displayName);
+                  }}
                   onChange={(event) => setName(event.target.value)}
                   className="border-border min-h-11 w-full rounded-md border px-3"
                 />
@@ -571,7 +680,10 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
                   inputMode="tel"
                   autoComplete="tel"
                   enterKeyHint="next"
-                  value={phone}
+                  value={displayPhone}
+                  onFocus={() => {
+                    if (phone === null) setPhone(displayPhone);
+                  }}
                   onChange={(event) => setPhone(event.target.value)}
                   className="border-border min-h-11 w-full rounded-md border px-3"
                 />
@@ -585,7 +697,10 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
                 {...props}
                 type="email"
                 autoComplete="email"
-                value={email}
+                value={displayEmail}
+                onFocus={() => {
+                  if (email === null) setEmail(displayEmail);
+                }}
                 onChange={(event) => setEmail(event.target.value)}
                 className="border-border min-h-11 w-full rounded-md border px-3"
               />

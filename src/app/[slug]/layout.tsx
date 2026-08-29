@@ -4,6 +4,8 @@ import { requireResolution } from "@/features/storefront/server/resolve";
 import { renderStoreTheme } from "@/features/theming/storeTheme";
 import { Container } from "@/components/ui/Container";
 import { CartBadge } from "@/features/cart/components/CartBadge";
+import { AccountBadge } from "@/features/account/components/AccountBadge";
+import { isSupabaseAuthConfigured } from "@/lib/supabase/config";
 
 /**
  * ISR floor, in seconds. On-demand `revalidateTag` from the sync is what
@@ -19,6 +21,10 @@ export const revalidate = 3600;
 export default async function StoreLayout({ children, params }: LayoutProps<"/[slug]">) {
   const { slug } = await params;
   const resolution = await requireResolution(slug);
+  // Computed server-side, identical for every visitor: the ISR HTML never
+  // depends on who is looking (R11, criterio 6). D7: the icon is global, so
+  // it shows in all four header variants, including a closed store's.
+  const authConfigured = isSupabaseAuthConfigured();
 
   // Etapa 2, criterio 2: a brand that groups 2+ renderable branches gets a
   // DIFFERENT header — the brand's own name and theme, no link (there is
@@ -37,6 +43,7 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[s
             <span className="min-w-0 flex-1 truncate text-xl font-semibold tracking-tight">
               {resolution.brandName}
             </span>
+            <AccountBadge storeSlug={resolution.brandSlug} authConfigured={authConfigured} />
           </Container>
         </header>
 
@@ -86,6 +93,7 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[s
             <span className="hidden text-sm opacity-80 sm:inline">· {store.city}</span>
           )}
           {!closed && <CartBadge storeId={store.id} storeSlug={store.canonicalSlug} />}
+          <AccountBadge storeSlug={store.canonicalSlug} authConfigured={authConfigured} />
         </Container>
       </header>
 
