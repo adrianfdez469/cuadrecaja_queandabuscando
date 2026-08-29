@@ -93,6 +93,30 @@ else
   warn "emulador de Storage no responde — ejecuta: docker compose up -d"
 fi
 
+echo "== Auth =="
+# Nunca con `bad`: una sesión que no toca la cuenta del comprador tiene que
+# seguir leyendo ENTORNO LISTO con el emulador parado (F-028, R4, E10).
+#
+# El renombrado de `storage-gateway` a `supabase-gateway` (D4) deja el
+# contenedor viejo ocupando el 54321 si alguien no pasó por
+# `--remove-orphans`: el síntoma sin este aviso es «port is already
+# allocated», que no menciona ni el renombrado ni el arreglo (E16, R11). Si
+# `docker` no está o no responde, esto no imprime nada — nunca convierte
+# "Docker parado" en ruido.
+if command -v docker >/dev/null 2>&1 && docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'queandabuscando-storage-gateway'; then
+  warn "el contenedor viejo queandabuscando-storage-gateway sigue vivo — ejecuta: docker compose up -d --remove-orphans"
+fi
+if curl -fsS -m 3 "$SUPABASE_URL/auth/v1/health" >/dev/null 2>&1; then
+  ok "emulador de Auth arriba (/auth/v1/health)"
+else
+  warn "emulador de Auth no responde — ejecuta: docker compose up -d"
+fi
+if curl -fsS -m 3 "http://localhost:54324/readyz" >/dev/null 2>&1; then
+  ok "capturador de correo arriba (Mailpit, http://localhost:54324)"
+else
+  warn "Mailpit no responde en http://localhost:54324 — comprueba el puerto y ejecuta: docker compose up -d"
+fi
+
 echo
 if [ "$FAIL" -eq 0 ]; then
   printf '\033[32mENTORNO LISTO\033[0m\n'

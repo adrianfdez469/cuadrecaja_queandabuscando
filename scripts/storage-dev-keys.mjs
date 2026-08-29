@@ -16,8 +16,11 @@
  *   node scripts/storage-dev-keys.mjs          # print the three lines
  *   node scripts/storage-dev-keys.mjs --write  # append/replace them in .env
  *
- * After changing them, the emulator must be recreated so it reads the new
- * secret: `docker compose up -d --force-recreate storage storage-gateway`.
+ * After changing them, the emulators must be recreated so they read the new
+ * secret: `docker compose up -d --force-recreate storage supabase-gateway auth`.
+ * The Auth emulator (F-028) reads this SAME secret (R2) — forgetting to
+ * recreate it too leaves it rejecting everything with an opaque 401, same as
+ * Storage would.
  */
 
 import { randomBytes } from "node:crypto";
@@ -66,5 +69,5 @@ for (const [i, name] of VARS.entries()) {
 writeFileSync(".env", env);
 
 console.log(`Wrote ${VARS.length} local Storage keys to .env.`);
-console.log("Now recreate the emulator so it reads the new secret:");
-console.log("  docker compose up -d --force-recreate storage storage-gateway");
+console.log("Now recreate the emulators so they read the new secret (Storage AND Auth, F-028):");
+console.log("  docker compose up -d --force-recreate storage supabase-gateway auth");
