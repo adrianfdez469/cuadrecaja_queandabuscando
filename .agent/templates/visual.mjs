@@ -1,6 +1,7 @@
 // Verificación visual del feature F-XXX. La ejecuta `bash .agent/verify.sh
-// F-XXX --visual` con la app ya levantada; $VISUAL_BASE_URL apunta a ella y
-// $VISUAL_SHOTS es la carpeta donde dejar las capturas.
+// F-XXX --visual` con la app ya levantada; $VISUAL_BASE_URL apunta a ella,
+// $VISUAL_SHOTS es la carpeta donde dejar las capturas y $VISUAL_TRACES la
+// carpeta donde dejar el trace de Playwright.
 //
 // Esto comprueba lo que `curl` no puede ver: si la lista salta mientras carga,
 // si el foco va donde debe, si el formulario es anunciable, si la pantalla
@@ -17,6 +18,10 @@ import { chromium } from "playwright";
 
 const BASE = process.env.VISUAL_BASE_URL ?? "http://localhost:3101";
 const SHOTS = process.env.VISUAL_SHOTS ?? ".agent/runs/_libre/shots";
+// Timeline navegable (DOM, red, consola, una captura por acción), se abre con
+// `npx playwright show-trace <archivo>`. Headless no tiene ventana que ver en
+// vivo — esto es el sustituto para "reproducir" la corrida entera.
+const TRACES = process.env.VISUAL_TRACES ?? ".agent/runs/_libre/traces";
 
 // El público objetivo compra desde un teléfono con conexión limitada. El
 // viewport estrecho es el caso normal, no el caso raro: se prueba primero.
@@ -74,11 +79,13 @@ function vigilarConsola(page, donde) {
 }
 
 const browser = await chromium.launch();
+const context = await browser.newContext({ viewport: MOVIL });
+await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
 
 try {
   // --- Ejemplos; sustitúyelos por los pasos V* de design.md -----------------
 
-  const page = await browser.newPage({ viewport: MOVIL });
+  const page = await context.newPage();
   await page.goto(`${BASE}/tienda-demo`, { waitUntil: "networkidle" });
   await prepararPagina(page, "/tienda-demo");
   await shot(page, "V01-catalogo-movil");
@@ -120,6 +127,7 @@ try {
 } catch (e) {
   fail(`el guion visual se rompió: ${e.message}`);
 } finally {
+  await context.tracing.stop({ path: `${TRACES}/trace.zip` });
   await browser.close();
 }
 

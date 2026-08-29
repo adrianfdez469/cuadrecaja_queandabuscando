@@ -72,3 +72,73 @@ jobs:
 
       - name: Client bundle is within budget
         run: npm run check:bundle
+
+  visual:
+    runs-on: ubuntu-latest
+    # Aparte de `verify`, no dentro de `--full`: instalar Chromium añade
+    # ~1-2 min y ~150 MB (cacheables) que no vale la pena pagar en el bucle
+    # típico typecheck/lint/test que los agentes corren decenas de veces por
+    # sesión (.agent/specs/propuestas/verificacion-visual-en-el-arnes.md, P2).
+    needs: verify
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: queandabuscando
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/queandabuscando
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/queandabuscando
+      SSO_JWT_SECRET: ci-only-secret-that-is-long-enough-to-pass-check
+      ADMIN_SESSION_SECRET: ci-only-admin-secret-long-enough-to-pass-check
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Migrations apply cleanly to an empty database
+        run: npx prisma migrate deploy
+
+      - run: npm run seed
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Visual verification (F-010 — carrito y checkout)
+        run: bash .agent/verify.sh F-010 --visual
+
+      # Siempre, pase o falle la etapa: no hay ventana headless que mirar en
+      # vivo, así que esto es lo único que deja ver la corrida después.
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: visual-shots-F-010
+          path: .agent/runs/F-010/shots/
+          retention-days: 14
+
+      # Traces de Playwright (uno por contexto): timeline navegable — DOM,
+      # red, consola, una captura por acción — que se abre localmente con
+      # `npx playwright show-trace <archivo>` tras descargar el artifact.
+      - name: Upload traces
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: visual-traces-F-010
+          path: .agent/runs/F-010/traces/
+          retention-days: 14

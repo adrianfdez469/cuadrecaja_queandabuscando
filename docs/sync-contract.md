@@ -512,6 +512,13 @@ GET /api/internal/orders?since=<último id visto>&limit=100
 que el cursor es monotónico. Un pedido devuelto pasa de `PENDING` a `PULLED`,
 y **no se borra**: la página de estado del cliente sigue funcionando.
 
+**Este endpoint asume un único poller por negocio, secuencial.** La lectura
+(`findMany`) y la marca como `PULLED` (`updateMany`) no son atómicas entre sí.
+Dos pollers del mismo negocio corriendo a la vez pueden leer el mismo pedido
+antes de que el primero lo marque, y ambos lo entregarían: el POS lo vería
+duplicado. Es responsabilidad de cuadrecaja no correr dos instancias del
+poller de un mismo negocio en paralelo.
+
 **El cursor es por negocio (v3).** `since` se interpreta solo contra los
 pedidos del negocio autenticado por el token — cuadrecaja tiene que guardar
 un `ultimoPedidoVisto` **por negocio**, no uno solo. Los ids siguen siendo un

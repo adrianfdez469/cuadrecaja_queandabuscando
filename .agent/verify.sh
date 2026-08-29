@@ -305,7 +305,7 @@ correr_smoke() { # <log>
 # la conecte, no existe en CI y no es reproducible entre sesiones. Esta etapa la
 # corre cualquier agente que tenga Bash, que son todos.
 correr_visual() { # <log>
-  local script="$SPECS/$FEATURE/visual.mjs" srvlog shots pid i code=0
+  local script="$SPECS/$FEATURE/visual.mjs" srvlog shots traces pid i code=0
   if [ ! -f "$script" ]; then
     # Misma regla que smoke: un feature con interfaz que no tiene guion visual no
     # está «sin comprobar», está en rojo. F-010 se cerró con 22 pasos visuales sin
@@ -322,6 +322,12 @@ correr_visual() { # <log>
   shots="$RUNS/$FEATURE/shots"
   rm -rf "$shots"
   mkdir -p "$shots"
+  # El trace (si el guion lo graba con context.tracing) es lo único que deja
+  # "reproducir" la corrida entera con `npx playwright show-trace <zip>` —
+  # headless no tiene ventana que ver en vivo, esto es el sustituto.
+  traces="$RUNS/$FEATURE/traces"
+  rm -rf "$traces"
+  mkdir -p "$traces"
 
   # Next 16 solo admite UN `next dev` por directorio, sea el puerto que sea: si
   # ya hay uno de ESTE worktree, lanzar otro muere con «Another next dev server
@@ -347,7 +353,7 @@ correr_visual() { # <log>
   fi
 
   if curl -sf -o /dev/null "http://localhost:$puerto/"; then
-    VISUAL_BASE_URL="http://localhost:$puerto" VISUAL_SHOTS="$shots" \
+    VISUAL_BASE_URL="http://localhost:$puerto" VISUAL_SHOTS="$shots" VISUAL_TRACES="$traces" \
       node "$script" >>"$1" 2>&1
     code=$?
   else
@@ -363,6 +369,9 @@ correr_visual() { # <log>
     echo
     printf -- '--- capturas en %s ---\n' "$shots"
     ls -1 "$shots" 2>/dev/null | sed 's/^/  /'
+    echo
+    printf -- '--- traces en %s (npx playwright show-trace <archivo>) ---\n' "$traces"
+    ls -1 "$traces" 2>/dev/null | sed 's/^/  /'
     echo
     echo "--- salida del servidor (runtime feedback) ---"
     tail -80 "$srvlog"
