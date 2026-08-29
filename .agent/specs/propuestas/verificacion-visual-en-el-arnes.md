@@ -1,8 +1,8 @@
 ---
 propuesta: verificacion-visual-en-el-arnes
 agente: orquestador
-actualizado: 2026-08-26T10:45:00Z
-estado: propuesta
+actualizado: 2026-08-28T22:55:00Z
+estado: resuelta
 ---
 
 ## Problema
@@ -55,26 +55,38 @@ arnés.
 - **El journal apunta las etapas que corrieron**, no un `todas` que no decía nada.
   Sin eso, la puerta no puede saber si `visual` llegó a ejecutarse.
 
-## Lo que falta, y es la mitad del trabajo
+## Resuelto (2026-08-28)
 
-`.agent/specs/F-010/visual.mjs` **es todavía la plantilla**, no los pasos de
-F-010. Traducir los `V7`–`V22` de su `design.md` —el estado de carga del carrito,
-Slow 4G, Offline con «Continuar de todos modos», el rebote de la recotización, el
-foco del formulario de checkout— es lo que haría que este mecanismo cubra el
-feature que lo motivó, en vez de solo demostrar que funciona.
+Las tres preguntas se le pusieron al humano y esto es lo que decidió, todo por
+la opción recomendada:
 
-Hasta que eso esté, la etapa pasa comprobando el catálogo, que es real pero es
-poco.
+- **P1 — parte del arnés.** No hay `F-025`: los `V7`–`V22` viven en el propio
+  `design.md` de F-010 (que ya los definía) y el mecanismo en `.agent/`, igual
+  que el resto de la infraestructura de verificación.
+- **P2 — job propio de CI, fuera de `--full`.** `.github/workflows/ci.yml`
+  ahora tiene un job `visual` separado de `verify` (`needs: verify`), con su
+  propio `npx playwright install --with-deps chromium` y capturas subidas como
+  artifact si falla. El bucle local (`--full` sin `--visual`) no paga ese costo.
+- **P3 — se tradujeron ahora.** `.agent/specs/F-010/visual.mjs` dejó de ser la
+  plantilla: los 16 pasos `V7`–`V22` están escritos y `bash .agent/verify.sh
+F-010 --visual` sale `PASA` (46 aserciones, 0 fallos, reproducido en más de
+  diez corridas seguidas tras estabilizarlo — ver notas de F-010 en
+  `features.json`).
 
-## Preguntas al humano
+Dos cosas se descubrieron traduciendo los pasos, no leyendo el código, y valen
+la pena dejarlas aquí para la próxima vez que alguien escriba un `visual.mjs`:
 
-- **P1** — ¿Esto es un feature de `features.json` con sus `acceptance_criteria`, o
-  parte del arnés que no se versiona como producto? El arnés hasta ahora ha
-  crecido sin ser feature; esto es más grande que lo habitual.
-- **P2** — ¿La etapa `visual` entra en `--full` (y por tanto en el CI), o se queda
-  como bandera aparte? En CI hace falta `npx playwright install chromium`, que
-  añade ~1–2 min y unos 150 MB de descarga cacheable. Recomiendo que **no** entre
-  en `--full` y sí en un job propio del CI, para no encarecer el bucle local que
-  los agentes corren decenas de veces.
-- **P3** — ¿Se traducen los `V7`–`V22` de F-010 ahora, reabriendo el feature, o se
-  quedan como deuda anotada en sus `notes`?
+1. **Estrangular la conexión entera con
+   `Network.emulateNetworkConditions` no es fiable contra `next dev`** — el
+   HMR y los chunks de compilación se estrangulan con todo lo demás y el
+   tiempo hasta `domcontentloaded` deja de ser predecible (se midió más de
+   10s sin resolver con un perfil de 4s de latencia). Interceptar con
+   `page.route()` solo la petición que a la app le importa (la cotización)
+   da el mismo efecto observable y es determinista.
+2. **`getComputedStyle(...).color` no devuelve `rgb()` en esta app** — los
+   tokens están en OKLCH y Tailwind v4 resuelve las variantes de opacidad con
+   `color-mix()`; Chromium lo serializa en `lab()`/`oklab()`. Un parser que
+   solo entienda `rgba?(...)` falla en silencio con cualquier color real, sin
+   que reintentar arregle nada (parecía una condición de carrera y no lo era).
+   Pintar el color en un canvas de 1×1 y leer el píxel con `getImageData`
+   normaliza cualquier color CSS a RGBA sin tener que parsear su sintaxis.
