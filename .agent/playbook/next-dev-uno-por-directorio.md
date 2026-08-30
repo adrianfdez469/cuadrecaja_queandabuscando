@@ -5,7 +5,7 @@ firma: Another next dev server is already running
 etapa: visual
 visto_en: F-010, F-018, F-012
 creado: 2026-08-26T10:36:00Z
-promovido_a_agents: no
+promovido_a_agents: sí
 arreglo: no lances otro; reutiliza el que ya corre en este directorio — verify.sh lo hace solo con servidor_propio(), y si el fallo persiste es que el puerto lo ocupa OTRO checkout
 ---
 

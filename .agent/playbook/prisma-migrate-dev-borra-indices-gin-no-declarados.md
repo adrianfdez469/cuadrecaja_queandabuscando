@@ -5,7 +5,7 @@ firma: DROP INDEX "(CanonicalProduct_(searchVector|name_trgm)_idx|StoreProduct_(
 etapa: review
 visto_en: F-010, F-021
 creado: 2026-08-26T03:57:58Z
-promovido_a_agents: no
+promovido_a_agents: sí
 arreglo: quita las líneas `DROP INDEX` del migration.sql generado; estos cinco índices no se representan en schema.prisma y no deben tocarse desde una migración de Prisma
 ---
 
