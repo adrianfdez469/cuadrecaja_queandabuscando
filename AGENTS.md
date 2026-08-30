@@ -203,6 +203,36 @@ the prose, not this check», que es lo que el propio mensaje pide—, y si ese
 documento no es tuyo escala a quien pueda editarlo en vez de darlo por bueno.
 Ya pasó en F-010, F-007, F-011 y F-017.
 
+**Prettier también formatea la prosa del arnés, y ahí puede cambiar lo que
+dice.** Dos mitades del mismo problema, y son las dos trampas más repetidas del
+repo. La primera: `format:check` es lo que valida el CI, y cualquier `.md` que
+escribas en `.agent/` cuenta — pasa `npm run format` sobre **lo que tú
+escribiste** antes de dar una etapa por buena, o el sensor se pone rojo por un
+documento, no por código. La segunda, más cara: **no formatees a ciegas un
+documento ajeno.** Prettier reindenta y, si una línea de continuación empieza por
+`+`, `-` o `*`, la convierte en viñeta y **cambia el sentido de la frase** —
+«(pantallas + fila de la base)» se convirtió en un ítem de lista que no decía
+nada. El procedimiento es copia, formatea, diffea, y si alguna línea cambió de
+sentido reescríbela a mano para que el signo no quede al principio. La primera
+mitad lleva once features acumulados; la segunda, siete.
+
+**Un solo `next dev` por directorio, y comprueba de cuál es.** Las etapas que
+levantan la app (`smoke`, `visual`) fallan con «el servidor de desarrollo no
+llegó a levantar», que no dice la causa: ya hay otro `next dev` en ese puerto.
+`verify.sh` reutiliza el suyo, así que si el fallo persiste **el puerto lo ocupa
+otro checkout** — y entonces lo grave no es que falle, sino que podrías estar
+verificando contra otra copia del repo sin notarlo. Comprueba el directorio del
+proceso antes de creerte lo que ves.
+
+**`prisma migrate dev` propone `DROP INDEX` de índices que no están en el
+schema.** Cinco índices GIN y parciales de búsqueda (`CanonicalProduct_searchVector_idx`,
+`CanonicalProduct_name_trgm_idx`, `StoreProduct_visible_catalog_idx`,
+`StoreProduct_searchVector_idx`, `StoreProduct_searchDocument_trgm_idx`) no se
+representan en `prisma/schema.prisma`, así que Prisma los da por sobrantes y los
+borra **en un diff que no tiene nada que ver con ellos**. Quita esas líneas del
+`migration.sql` generado antes de aplicarlo. Aplicarlo sin mirar no rompe ningún
+test: solo deja la búsqueda haciendo scans secuenciales en producción.
+
 **Un evento fallido NO es un duplicado.** Reportarlo en `ok` haría que el POS
 marque su outbox como procesado y la actualización se pierda en silencio. Ver
 `features/sync/server/inbox.ts` y sus tests.
