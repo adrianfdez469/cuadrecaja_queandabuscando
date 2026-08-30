@@ -377,7 +377,15 @@ export function SignInCard({
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold">Escribe el código</h2>
-        <p className="text-fg-muted mt-1 text-sm" id="signin-code-help">
+        {/* Su propio id, distinto del que compone `Field` para el campo de
+            abajo (`${id}-help` = "signin-code-help", por su `help="Escribe
+            los 6 dígitos."`). Antes ambos usaban "signin-code-help" — un id
+            duplicado en el documento, que deja el `aria-describedby` del
+            input apuntando a una referencia ambigua. El input abajo
+            referencia AMBOS ids explícitamente (design.md § Accesibilidad
+            punto 1: el lector de pantalla tiene que decir a quién se le
+            mandó el código al recibir el foco). */}
+        <p className="text-fg-muted mt-1 text-sm" id="signin-code-recipient">
           Te mandamos un código de 6 dígitos a {email}.
         </p>
         <button
@@ -418,8 +426,19 @@ export function SignInCard({
                 pattern="[0-9]*"
                 autoComplete="one-time-code"
                 enterKeyHint="go"
-                maxLength={OTP_CODE_LENGTH}
+                // Sin `maxLength`: el navegador lo aplicaría al texto CRUDO
+                // pegado, antes de que `handleCodeChange` filtre los
+                // no-dígitos — pegar "123 456" (con espacio) o "Tu código es
+                // 123456" perdía dígitos, truncado a 6 caracteres crudos
+                // antes del filtrado (design.md § 2 exige que el pegado deje
+                // los 6 dígitos limpios). `handleCodeChange` ya filtra y
+                // recorta a `OTP_CODE_LENGTH` él mismo, así que el límite
+                // sigue existiendo, solo que después de filtrar, no antes.
                 value={code}
+                aria-describedby={
+                  ["signin-code-recipient", props["aria-describedby"]].filter(Boolean).join(" ") ||
+                  undefined
+                }
                 onChange={handleCodeChange}
                 className="border-border min-h-14 w-full rounded-md border px-3 text-center text-2xl tracking-[0.35em]"
               />
@@ -462,6 +481,7 @@ export function SignInCard({
           type="button"
           className="text-fg-muted min-h-11 w-full px-3 text-center text-sm underline disabled:no-underline disabled:opacity-60"
           disabled={resendSecondsLeft > 0}
+          aria-live="off"
           onClick={() => void requestCode(email, { isResend: true })}
         >
           {resendSecondsLeft > 0

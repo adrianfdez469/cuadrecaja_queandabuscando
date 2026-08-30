@@ -217,7 +217,7 @@
         "Las sesiones de cliente y de admin no comparten cookie: sus nombres son distintos.",
         "Con Supabase Auth sin configurar, la tienda y el checkout funcionan igual y el build pasa."
       ],
-      "passes": false,
+      "passes": true,
       "notes": "En curso con /sdd. Los clientes de Supabase ya están en src/lib/supabase/. El criterio 6 lo agregó el humano el 2026-08-29 a propuesta de sdd-spec; los cinco originales no se tocaron (regla 3)."
     },
     {

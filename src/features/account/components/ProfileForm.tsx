@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
@@ -36,6 +36,27 @@ export function ProfileForm({ initialProfile }: { initialProfile: AccountProfile
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState(false);
 
+  const summaryRef = useRef<HTMLDivElement | null>(null);
+  // Same pattern as `src/features/cart/components/CheckoutForm.tsx`
+  // (`wantsSummaryFocusRef`/`summaryRef`): the summary below renders
+  // conditionally on `outcome.kind === "invalid"`, so it does not exist yet
+  // when `save()` decides the response was invalid — focusing the ref right
+  // there only worked from the second failed submit on. The intent lives in
+  // a ref, not state, because `react-hooks/set-state-in-effect` forbids
+  // clearing a state flag from the very effect that consumes it, and this is
+  // a one-shot instruction, not data to render: it must not survive to the
+  // next render or it would steal focus back from the user.
+  const wantsSummaryFocusRef = useRef(false);
+
+  // Runs after the commit that mounted the summary, so the node exists even
+  // on the first failed save. `outcome` gets a fresh object on every save,
+  // so its identity change is what re-runs this.
+  useEffect(() => {
+    if (!wantsSummaryFocusRef.current) return;
+    wantsSummaryFocusRef.current = false;
+    summaryRef.current?.focus();
+  }, [outcome]);
+
   const dirty =
     name !== (initialProfile.name ?? "") ||
     phone !== (initialProfile.phone ?? "") ||
@@ -69,6 +90,7 @@ export function ProfileForm({ initialProfile }: { initialProfile: AccountProfile
           }
         }
         setOutcome({ kind: "invalid", errors });
+        wantsSummaryFocusRef.current = true;
         return;
       }
       setOutcome({ kind: "network_error" });
@@ -103,6 +125,7 @@ export function ProfileForm({ initialProfile }: { initialProfile: AccountProfile
       {outcome.kind === "saved" && <Alert tone="positive">Guardamos tus datos.</Alert>}
       {outcome.kind === "invalid" && Object.keys(fieldErrors).length > 0 && (
         <div
+          ref={summaryRef}
           role="alert"
           tabIndex={-1}
           className="bg-danger/12 border-danger/30 rounded-md border p-4 text-sm"

@@ -3,7 +3,7 @@ slug: next-dev-uno-por-directorio
 sintoma: "una etapa que levanta la app (smoke, visual) falla porque el servidor no llegó a levantar, y el log del servidor dice que ya hay otro next dev corriendo"
 firma: Another next dev server is already running
 etapa: visual
-visto_en: F-010, F-018
+visto_en: F-010, F-018, F-012
 creado: 2026-08-26T10:36:00Z
 promovido_a_agents: no
 arreglo: no lances otro; reutiliza el que ya corre en este directorio — verify.sh lo hace solo con servidor_propio(), y si el fallo persiste es que el puerto lo ocupa OTRO checkout

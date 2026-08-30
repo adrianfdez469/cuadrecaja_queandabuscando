@@ -1,7 +1,7 @@
 ---
 feature: F-012
 agente: sdd-implementer
-actualizado: 2026-08-29T15:53:19Z
+actualizado: 2026-08-30T02:46:48Z
 estado: listo
 ---
 
@@ -44,6 +44,81 @@ en 0 al final de cada uno.
 | `src/app/api/orders/route.ts` (modificado)                                                           | Arranca `resolveOrderCustomerId()` antes de leer el cuerpo                                                                                                                                                                                         | 10   | 4         |
 | `src/proxy.ts` (modificado, + `.test.ts`)                                                            | `matcher` + `/cuenta*`, `/auth*`; bifurcado por prefijo ANTES del redirect de admin                                                                                                                                                                | 11   | 4, 5      |
 | `src/app/robots.ts` (modificado)                                                                     | `disallow` + `/cuenta`, `/auth`                                                                                                                                                                                                                    | 11   | —         |
+
+## Ciclo de arreglo — los tres defectos que `visual.mjs` encontró (V9, V13, V17)
+
+`tests.md` (ciclo 3 de `sdd-tester`) escribió y ejecutó
+`.agent/specs/F-012/visual.mjs` por primera vez y encontró tres defectos
+reales de interfaz que ninguna otra etapa podía ver — dos de accesibilidad,
+uno funcional. No es alcance nuevo: son defectos en pasos que `plan.md` ya
+firmó. `visual.mjs` no se tocó (es del tester).
+
+1. **`V17`, severidad alta — el foco no saltaba al resumen de errores de
+   `/cuenta`.** `src/features/account/components/ProfileForm.tsx` — se
+   replicó **el mismo patrón** que ya resuelve
+   `src/features/cart/components/CheckoutForm.tsx:114-125,233`
+   (`summaryRef`/`wantsSummaryFocusRef`), no uno nuevo: un `useRef<HTMLDivElement>`
+   (`summaryRef`) en el contenedor `role="alert" tabIndex={-1}`, una intención
+   de una sola vez en otro `useRef` (`wantsSummaryFocusRef`) puesta a `true`
+   en `save()` justo antes del `setOutcome({ kind: "invalid", errors })`, y un
+   `useEffect` con `[outcome]` como dependencia que la consume y enfoca. Un
+   ref y no estado, por el mismo motivo que en `CheckoutForm`:
+   `react-hooks/set-state-in-effect` prohíbe limpiar un flag de estado desde
+   el mismo efecto que lo consume, y esto es una orden de una sola vez, no un
+   dato que se pinta — dejarlo en estado sobreviviría al siguiente render y
+   le robaría el foco al usuario en cualquier edición posterior. Nada de
+   `setTimeout(…, 0)`.
+2. **`V9`, severidad media — pegar el código perdía dígitos.** Mismo archivo,
+   el `<input id="signin-code">`: tenía `maxLength={OTP_CODE_LENGTH}` (6), y
+   el navegador lo aplica al texto **crudo** pegado, antes de que
+   `handleCodeChange` filtre los no-dígitos — pegar `"123 456"` (con espacio)
+   cortaba a `"123 45"` antes del filtro y dejaba `"12345"` (un dígito
+   perdido); pegar `"Tu código es 123456"` cortaba a `"Tu cód"` y dejaba el
+   campo vacío. Arreglo: se quitó el atributo `maxLength` del `<input>`.
+   `handleCodeChange` ya recortaba con `.replace(/\D/g, "").slice(0,
+OTP_CODE_LENGTH)`, así que el límite de longitud sigue existiendo — solo
+   que se aplica después de filtrar, no antes — y el campo sigue siendo
+   controlado (`value={code}`), así que nunca se ve más de 6 dígitos en
+   pantalla. Teclear dígito a dígito y la comprobación automática al llegar
+   los 6 de golpe no cambiaron. Fichado:
+   `.agent/playbook/otp-codigo-paste-truncado-por-maxlength-antes-de-filtrar.md`.
+3. **`V13`, severidad media — `id="signin-code-help"` duplicado.** Dos
+   elementos compartían ese id: el párrafo fijo con el correo
+   (`SignInCard.tsx`, antes en la línea 381) y el `<p id={helpId}>` que
+   `Field` (`src/components/ui/Field.tsx`) genera solo para su propio
+   `help="Escribe los 6 dígitos."` del campo `id="signin-code"`
+   (`${id}-help`). **No se tocó `Field.tsx`**: es un primitivo compartido y
+   nada en su contrato estaba mal — el problema era que dos ids distintos
+   coincidían por casualidad. El arreglo vive en quien lo usa: el párrafo
+   fijo pasó a tener su propio id (`signin-code-recipient`), y el `<input>`
+   del código ahora compone su `aria-describedby` a mano —
+   `[props["aria-describedby"], "signin-code-recipient"].filter(Boolean).join(" ")`
+   sobre lo que ya calculaba `Field`— así que un lector de pantalla recibe
+   **ambos** textos (el que dice a qué correo se mandó el código, y la ayuda
+   de "Escribe los 6 dígitos."), cada uno con un id único en el documento,
+   tal como pide `design.md` § Accesibilidad punto 1.
+4. **De propina — `aria-live="off"` en el botón de reenvío.** El efecto
+   observable ya era correcto por casualidad (un `<button>` sin `aria-live`
+   tampoco es una región activa), pero `design.md` § 2 lo pide explícito:
+   se añadió `aria-live="off"` al botón `Reenviar el código`.
+
+**Verificación de cierre**, misma ejecución dos veces para descartar
+intermitencia: `bash .agent/verify.sh F-012 --visual` → **0** (intentos 64 y
+67, 0 aserciones fallidas de 19 pasos automatizados, `V6`/`V15` siguen
+excluidos con su motivo original). `bash .agent/verify.sh F-012 --full` → **0**
+(intento 65). `bash .agent/verify.sh F-012 --smoke` → **0** (intento 66).
+`bash .agent/verify.sh pending F-012` → vacío: la única entrada previa (la
+firma del paste truncado) quedó fichada con `bash .agent/sdd.sh learn
+otp-codigo-paste-truncado-por-maxlength-antes-de-filtrar`.
+
+De paso, format arrastraba dos archivos sin formatear ajenos a estos tres
+arreglos —`.agent/progress/F-012.md` (prosa del ciclo anterior del tester,
+sin `npm run format` antes de guardar) y la ficha nueva de la bitácora—;
+ambos se revisaron con el procedimiento de
+`.agent/playbook/prettier-write-reescribe-prosa-ajena.md` (copiar, formatear,
+diffear) antes de aplicar `prettier --write`: en los dos casos el diff solo
+movía espacios de líneas de continuación de lista, ninguna palabra cambió de
+sentido.
 
 ## Desviaciones
 
