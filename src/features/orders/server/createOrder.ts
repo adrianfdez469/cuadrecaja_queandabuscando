@@ -248,9 +248,12 @@ export async function createOrder(
   );
 
   // Awaited HERE, and only once: everything above (store lookup, quote, the
-  // idempotency/abuse guard) already ran, so in the normal case this
-  // resolves instantly and the order is not delayed (R14, architecture.md §
-  // DA2 § Flujo de datos 4).
+  // idempotency/abuse guard) already ran, so the identity resolves alongside
+  // that work instead of ahead of it. It does NOT resolve instantly — with
+  // HS256 it costs a round trip to Auth — so what is guaranteed is narrower
+  // than it used to say here: the link never prevents the order, never makes
+  // it fail, and never delays it beyond ORDER_CUSTOMER_LINK_TIMEOUT_MS
+  // (R14, architecture.md § DA2 § Flujo de datos 4, corrected 2026-08-30).
   const customerId = await customerLink;
 
   for (let attempt = 0; attempt < ORDER_CODE_MAX_RETRIES; attempt += 1) {
