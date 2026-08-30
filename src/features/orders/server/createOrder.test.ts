@@ -375,6 +375,56 @@ describe("createOrder() — writing the order", () => {
   });
 });
 
+describe("createOrder() — customerLink (D6, R14, architecture.md § DA2)", () => {
+  it("defaults customerId to null when no second argument is given (every F-010 call site is unaffected)", async () => {
+    orderCreate.mockImplementation(async ({ data }: { data: { code: string } }) => ({
+      code: data.code,
+    }));
+    await createOrder(baseBody());
+
+    const data = orderCreate.mock.calls[0][0].data;
+    expect(data.customerId).toBeNull();
+  });
+
+  it("writes the id the customerLink promise resolves to (E28)", async () => {
+    orderCreate.mockImplementation(async ({ data }: { data: { code: string } }) => ({
+      code: data.code,
+    }));
+    await createOrder(baseBody(), Promise.resolve("customer-1"));
+
+    const data = orderCreate.mock.calls[0][0].data;
+    expect(data.customerId).toBe("customer-1");
+  });
+
+  it("a customerLink resolving to null (guest, or an unresolved identity, E16/E17) writes null", async () => {
+    orderCreate.mockImplementation(async ({ data }: { data: { code: string } }) => ({
+      code: data.code,
+    }));
+    await createOrder(baseBody(), Promise.resolve(null));
+
+    const data = orderCreate.mock.calls[0][0].data;
+    expect(data.customerId).toBeNull();
+  });
+
+  it("awaits customerLink only ONCE, after the store/quote/guard work is already done", async () => {
+    orderCreate.mockImplementation(async ({ data }: { data: { code: string } }) => ({
+      code: data.code,
+    }));
+    let resolveCount = 0;
+    const customerLink = Promise.resolve("customer-1").then((id) => {
+      resolveCount += 1;
+      return id;
+    });
+
+    await createOrder(baseBody(), customerLink);
+    // await it again in this test: still only resolved once by the promise chain.
+    await customerLink;
+
+    expect(resolveCount).toBe(1);
+    expect(orderCreate.mock.calls[0][0].data.customerId).toBe("customer-1");
+  });
+});
+
 describe("createOrder() — whatsappUrl", () => {
   it("is null for ONSITE regardless of the store's number", async () => {
     const onsiteStore = { ...store, checkoutMode: "ONSITE" as const };

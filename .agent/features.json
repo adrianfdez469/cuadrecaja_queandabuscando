@@ -214,10 +214,11 @@
         "El primer inicio de sesión crea un Customer enlazado por supabaseUserId.",
         "Los datos de contacto guardados se autocompletan en el siguiente pedido.",
         "Un pedido de invitado sigue siendo posible: la ruta de checkout no exige sesión.",
-        "Las sesiones de cliente y de admin no comparten cookie: sus nombres son distintos."
+        "Las sesiones de cliente y de admin no comparten cookie: sus nombres son distintos.",
+        "Con Supabase Auth sin configurar, la tienda y el checkout funcionan igual y el build pasa."
       ],
-      "passes": false,
-      "notes": "Sin empezar. Los clientes de Supabase ya están en src/lib/supabase/."
+      "passes": true,
+      "notes": "En curso con /sdd. Los clientes de Supabase ya están en src/lib/supabase/. El criterio 6 lo agregó el humano el 2026-08-29 a propuesta de sdd-spec; los cinco originales no se tocaron (regla 3)."
     },
     {
       "id": "F-013",
@@ -519,6 +520,70 @@
       ],
       "passes": false,
       "notes": "Anadido el 2026-08-29 por indicacion expresa del humano (regla 4), como parte del mismo pedido que F-025 y F-026. Spec completa en .agent/specs/F-027/spec.md, trasladada de .agent/specs/propuestas/filtros-y-ordenamiento-avanzados.md. ESTO ES LO QUE F-021 DEJO ANOTADO COMO 'OTRO FEATURE': su spec.md dice literalmente, en Alcance > Fuera: «Facetas, filtros y ordenaciones (por precio, por categoria, por disponibilidad). Otro feature.» — este feature es ese. Preguntas ya resueltas por el humano (recomendacion del agente aceptada tal cual): SP1, no se ofrece ordenar por 'mas vendido' en este ciclo (el contrato prohibe enviar Venta/MovimientoStock y los OrderItem de este storefront no son las ventas del negocio); se reabre con volumen real de pedidos o con un dato explicito del POS. SP2, el filtro de categoria reutiliza el mismo parametro que define F-026 para su navegacion por categoria, sin renombrarlo. SP3, el filtro y el orden por precio se calculan en la capa de aplicacion sobre la unica lectura de catalogo ya cacheada por tienda (usando resolvePrice, el mismo compositor que pinta las tarjetas), no en SQL ni con una columna derivada — evita duplicar la logica de promociones y evita multiplicar las entradas de cache por combinacion de filtros. SP4, el catalogo filtrado vive en una ruta dinamica propia, hermana de /[slug]/buscar, nunca como query param de /[slug] (que lo volveria Dynamic y rompe el primer criterio de F-004). SP5, se muestran conteos por faceta ('Bebidas (12)') solo en esta superficie, no en /[slug]/buscar. DELIBERADAMENTE FUERA por falta de dato: filtrar por marca o atributos (no existen en el schema ni en el contrato v4), ordenar por calificacion (no hay modelo de reseñas), el arbol de categorias y sus URL propias (F-026). No toca docs/sync-contract.md ni sube su version."
+    },
+    {
+      "id": "F-028",
+      "category": "calidad",
+      "status": "active",
+      "depends_on": [],
+      "description": "Emulador local de Supabase Auth, para poder verificar el acceso del comprador sin un proyecto en la nube.",
+      "acceptance_criteria": [
+        "'docker compose up -d' deja un solo origen sirviendo las dos APIs: 'curl -fsS http://localhost:54321/auth/v1/health' responde 200, y '/storage/v1/bucket' con la clave de servicio sigue devolviendo store-media.",
+        "El guion de acceso por correo termina con codigo 0 sin intervencion humana: pide el codigo, lo lee del correo capturado, lo canjea e imprime el user.id.",
+        "El acceso por correo funciona por las pantallas de F-012: /cuenta responde 200 con el perfil, y la consulta a Postgres antes y despues muestra exactamente un Customer nuevo con supabaseUserId no nulo.",
+        "Con el emulador parado, 'bash .agent/init.sh' termina en ENTORNO LISTO e imprime el comando para levantarlo; /tienda-demo y /cuenta/entrar siguen respondiendo 200.",
+        "El criterio 6 de F-012 sigue en pie: con NEXT_PUBLIC_SUPABASE_URL vacio, 'npm run build' termina en 0 y ese build sirve /tienda-demo en 200.",
+        "'npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script' no menciona los esquemas auth ni storage.",
+        "No entra en git nada con forma de clave: el grep de cadenas tipo JWT sobre el repo sigue sin devolver nada, y 'docker compose config' falla nombrando el generador de claves si falta el secreto.",
+        "El authorize de google y de facebook responde 302 al dominio del proveedor con redirect_uri y state correctos. Esto NO prueba que se pueda iniciar sesion con ellos: el consentimiento y la vuelta con un code real los emite un servidor de Google o Facebook y no se pueden fabricar en local.",
+        "El emulador se levanta y se ejecuta en CI sin ningun secreto de repositorio.",
+        "'docker compose up -d' dos veces seguidas termina con codigo 0 las dos veces.",
+        "'bash .agent/verify.sh F-028 --full' termina con codigo 0."
+      ],
+      "passes": true,
+      "notes": "Anadido el 2026-08-29 por decision expresa del humano (regla 4). Sale del bloqueo de F-012: su criterio 1 no se pudo verificar por no haber backend de Auth, y el humano confirmo que no habra proyecto Supabase en la nube a corto plazo. Mismo patron que F-011 uso para Storage. Propuesta completa en .agent/specs/propuestas/emulador-auth-local.md. HONESTIDAD SOBRE EL ALCANCE: de los cuatro metodos del criterio 1 de F-012, solo el correo queda verificable de punta a punta; Google y Facebook solo hasta el 302 de salida; Apple usa OIDC con un secret que es un JWT firmado y ni el 302 esta garantizado sin credenciales reales. El criterio 1 de F-012 NO podra marcarse verificado al 100% ni con este feature. Preguntas ya resueltas por el humano: SP1, NO se incluye un servidor OIDC de mentira para el camino de vuelta de OAuth — el acceso por correo ya produce una sesion real y con ella se cierran los huecos de los criterios 2, 3 y 5 de F-012; el OIDC falso solo cubriria el route.ts del callback, ya probado con mocks, a cambio de la pieza mas fragil del montaje, y no demostraria nada sobre Google, Facebook ni Apple. SP2 (proceso, resuelto por el orquestador): este feature trae su guion reutilizable y su propio smoke; cuando se reabra F-012 su sdd-tester sustituye la Parte 2 manual de .agent/specs/F-012/smoke.sh, para que ningun agente escriba en el artefacto de otro feature. Pendiente de resolver al empezar: SP3, si se renombra storage-gateway a supabase-gateway. Decisiones ya tomadas en la propuesta: imagen supabase/auth v2.196.0 (supabase/gotrue fue renombrada a supabase/auth), Mailpit axllent/mailpit v1.31.0, base y volumen propios para Auth, NEXT_PUBLIC_SUPABASE_URL no cambia porque el gateway nginx gana una location /auth/v1/, y NO se renombra STORAGE_JWT_SECRET porque .agent/init.sh excluye esas tres claves de su chequeo y un renombrado dejaria el .env de todos roto en silencio. Cero archivos de src/."
+    },
+    {
+      "id": "F-029",
+      "category": "calidad",
+      "status": "active",
+      "depends_on": [],
+      "description": "Los secretos opcionales de .env.example dejan de romper serverEnv() en silencio.",
+      "acceptance_criteria": [
+        "El generador de secretos de desarrollo con --write escribe las tres claves cumpliendo los minimos de src/lib/env.ts, sin duplicar lineas, y 'git status --porcelain' queda vacio despues.",
+        "Sin --write, el generador imprime por stdout y no modifica ningun archivo.",
+        "'npx vitest run src/lib/env.test.ts' termina en 0, con dos casos: las tres claves en cadena vacia hacen que serverEnv() lance un error que nombra las tres, y con valores generados parsea.",
+        "'npx vitest run src/lib/auth/adminSession.test.ts' termina en 0, con un caso que comprueba que getAdminSession() devuelve null y que se registro una linea con Invalid server environment.",
+        "Ninguna de las tres claves aparece asignada a cadena vacia en .env.example.",
+        "Con las tres claves sin valor, 'bash .agent/init.sh' sigue terminando en ENTORNO LISTO e imprime el nombre del generador, no solo el aviso de sin valor en .env.",
+        "Una sesion de admin real responde 200 en /admin sin tocar .env a mano ni revertir nada despues.",
+        "'bash .agent/verify.sh F-029 --full' termina con codigo 0."
+      ],
+      "passes": false,
+      "notes": "Anadido el 2026-08-29 por decision expresa del humano (regla 4). Salio al verificar F-012: sdd-tester necesito montar a mano un JWT de admin para el criterio 5 y descubrio que SSO_JWT_SECRET, ADMIN_SESSION_SECRET y CRON_SECRET en cadena vacia rompen serverEnv() en silencio. Es anterior a F-012 y no depende de el. Ficha: .agent/playbook/env-optional-secreto-vacio-rompe-serverenv.md, que ya habia concluido esto en su seccion Como se evita. Propuesta completa en .agent/specs/propuestas/env-example-secretos-vacios.md. Preguntas ya resueltas por el humano: SP5, CRON_SECRET se queda opcional de verdad — sigue .optional() en src/lib/env.ts, se le quita el valor vacio de .env.example y se comenta para que sirve; su unico consumidor la seguira leyendo de process.env directamente, como hoy. Pendiente de resolver al empezar: SP4, si se puede tocar src/lib/auth/adminSession.ts para que el fallo de configuracion deje de ser mudo. FUERA: meter secretos reales, ni con forma de clave, en git — .env.example ya argumenta por que. NOTA: .github/workflows/ci.yml ya fija valores de relleno para dos de las tres claves; el arreglo nunca bajo al entorno local, que es donde se depura."
+    },
+    {
+      "id": "F-030",
+      "category": "calidad",
+      "status": "active",
+      "depends_on": ["F-012"],
+      "description": "Que se pueda ver cuando un pedido se queda sin enlazar a su cuenta por agotar el techo de tiempo.",
+      "acceptance_criteria": [
+        "Con una sesion real y Auth retrasado a proposito por encima del techo, POST /api/orders responde 201, Order.customerId queda NULL y se registra una linea de resultado 'timeout' con el techo en milisegundos.",
+        "El mismo pedido sin el retraso queda enlazado y no registra ninguna linea.",
+        "Las tres situaciones que hoy acaban en el mismo NULL producen registros distinguibles entre si: no habia sesion, la sesion no se pudo verificar, y la sesion existia pero no llego a tiempo.",
+        "Se registra un aviso temprano cuando la resolucion pasa del umbral acordado sin llegar a agotar el techo.",
+        "Cuando la resolucion termina despues del techo, queda constancia de cuanto tardo de mas.",
+        "Hay pruebas unitarias, sin Docker, con un caso por cada resultado posible.",
+        "Medir no retrasa el pedido: con la resolucion colgada, el pedido responde por debajo del techo mas 100 ms, y un pedido de invitado no hace ninguna llamada de identidad.",
+        "F-010 y F-012 siguen intactos: 'git grep -rn \"cookies()\" src/features/orders/ \"src/app/[slug]/\"' sigue vacio y 'bash .agent/verify.sh F-012 --smoke' termina en 0.",
+        "Con Supabase Auth sin configurar no se registra ninguna linea.",
+        "Ninguna linea registrada contiene datos personales ni credenciales: ni correo, ni telefono, ni token, ni identificador de sesion.",
+        "'npm run check:bundle' termina en 0 sin subir BUDGET_KB.",
+        "'bash .agent/verify.sh F-030 --full' termina con codigo 0."
+      ],
+      "passes": false,
+      "notes": "Anadido el 2026-08-30 por decision expresa del humano (regla 4). Sale de corregir la arquitectura de F-012: se creia que resolver la sesion costaba microsegundos porque getClaims() verificaba el JWT en local, y es falso — con HS256 auth-js cae a getUser(token), un GET /auth/v1/user por llamada y sin cache (ficha getclaims-hs256-sale-a-la-red). Con un viaje de red de por medio, la carrera contra el techo de 600 ms de ORDER_CUSTOMER_LINK_TIMEOUT_MS es real, y hoy agotarlo es SILENCIOSO: el pedido sale 201 con customerId NULL, indistinguible de uno de invitado. Propuesta completa en .agent/specs/propuestas/enlace-de-pedido-observable.md. NO SE CAMBIA EL TECHO NI EL MECANISMO DE DA2: sdd-architect confirmo que 600 ms sigue siendo razonable con el coste real; este feature es para VERLO, no para cambiarlo. El repo no tiene logger: solo console.* con prefijo [scope]; se usa console.warn y NUNCA console.error, porque .agent/verify.sh pone roja la etapa smoke si la salida del servidor casa con (mark|Unhandled|Error:). Preguntas ya resueltas por el humano: SP4, el token caducado en el checkout (quien vuelve pasada una hora paga DOS viajes dentro de los 600 ms, porque el proxy solo refresca en /cuenta* y /auth*) NO se arregla aqui — primero medir, luego decidir; arreglar hoy una sospecha tocando el matcher del proxy, que AGENTS.md marca como el error mas caro del repo, seria el orden equivocado. Pendientes de resolver al empezar: SP1 (si entra la linea tardia), SP2 (el umbral del aviso temprano), SP3 (si basta el log o hace falta una fila en Postgres al estilo de searchLog.ts). FUERA: cambiar el techo o DA2, dependencias de APM, persistir en Postgres, alertar, instrumentar los otros tres caminos que pagan viaje a Auth, y correlacionar cada linea con su pedido — la resolucion empieza antes de leer el cuerpo, asi que las lineas se cuentan, no se cruzan."
     }
   ]
 }

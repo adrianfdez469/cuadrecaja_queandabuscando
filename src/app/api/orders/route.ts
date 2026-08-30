@@ -1,17 +1,27 @@
 import { NextResponse } from "next/server";
 import { createOrderRequestSchema } from "@/features/orders/schemas";
 import { createOrder, type CreateOrderResult } from "@/features/orders/server/createOrder";
+import { resolveOrderCustomerId } from "@/features/account/server/orderIdentity";
 import { NO_STORE, readJsonBody, zodIssuesToInvalidBody } from "./_lib/body";
 
 export const dynamic = "force-dynamic";
 
 /**
- * The only public write in the system (docs/adr/0016). No session, no
- * cookie read (R24, criterio 4) — the request is self-sufficient. All the
- * decisions live in `createOrder.ts`; this route only maps its result to
- * HTTP, which is the layering AGENTS.md fixes for `src/app/`.
+ * The only public write in the system (docs/adr/0016). No session is
+ * REQUIRED (R24, criterio 4) — the request is self-sufficient either way.
+ * Since D6, a session that DOES exist gets the order linked (R14): this
+ * route is where that identity is resolved — never inside
+ * `src/features/orders/**` or `src/app/[slug]/**`, which is what keeps the
+ * fila 4 of F-010 green. All the decisions live in `createOrder.ts`; this
+ * route only maps its result to HTTP and wires the identity through, which
+ * is the layering AGENTS.md fixes for `src/app/`.
  */
 export async function POST(request: Request) {
+  // Started BEFORE the body is even read, without awaiting (architecture.md
+  // § DA2): a guest with no cookie resolves in 0 ms, and a signed-in
+  // shopper's lookup runs in parallel with parsing the body below.
+  const customerLink = resolveOrderCustomerId();
+
   const body = await readJsonBody(request);
   if (!body.ok) return body.response;
 
@@ -19,7 +29,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return zodIssuesToInvalidBody(parsed.error);
 
   try {
-    const result = await createOrder(parsed.data);
+    const result = await createOrder(parsed.data, customerLink);
     return toResponse(result);
   } catch (error) {
     console.error("[orders] create failed", error);

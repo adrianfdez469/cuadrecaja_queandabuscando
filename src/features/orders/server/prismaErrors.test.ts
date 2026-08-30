@@ -18,6 +18,19 @@ describe("isUniqueViolation()", () => {
     expect(isUniqueViolation(knownError("P2002", ["code"]), "idempotencyKey")).toBe(false);
   });
 
+  it("recognizes the driver-adapter shape (Prisma 7 + @prisma/adapter-pg, no top-level meta.target)", () => {
+    const driverAdapterError = {
+      code: "P2002",
+      meta: {
+        driverAdapterError: {
+          cause: { constraint: { fields: ['"supabaseUserId"'] } },
+        },
+      },
+    };
+    expect(isUniqueViolation(driverAdapterError, "supabaseUserId")).toBe(true);
+    expect(isUniqueViolation(driverAdapterError, "code")).toBe(false);
+  });
+
   it("rejects a different error code", () => {
     expect(isUniqueViolation(knownError("P2025", "code"), "code")).toBe(false);
   });

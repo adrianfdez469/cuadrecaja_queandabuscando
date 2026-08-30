@@ -106,7 +106,16 @@ async function toIdempotentResult(store: OrderStore, code: string): Promise<Crea
   };
 }
 
-export async function createOrder(body: CreateOrderRequest): Promise<CreateOrderResult> {
+export async function createOrder(
+  body: CreateOrderRequest,
+  /**
+   * D6/R14, architecture.md § DA2: resolves to the signed-in shopper's
+   * `Customer.id`, or `null` for a guest. NEVER rejects. Defaults to a
+   * resolved `null` so every existing call site — and every assertion in
+   * F-010's own suite — is unaffected (criterio 4: "sin tocar un aserto").
+   */
+  customerLink: Promise<string | null> = Promise.resolve(null),
+): Promise<CreateOrderResult> {
   // 1. Store lookup. Nothing else is consulted if this fails.
   const store = await loadStoreForOrder(body.storeSlug);
   if (!store) return { kind: "store_not_found" };
@@ -238,6 +247,15 @@ export async function createOrder(body: CreateOrderRequest): Promise<CreateOrder
     quote.capturedAt,
   );
 
+  // Awaited HERE, and only once: everything above (store lookup, quote, the
+  // idempotency/abuse guard) already ran, so the identity resolves alongside
+  // that work instead of ahead of it. It does NOT resolve instantly — with
+  // HS256 it costs a round trip to Auth — so what is guaranteed is narrower
+  // than it used to say here: the link never prevents the order, never makes
+  // it fail, and never delays it beyond ORDER_CUSTOMER_LINK_TIMEOUT_MS
+  // (R14, architecture.md § DA2 § Flujo de datos 4, corrected 2026-08-30).
+  const customerId = await customerLink;
+
   for (let attempt = 0; attempt < ORDER_CODE_MAX_RETRIES; attempt += 1) {
     const code = generateOrderCode();
     try {
@@ -246,7 +264,7 @@ export async function createOrder(body: CreateOrderRequest): Promise<CreateOrder
           code,
           storeId: store.id,
           businessId: store.businessId,
-          customerId: null,
+          customerId,
           contactName: body.contact.name,
           contactPhone: phone,
           contactEmail: body.contact.email ?? null,

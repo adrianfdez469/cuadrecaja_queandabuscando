@@ -85,17 +85,179 @@ services:
       timeout: 5s
       retries: 10
 
-  storage-gateway:
+  # Renamed from `storage-gateway` (F-028, D4): one origin now serves both
+  # `/storage/v1/*` and `/auth/v1/*`, Kong-style, and the old name would lie.
+  # `storage-bucket-init` below depends on THIS name and calls it by name —
+  # both had to change together, or criterio 1b breaks silently (the trap
+  # this step exists to isolate; architecture.md § Riesgos, riesgo 2).
+  supabase-gateway:
     image: nginx:1.27-alpine
-    container_name: queandabuscando-storage-gateway
+    container_name: queandabuscando-supabase-gateway
     restart: unless-stopped
     depends_on:
       storage:
         condition: service_healthy
+      auth:
+        condition: service_healthy
     ports:
       - "54321:80"
     volumes:
-      - ./docker/storage-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/supabase-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+      # The `otp.html` GoTrue fetches for `GOTRUE_MAILER_TEMPLATES_*` — served
+      # by this same nginx, so no fourth container is needed just for one file.
+      - ./docker/auth-email-otp.html:/etc/nginx/dev-mail/otp.html:ro
+
+  # --- Supabase Auth emulator (F-028) ------------------------------------
+  # Three services, and no more (architecture.md § Riesgos, criterio de
+  # abandono): `auth-db`, `auth`, `mailpit`. Same pattern as Storage above —
+  # own database, own volume, `${VAR:?mensaje}` for anything read from `.env`.
+  # Optional: a session that never touches shopper auth works fine with these
+  # stopped (`.agent/init.sh` only warns). See spec.md § Hasta dónde llega
+  # esto — only email is verifiable end to end; Google/Facebook only up to
+  # the outbound 302; Apple is observed, not asserted (E9).
+
+  auth-db:
+    image: postgres:16-alpine
+    container_name: queandabuscando-auth-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: auth
+    volumes:
+      - queandabuscando-auth-pgdata:/var/lib/postgresql/data
+      # Only runs against an EMPTY volume — never the app's own Postgres.
+      - ./docker/auth-roles.sql:/docker-entrypoint-initdb.d/auth-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d auth"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  auth:
+    image: supabase/auth:v2.196.0
+    container_name: queandabuscando-auth
+    restart: unless-stopped
+    depends_on:
+      auth-db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      # 9999, not the image's own default (8081): it is what every Supabase
+      # deployment uses and what `proxy_pass` below names.
+      GOTRUE_API_PORT: "9999"
+      # WITH the `/auth/v1` prefix, same as the official compose: it is where
+      # `redirect_uri = …/auth/v1/callback` (`internal/api/external.go`) comes
+      # from.
+      API_EXTERNAL_URL: http://localhost:54321/auth/v1
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:postgres@auth-db:5432/auth
+      GOTRUE_DB_NAMESPACE: auth
+      # Read from .env, which is gitignored: the SAME secret Storage already
+      # reads (R2) — a JWT issued by this Auth is accepted by the Storage
+      # emulator as `authenticated`, exactly like real Supabase.
+      GOTRUE_JWT_SECRET: "${STORAGE_JWT_SECRET:?missing, run node scripts/storage-dev-keys.mjs --write}"
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_ISSUER: http://localhost:54321/auth/v1
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_SITE_URL: http://localhost:3000
+      # `next dev` (3000), the smoke's own port (3100) and the visual stage's
+      # (3101), plus a wildcard for anything else local — globs compile with
+      # `.` and `/` as separators, so `*` covers any port.
+      GOTRUE_URI_ALLOW_LIST: "http://localhost:3000/**,http://localhost:3100/**,http://localhost:3101/**,http://localhost:*/**,http://127.0.0.1:*/**"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      # R9: with autoconfirm, no email is ever sent and the criterion would
+      # verify against nothing.
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+      # `src/constants/account.ts` (`OTP_CODE_LENGTH`) and
+      # `src/features/account/schemas.ts` are exact about 6 digits.
+      GOTRUE_MAILER_OTP_LENGTH: "6"
+      # Default is a full day, which exercises nothing in a quick cycle.
+      GOTRUE_MAILER_OTP_EXP: "300"
+      # Default is 30/hour: a suite run a few times a day would start seeing
+      # 429s that `src/app/api/account/otp/route.ts` turns into its own
+      # RATE_LIMITED — indistinguishable from an app bug if this were left low.
+      GOTRUE_RATE_LIMIT_EMAIL_SENT: "1000000/1h"
+      # Default is 1 MINUTE per recipient: harmless with a fresh recipient
+      # per run (R10), but bites the moment anyone reuses `--email`.
+      GOTRUE_SMTP_MAX_FREQUENCY: 1s
+      GOTRUE_SMTP_HOST: mailpit
+      GOTRUE_SMTP_PORT: "1025"
+      GOTRUE_SMTP_ADMIN_EMAIL: no-reply@queandabuscando.local
+      GOTRUE_SMTP_SENDER_NAME: "queandabuscando (local)"
+      GOTRUE_SMTP_USER: ""
+      GOTRUE_SMTP_PASS: ""
+      # Two independent carriers for the 6-digit token (architecture.md §
+      # Riesgos, riesgo 1): the SUBJECT is inline, parsed with no network —
+      # it is the diagnostic. The TEMPLATE is fetched over HTTP from the
+      # gateway that already exists; it is what E3 actually requires.
+      # `signInWithOtp` WITHOUT `shouldCreateUser:false` (src/app/api/account/
+      # otp/route.ts) sends `confirmation` to a brand-new email and
+      # `magic_link` to a known one — both need configuring.
+      GOTRUE_MAILER_SUBJECTS_CONFIRMATION: "{{ .Token }} es tu codigo de acceso"
+      GOTRUE_MAILER_SUBJECTS_MAGIC_LINK: "{{ .Token }} es tu codigo de acceso"
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://supabase-gateway/dev-mail/otp.html
+      GOTRUE_MAILER_TEMPLATES_MAGIC_LINK: http://supabase-gateway/dev-mail/otp.html
+      # `url.ResolveReference` with an absolute path DISCARDS the base's own
+      # path, so this has to carry `/auth/v1` itself — otherwise the email's
+      # link would 404 against this same gateway.
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+      GOTRUE_DISABLE_SIGNUP: "false"
+      # Inert dev-only literals (R8, criterio 8): their only effect is that
+      # `authorize` issues the outbound 302. They cannot sign anyone in —
+      # that is the point, and the names say so.
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: "true"
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: local-dev-inert-client-id
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: local-dev-inert-secret
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: http://localhost:54321/auth/v1/callback
+      GOTRUE_EXTERNAL_FACEBOOK_ENABLED: "true"
+      GOTRUE_EXTERNAL_FACEBOOK_CLIENT_ID: local-dev-inert-client-id
+      GOTRUE_EXTERNAL_FACEBOOK_SECRET: local-dev-inert-secret
+      GOTRUE_EXTERNAL_FACEBOOK_REDIRECT_URI: http://localhost:54321/auth/v1/callback
+      # E9: enabling Apple does not risk the boot — its provider is built per
+      # request, not at startup. Whatever `authorize?provider=apple` answers
+      # is observed, never asserted (no criterion names Apple).
+      GOTRUE_EXTERNAL_APPLE_ENABLED: "true"
+      GOTRUE_EXTERNAL_APPLE_CLIENT_ID: local-dev-inert-client-id
+      GOTRUE_EXTERNAL_APPLE_SECRET: local-dev-inert-secret
+      GOTRUE_EXTERNAL_APPLE_REDIRECT_URI: http://localhost:54321/auth/v1/callback
+    healthcheck:
+      # `127.0.0.1`, not `localhost`, same reasoning as `storage`'s own
+      # healthcheck above: this image can resolve "localhost" to `::1` first.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9999/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:v1.31.0
+    container_name: queandabuscando-mailpit
+    restart: unless-stopped
+    environment:
+      # Accepts any (or no) SMTP auth: removes a whole family of SMTP setup
+      # failures from the map.
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+      # Deliberately low: this is a development inbox, not an archive.
+      MP_MAX_MESSAGES: "200"
+      # No MP_DATABASE: the inbox lives in memory ONLY. A `docker compose
+      # restart mailpit` empties it, and no run inherits a previous run's
+      # code — half of what makes R10 true structurally, not by convention.
+    ports:
+      # 54324, not the generic 8025: it is the port the Supabase CLI itself
+      # reserves for its own mail catcher, so nobody is surprised by it, and
+      # it is far from the 8025 that collides with other projects' tools.
+      - "54324:8025"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8025/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # One shot, idempotent, two jobs — `postgres:16-alpine` (already pulled for
   # the app's own db) has both `psql` and `wget`, so one container covers both:
@@ -125,7 +287,7 @@ services:
     image: postgres:16-alpine
     container_name: queandabuscando-storage-bucket-init
     depends_on:
-      storage-gateway:
+      supabase-gateway:
         condition: service_started
     restart: "no"
     environment:
@@ -135,9 +297,10 @@ services:
       - sh
       - -c
       - >
-        apk add --no-cache curl >/tmp/apk.log 2>&1; for i in $$(seq 1 20); do psql -h storage-db -U postgres -d storage -c "grant usage on schema storage to anon, authenticated, service_role;" >/tmp/grant.log 2>&1 && break; sleep 1; done; cat /tmp/grant.log; for i in $$(seq 1 20); do body=$$(curl -s -o /tmp/out -w '%{http_code}' -X POST http://storage-gateway/storage/v1/bucket -H "Authorization: Bearer $$SERVICE_KEY" -H "content-type: application/json" -d '{"name":"store-media","public":true}'); if [ "$$body" = "200" ] || [ "$$body" = "201" ] || grep -q BucketAlreadyExists /tmp/out; then exit 0; fi; sleep 1; done; cat /tmp/out; exit 1
+        apk add --no-cache curl >/tmp/apk.log 2>&1; for i in $$(seq 1 20); do psql -h storage-db -U postgres -d storage -c "grant usage on schema storage to anon, authenticated, service_role;" >/tmp/grant.log 2>&1 && break; sleep 1; done; cat /tmp/grant.log; for i in $$(seq 1 20); do body=$$(curl -s -o /tmp/out -w '%{http_code}' -X POST http://supabase-gateway/storage/v1/bucket -H "Authorization: Bearer $$SERVICE_KEY" -H "content-type: application/json" -d '{"name":"store-media","public":true}'); if [ "$$body" = "200" ] || [ "$$body" = "201" ] || grep -q BucketAlreadyExists /tmp/out; then exit 0; fi; sleep 1; done; cat /tmp/out; exit 1
 
 volumes:
   queandabuscando-pgdata:
   queandabuscando-storage-pgdata:
   queandabuscando-storage-objects:
+  queandabuscando-auth-pgdata:
