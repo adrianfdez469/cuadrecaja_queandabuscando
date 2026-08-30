@@ -3,7 +3,7 @@ slug: check-harness-falso-positivo-ruta-abreviada
 sintoma: "check:harness dice que un archivo no existe, y el archivo real sí existe: la ruta estaba abreviada (tres puntos y el nombre, o una carpeta sin el prefijo src/)"
 firma: `[A-Za-z0-9._/-]+\.(ts|tsx)` does not exist
 etapa: harness
-visto_en: F-010, F-007, F-011, F-017, PR #7, F-018, F-023
+visto_en: F-010, F-007, F-011, F-017, PR #7, F-018, F-023, F-019
 creado: 2026-08-26T05:00:00Z
 actualizado: 2026-08-26T12:45:00Z
 promovido_a_agents: sí
