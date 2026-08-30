@@ -561,6 +561,29 @@
       ],
       "passes": false,
       "notes": "Anadido el 2026-08-29 por decision expresa del humano (regla 4). Salio al verificar F-012: sdd-tester necesito montar a mano un JWT de admin para el criterio 5 y descubrio que SSO_JWT_SECRET, ADMIN_SESSION_SECRET y CRON_SECRET en cadena vacia rompen serverEnv() en silencio. Es anterior a F-012 y no depende de el. Ficha: .agent/playbook/env-optional-secreto-vacio-rompe-serverenv.md, que ya habia concluido esto en su seccion Como se evita. Propuesta completa en .agent/specs/propuestas/env-example-secretos-vacios.md. Preguntas ya resueltas por el humano: SP5, CRON_SECRET se queda opcional de verdad — sigue .optional() en src/lib/env.ts, se le quita el valor vacio de .env.example y se comenta para que sirve; su unico consumidor la seguira leyendo de process.env directamente, como hoy. Pendiente de resolver al empezar: SP4, si se puede tocar src/lib/auth/adminSession.ts para que el fallo de configuracion deje de ser mudo. FUERA: meter secretos reales, ni con forma de clave, en git — .env.example ya argumenta por que. NOTA: .github/workflows/ci.yml ya fija valores de relleno para dos de las tres claves; el arreglo nunca bajo al entorno local, que es donde se depura."
+    },
+    {
+      "id": "F-030",
+      "category": "calidad",
+      "status": "active",
+      "depends_on": ["F-012"],
+      "description": "Que se pueda ver cuando un pedido se queda sin enlazar a su cuenta por agotar el techo de tiempo.",
+      "acceptance_criteria": [
+        "Con una sesion real y Auth retrasado a proposito por encima del techo, POST /api/orders responde 201, Order.customerId queda NULL y se registra una linea de resultado 'timeout' con el techo en milisegundos.",
+        "El mismo pedido sin el retraso queda enlazado y no registra ninguna linea.",
+        "Las tres situaciones que hoy acaban en el mismo NULL producen registros distinguibles entre si: no habia sesion, la sesion no se pudo verificar, y la sesion existia pero no llego a tiempo.",
+        "Se registra un aviso temprano cuando la resolucion pasa del umbral acordado sin llegar a agotar el techo.",
+        "Cuando la resolucion termina despues del techo, queda constancia de cuanto tardo de mas.",
+        "Hay pruebas unitarias, sin Docker, con un caso por cada resultado posible.",
+        "Medir no retrasa el pedido: con la resolucion colgada, el pedido responde por debajo del techo mas 100 ms, y un pedido de invitado no hace ninguna llamada de identidad.",
+        "F-010 y F-012 siguen intactos: 'git grep -rn \"cookies()\" src/features/orders/ \"src/app/[slug]/\"' sigue vacio y 'bash .agent/verify.sh F-012 --smoke' termina en 0.",
+        "Con Supabase Auth sin configurar no se registra ninguna linea.",
+        "Ninguna linea registrada contiene datos personales ni credenciales: ni correo, ni telefono, ni token, ni identificador de sesion.",
+        "'npm run check:bundle' termina en 0 sin subir BUDGET_KB.",
+        "'bash .agent/verify.sh F-030 --full' termina con codigo 0."
+      ],
+      "passes": false,
+      "notes": "Anadido el 2026-08-30 por decision expresa del humano (regla 4). Sale de corregir la arquitectura de F-012: se creia que resolver la sesion costaba microsegundos porque getClaims() verificaba el JWT en local, y es falso — con HS256 auth-js cae a getUser(token), un GET /auth/v1/user por llamada y sin cache (ficha getclaims-hs256-sale-a-la-red). Con un viaje de red de por medio, la carrera contra el techo de 600 ms de ORDER_CUSTOMER_LINK_TIMEOUT_MS es real, y hoy agotarlo es SILENCIOSO: el pedido sale 201 con customerId NULL, indistinguible de uno de invitado. Propuesta completa en .agent/specs/propuestas/enlace-de-pedido-observable.md. NO SE CAMBIA EL TECHO NI EL MECANISMO DE DA2: sdd-architect confirmo que 600 ms sigue siendo razonable con el coste real; este feature es para VERLO, no para cambiarlo. El repo no tiene logger: solo console.* con prefijo [scope]; se usa console.warn y NUNCA console.error, porque .agent/verify.sh pone roja la etapa smoke si la salida del servidor casa con (mark|Unhandled|Error:). Preguntas ya resueltas por el humano: SP4, el token caducado en el checkout (quien vuelve pasada una hora paga DOS viajes dentro de los 600 ms, porque el proxy solo refresca en /cuenta* y /auth*) NO se arregla aqui — primero medir, luego decidir; arreglar hoy una sospecha tocando el matcher del proxy, que AGENTS.md marca como el error mas caro del repo, seria el orden equivocado. Pendientes de resolver al empezar: SP1 (si entra la linea tardia), SP2 (el umbral del aviso temprano), SP3 (si basta el log o hace falta una fila en Postgres al estilo de searchLog.ts). FUERA: cambiar el techo o DA2, dependencias de APM, persistir en Postgres, alertar, instrumentar los otros tres caminos que pagan viaje a Auth, y correlacionar cada linea con su pedido — la resolucion empieza antes de leer el cuerpo, asi que las lineas se cuentan, no se cruzan."
     }
   ]
 }
