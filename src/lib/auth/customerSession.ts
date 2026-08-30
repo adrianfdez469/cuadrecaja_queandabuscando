@@ -111,9 +111,15 @@ export async function getCustomerUser(): Promise<CustomerUser | null> {
     const supabase = await createSupabaseServerClient();
     if (!supabase) return null;
 
-    // getClaims(), not getUser(): verified locally against the cached JWKS
-    // in the common case, so linking an order costs microseconds, not a
-    // round trip to Supabase (architecture.md § contrato, nota 1).
+    // getClaims(), not getUser(): it checks `exp` locally BEFORE any network
+    // call, so an expired cookie costs nothing. It does not, however, verify
+    // the signature locally: this project signs with HS256, and auth-js falls
+    // back to `getUser(token)` — one `GET /auth/v1/user` per call, uncached —
+    // for any `HS*` algorithm. Verified in @supabase/auth-js's own source.
+    // Only asymmetric keys (ES256/RS256) fetch a JWKS and verify offline, and
+    // the day this project moves to them the round trip disappears with no
+    // change here (architecture.md § Contratos, nota 1, corrected 2026-08-30;
+    // playbook: getclaims-hs256-sale-a-la-red).
     const { data, error } = await supabase.auth.getClaims();
     if (error || !data) return null;
 

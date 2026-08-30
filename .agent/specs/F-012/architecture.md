@@ -1,7 +1,7 @@
 ---
 feature: F-012
 agente: sdd-architect
-actualizado: 2026-08-29T05:05:00Z
+actualizado: 2026-08-30T00:00:00Z
 estado: listo
 ---
 
@@ -10,6 +10,20 @@ estado: listo
 > muerden). En este documento eso es casi todo: una arquitectura nombra el
 > edificio que aún no está construido. Cuando el implementador los cree, ganan
 > sus comillas.
+
+> **Corrección posterior al cierre (2026-08-30).** Este documento afirmaba que
+> resolver la sesión del comprador cuesta **0 viajes a Supabase Auth** porque
+> «`getClaims` verifica en local». **Era falso para este montaje.** Lo desmintió
+> `sdd-tester` en el ciclo de verificación de F-012
+> (`.agent/specs/F-012/tests.md`) leyendo el código de `@supabase/auth-js`: los
+> tokens que emite este montaje son **HS256** —un secreto simétrico,
+> `GOTRUE_JWT_SECRET`— y con algoritmo simétrico `getClaims()` **no puede**
+> verificar en local: cae a `getUser()`, que es una petición HTTP real. Eso fue
+> justamente lo que hizo imposible fingir una sesión válida sin backend de Auth
+> durante todo el primer ciclo de verificación. Los sitios que se apoyaban en la
+> afirmación —DA1, DA2, DA4, § Flujo de datos y § Escalabilidad y límites— están
+> corregidos y marcados con **[corregido 2026-08-30]**. **Nada de lo construido
+> cambia**: es exactitud documental sobre un feature cerrado y funcionando.
 
 ## Estado actual relevante
 
@@ -97,8 +111,13 @@ escribe. Verificado leyendo los dos archivos. Entonces:
 2. Pasa la promesa como segundo argumento: `createOrder(parsed.data, customerLink)`.
 3. `createOrder` la espera **una sola vez, justo antes** del `prisma.order.create`
    —cuando ya gastó la búsqueda de tienda, la cotización y la consulta de
-   idempotencia—, así que en el camino normal la identidad ya está resuelta y el
-   pedido **no se retrasa** (R14).
+   idempotencia—, así que el viaje a Auth **se solapa** con los 2–4 viajes a
+   Postgres en vez de sumarse a ellos. **[corregido 2026-08-30]** Lo que este
+   documento decía antes, «el pedido no se retrasa», era demasiado fuerte: la
+   rama de identidad cuesta **un viaje de red**, no una verificación en local
+   (§ Escalabilidad y límites), y puede terminar después que el trabajo de
+   Postgres. Lo que R14 garantiza de verdad es que la identidad **nunca impide
+   el pedido, nunca lo hace fallar y nunca lo retrasa por encima de 600 ms**.
 
 Las tres condiciones de R14, una por una:
 
@@ -107,11 +126,16 @@ Las tres condiciones de R14, una por una:
   el cuerpo no llega a `createOrder`, que recibe `parsed.data` y nunca el JSON
   crudo. La query y las cabeceras no se leen. Se prueba con un POST de invitado
   que lleve `customerId` en el cuerpo: el pedido sale con `null`.
-- **Nunca impide ni retrasa.** `resolveOrderCustomerId()` **jamás rechaza** y
-  siempre se resuelve en ≤ `ORDER_CUSTOMER_LINK_TIMEOUT_MS` (600 ms), por
-  `Promise.race` contra un temporizador. Cualquier fallo —Auth caído, token
-  caducado, Prisma lento— devuelve `null` (E17). Sin cookie de cliente se
-  resuelve en 0 ms, sin tocar red ni base: el camino de invitado no paga nada.
+- **Nunca impide, nunca falla, y el retraso está acotado** **[corregido
+  2026-08-30]**. `resolveOrderCustomerId()` **jamás rechaza** y siempre se
+  resuelve en ≤ `ORDER_CUSTOMER_LINK_TIMEOUT_MS` (600 ms), por `Promise.race`
+  contra un temporizador. Cualquier fallo —Auth caído, token caducado, Prisma
+  lento— devuelve `null` (E17). Sin cookie de cliente se resuelve en 0 ms, sin
+  tocar red ni base: el camino de invitado no paga nada. **Con** cookie sí paga
+  **un viaje de red a Supabase Auth**, porque con HS256 `getClaims()` sale a
+  `/auth/v1/user` (§ Contratos, nota 1). Los 600 ms son por tanto un **techo que
+  acota el daño**, no una descripción del coste: la comparación honesta es un
+  viaje de red contra los 2–4 de Postgres que corren en paralelo.
 - **No cambia lo que ve el POS.** `customerId` no aparece en
   `src/features/orders/server/pull.ts`, ni en `src/features/orders/types.ts`, ni
   en `docs/sync-contract.md`. Verificado.
@@ -218,8 +242,18 @@ y **solo sale a la red si el token expiró** (`__loadSession` → `_callRefreshT
 verificado en `@supabase/auth-js`). No es `getUser()`: el proxy **no autoriza, no
 decide y no lee identidad** —eso es siempre `getCustomerUser()`—, solo mantiene
 la cookie viva y, de paso, borra la pista si ya no hay sesión. Coste en el 99%
-de las peticiones a `/cuenta`: un parseo local. Y esas rutas ya son dinámicas: no
-hay ISR que anular. `AGENTS.md` y la propia documentación de Next avisan de que
+de las peticiones a `/cuenta`: un parseo local. El margen exacto son 90 s
+(`EXPIRY_MARGIN_MS`, 3 × 30 s en la librería) sobre un token de 3600 s
+(`GOTRUE_JWT_EXP`), así que el refresco toca la red **una vez por hora de
+sesión**, no una vez por petición. Y esas rutas ya son dinámicas: no hay ISR que
+anular.
+
+**[corregido 2026-08-30]** Esto —el proxy— es lo **único** de F-012 que de
+verdad se resuelve en local, y por un motivo que no se puede extrapolar:
+`getSession()` **no comprueba la firma**, solo lee la cookie y decide si hay que
+refrescar. `getCustomerUser()`, que sí establece identidad, usa `getClaims()` y
+con HS256 **paga un viaje de red en cada llamada** (§ Contratos, nota 1). Que el
+proxy sea barato no abarata ninguno de los otros caminos. `AGENTS.md` y la propia documentación de Next avisan de que
 el proxy no es sitio para datos lentos; esto no lo es.
 
 - Alternativas descartadas: **ningún refresco** (la sesión moriría a la hora y el
@@ -386,6 +420,14 @@ un fallo de red.
    haya dos islas suscritas.
 2. La ruta: sin cookie de sesión → `{ signedIn: false, profile: null }` sin tocar
    red ni base. Con cookie → `getCustomerUser()` → `getProfileByUserId()`.
+   **[corregido 2026-08-30]** Con sesión, ese `getCustomerUser()` cuesta **1
+   viaje a Supabase Auth** (HS256, § Contratos nota 1) más 1 `SELECT`, no una
+   verificación en local. No se nota, y no por suerte: es un `fetch` posterior al
+   montaje, el formulario ya es usable desde el primer frame (R17) y lo que
+   llegue tarde solo rellena lo vacío (E13). Lo que sí conviene saber es que el
+   tope de `PROFILE_FETCH_TIMEOUT_MS` (3000 ms) cubre ahora red **y** SQL, no
+   solo SQL — y sobra: 3000 ms para un viaje de red y un `SELECT` por índice
+   único.
 3. La isla guarda el perfil en el `.then` del `fetch` —un callback, no el cuerpo
    de un efecto— y pinta `lo tecleado ?? lo del perfil ?? ""` (`design.md` § 5).
 
@@ -395,7 +437,7 @@ un fallo de red.
 POST /api/orders
  ├─ resolveOrderCustomerId()             ← arranca aquí, SIN await
  │    ├─ ¿hay cookie nuestra? no → null  (0 ms, 0 red, 0 SQL)
- │    ├─ getCustomerUser()               ← JWT verificado, normalmente en local
+ │    ├─ getCustomerUser()               ← 1 viaje a Auth: HS256 ⇒ GET /auth/v1/user
  │    └─ findCustomerIdByUserId(user.id) ← 1 SELECT por índice único
  ├─ readJsonBody + createOrderRequestSchema      (en paralelo con lo anterior)
  └─ createOrder(parsed.data, customerLink)
@@ -406,6 +448,14 @@ POST /api/orders
 
 Todo lo que puede salir mal en la rama izquierda devuelve `null`; nada de esa
 rama puede lanzar hacia arriba.
+
+**[corregido 2026-08-30]** El comentario del diagrama decía «JWT verificado,
+normalmente en local». No: con HS256 esa línea es **una petición HTTP a Supabase
+Auth**, siempre. Sigue siendo la rama izquierda —paralela, acotada a 600 ms y
+degradable a `null`—, pero es red, y por eso el «ya resuelto en el caso normal»
+de la línea del `await` depende de que el viaje a Auth termine antes que los 2–4
+viajes a Postgres de su derecha, que no está garantizado
+(§ Escalabilidad y límites).
 
 ### 5. Cerrar sesión (E4, E18)
 
@@ -489,11 +539,36 @@ export async function refreshCustomerSession(
 
 Cinco notas que son parte del contrato:
 
-1. **`getCustomerUser()` usa `auth.getClaims()`**, no `getUser()`: verifica el JWT
-   en local contra el JWKS cacheado y solo sale a la red la primera vez del
-   proceso (o si el proyecto usa el secreto simétrico heredado, en cuyo caso la
-   propia librería cae a `getUser()`). Es lo que hace que enlazar un pedido
-   cueste microsegundos y no un viaje a Supabase.
+1. **`getCustomerUser()` usa `auth.getClaims()`**, no `getUser()`.
+   **[corregido 2026-08-30]** Esta nota decía que eso «verifica el JWT en local
+   contra el JWKS cacheado» y que enlazar un pedido «cuesta microsegundos y no un
+   viaje a Supabase». **Era falso**, y lo desmintió `sdd-tester` en el ciclo de
+   verificación de F-012 (`.agent/specs/F-012/tests.md`) leyendo la librería. Lo
+   que `getClaims()` hace de verdad, en `@supabase/auth-js`:
+   - si el `alg` de la cabecera empieza por `HS` —o falta el `kid`, o no hay
+     WebCrypto— **no busca ninguna clave**: cae a `getUser(token)`, que es un
+     `GET` a `/auth/v1/user`, una petición HTTP real, **en cada llamada** y sin
+     caché del resultado;
+   - solo con claves **asimétricas** (ES256/RS256) baja el JWKS público, lo
+     cachea 10 minutos por realm de JS y verifica la firma con `crypto.subtle`
+     sin salir a la red. Ahí sí serían microsegundos, y ahí sí valdría el «solo
+     la primera vez del proceso» que esta nota prometía.
+
+   Los tokens de este montaje son **HS256**: los firma un secreto simétrico
+   (`GOTRUE_JWT_SECRET`, el mismo valor que `STORAGE_JWT_SECRET`, ver
+   `docker-compose.yml` y el emulador que documenta
+   `.agent/specs/F-028/architecture.md`). No hay JWKS público que cachear, así
+   que estamos **siempre** en el primer caso: **`getCustomerUser()` = 1 viaje de
+   red**, cada vez.
+
+   Lo que sí sigue siendo cierto de preferir `getClaims()` a `getUser()`, y por
+   lo que la elección se mantiene: la caducidad se comprueba **antes** de la red
+   (`validateExp` sobre el `exp` decodificado), así que un token vencido se
+   descarta en local sin gastar el viaje; y el día que el proyecto Supabase migre
+   a claves de firma asimétricas, la promesa original se cumple sola, sin tocar
+   una línea de `src/lib/auth/customerSession.ts`. El coste es del algoritmo, no
+   del código.
+
 2. Todas las funciones **capturan cualquier excepción** y devuelven el caso «sin
    sesión» o un `reason`. Una URL vacía, un token corrupto o Supabase caído se
    ven igual desde fuera (E17, E26).
@@ -707,18 +782,65 @@ camino por el que Auth toca el checkout es un `fetch` cuyo fallo se ignora.
 
 ## Escalabilidad y límites
 
-**Consultas por checkout.**
+**Consultas por checkout.** **[corregido 2026-08-30]** La versión anterior de
+esta tabla daba **0** viajes a Auth en el caso normal, apoyándose en la nota 1 de
+§ Contratos, que era falsa. Recalculada con lo que hace de verdad `getClaims()`
+con HS256:
 
-| Camino                       | Viajes a Postgres                 | Viajes a Supabase Auth                                                                                |
-| ---------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Invitado (hoy y después)     | los mismos de F-010               | **0** (corta al no ver cookie)                                                                        |
-| Con sesión                   | **+1** (`findCustomerIdByUserId`) | 0 en el caso normal (`getClaims` verifica en local); 1 la primera vez del proceso, para traer el JWKS |
-| Sesión caducada / Auth caído | +0                                | 1 intento, cortado a 600 ms → `customerId` `null`                                                     |
+| Camino                                       | Viajes a Postgres                 | Viajes a Supabase Auth                                                       |
+| -------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------- |
+| Invitado (hoy y después)                     | los mismos de F-010               | **0** — `hasCustomerSessionCookie()` corta antes de construir cliente alguno |
+| Con sesión, token vigente (el caso normal)   | **+1** (`findCustomerIdByUserId`) | **1** — `GET /auth/v1/user`, **siempre**, no cero                            |
+| Con sesión, token caducado o a menos de 90 s | **+1**                            | **2** — el `POST` de refresco y después el `GET /auth/v1/user`               |
+| Cookie ilegible o sin forma de sesión        | +0                                | **0** — se descarta en local, sin red; es el caso que midió `tests.md`       |
+| Refresco rechazado por Auth                  | +0                                | 1 (el `POST` de refresco, que falla) → `customerId` `null`                   |
+| Auth caído o lento                           | +0                                | 1 intento, cortado a 600 ms → `customerId` `null`                            |
 
-El `+1` corre **en paralelo** con la búsqueda de tienda y la cotización, así que
-no alarga el pedido. El autocompletado añade una petición HTTP a
+**En cuánto cambió el número.** El delta de un checkout **con sesión** frente a
+uno de invitado no es «+1 consulta a Postgres y 0 viajes a Auth»: es **+1
+consulta a Postgres y +1 viaje de red a Supabase Auth** (2 en la hora en que toca
+refrescar). El checkout **de invitado**, que hoy es la mayoría, no cambia en
+nada: sigue en 0 y 0, y esa fila era y sigue siendo correcta.
+
+El `+1` de Postgres corre **en paralelo** con la búsqueda de tienda y la
+cotización; el viaje a Auth también, pero es red y no base, así que ya no se
+puede afirmar que la identidad termine siempre antes que ellas (ver el techo de
+600 ms, más abajo). El autocompletado añade una petición HTTP a
 `/[slug]/checkout` (que ya es `force-dynamic`) y **cero** al catálogo cacheado:
 el icono de la cabecera se resuelve con una cookie, no con una petición (NC1).
+
+**Dónde se paga ese viaje, camino por camino.** No cuesta lo mismo en todos, y
+esa es la parte que la afirmación errónea escondía:
+
+| Camino                                              | Cuándo ocurre                    | Qué cuesta de verdad                                                                                                                                                    |
+| --------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Autocompletado del checkout (DA1), `GET` del perfil | tras montar la isla, en paralelo | 1 viaje a Auth + 1 `SELECT`. **Invisible**: el formulario ya es usable (R17) y el tope de 3000 ms cubre de sobra red y SQL                                              |
+| `POST /api/orders` (DA2)                            | en paralelo con `createOrder`    | 1 viaje a Auth + 1 `SELECT`, con techo de 600 ms. **El único camino con presupuesto**, y el único donde agotar el techo tiene consecuencia: el pedido queda sin enlazar |
+| `PUT /api/account/profile` (guardar el perfil)      | en serie, antes del `UPDATE`     | 1 viaje a Auth. Es una acción explícita del usuario, con su estado de envío en la isla; nadie lo percibe como latencia sorpresa                                         |
+| `/cuenta` (Server Component)                        | en el render de la página        | 1 viaje a Auth + `ensureCustomerForUser`. La página es `force-dynamic` y no hay ISR que anular; es la pantalla de la cuenta, no la tienda                               |
+| `src/proxy.ts` (DA4)                                | en `/cuenta*` y `/auth*`         | **0** en el caso normal: usa `getSession()`, que no verifica firma. Solo paga red al refrescar, una vez por hora de sesión                                              |
+| Catálogo `/[slug]`                                  | nunca                            | **0**. No está en el `matcher` y el icono se resuelve con la cookie de pista (NC1). Esto no cambia, y es lo que mantiene intacta la estrategia ISR                      |
+
+**¿Sigue siendo razonable el techo de 600 ms de `resolveOrderCustomerId`?** Sí, y
+conviene decir por qué, ahora que ese número tiene que cubrir red y no una
+verificación en local. La rama gasta 1 viaje a Auth —decenas de ms si Auth y el
+servidor están en la misma región, 100–350 ms cruzando región— más 1 `SELECT` por
+índice único (~1 ms), y corre solapada con los 2–4 viajes a Postgres de
+`createOrder`. 600 ms deja holgura incluso cruzando región, y absorbe también el
+peor caso ordinario, el refresco de la hora con dos viajes en serie, mientras cada
+viaje no pase de ~300 ms. Bajarlo no ahorra nada en el caso normal —ahí el pedido
+espera a la rama, no al temporizador— y sí compra más pedidos sin enlazar a
+cambio de un peor caso más corto; subirlo solo alarga el peor caso sin recuperar
+enlaces que no se estén perdiendo. 600 ms es el punto razonable entre esas dos
+cosas y se mantiene. La afirmación que **no** se sostiene es la vieja
+«resolver la identidad nunca retrasa el pedido»: puede retrasarlo, como mucho
+hasta el techo, y por eso el techo existe. Lo corregido está en DA2.
+
+**Lo que este cambio deja abierto** (no se toca en F-012, que está cerrado):
+agotar el techo es **silencioso**. El pedido sale en 201 con `customerId` `null`
+y es indistinguible de uno de invitado, así que un Auth lento en producción
+degradaría el enlace de pedidos sin que nadie se entere. Queda anotado como
+riesgo 7 de § Riesgos y plan B.
 
 **Cuando `Customer` tenga cientos de miles de filas.** Todas las consultas de
 este feature entran por `supabaseUserId`, que es `@unique` y por tanto tiene su
@@ -829,6 +951,17 @@ tienda. `src/app/[slug]/**` conserva su `revalidate = 3600` y sus tags intactos.
    `content-type` estricto, el tope de cuerpo y `no-store`, y quedan anotadas en
    la ADR nueva, que es lo que `docs/adr/0016` exige de cualquier ruta pública de
    escritura.
+
+7. **Agotar el techo de 600 ms es silencioso** **[añadido 2026-08-30, a raíz de
+   la corrección de arriba]**. Cuando `resolveOrderCustomerId()` pierde la
+   carrera contra su temporizador, el pedido sale igual y `customerId` queda
+   `null`: exactamente igual que un pedido de invitado, sin log, sin métrica y
+   sin diferencia observable. Mientras se creía que la identidad se resolvía en
+   local, la carrera era teórica; con un viaje de red por resolución, deja de
+   serlo. Nada que arreglar aquí —el comportamiento es el correcto y el feature
+   está cerrado—, pero quien recoja el testigo debería poder **contar** cuántas
+   veces gana el temporizador. Eso es un feature nuevo, con su entrada en
+   `.agent/features.json` escrita por el humano, no una edición de este.
 
 ## Qué NO hace falta, dicho para que nadie lo añada
 
