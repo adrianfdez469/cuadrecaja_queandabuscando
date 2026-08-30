@@ -84,7 +84,7 @@ async function buildWhatsappUrlForOrder(store: OrderStore, code: string): Promis
   // (E18), so there is nothing to fetch a snapshot for.
   if (store.checkoutMode !== "WHATSAPP") return null;
 
-  const snapshot = await getOrderByCode(store.slug, code);
+  const snapshot = await getOrderByCode(store.id, code);
   return snapshot ? orderWhatsappUrl(snapshot) : null;
 }
 

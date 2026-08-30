@@ -479,6 +479,14 @@ describe("createOrder() — whatsappUrl", () => {
       expect(result.whatsappUrl).toMatch(/^https:\/\/wa\.me\/5350000001\?text=/);
     }
     const usedCode = orderCreate.mock.calls[0][0].data.code;
-    expect(getOrderByCode).toHaveBeenCalledWith("tienda-demo", usedCode);
+    // F-019 SP6: getOrderByCode(storeId, rawCode) is the signature (read.ts),
+    // and the query filters by `{ code, storeId }`. Passing store.slug here
+    // was I2 — createOrder.ts:87 called getOrderByCode(store.slug, code), a
+    // slug where an id was expected, so the WHERE never matched and
+    // whatsappUrl came back null always. The OLD version of this assertion
+    // only checked getOrderByCode was called with SOME arguments (or matched
+    // store.slug, which happens to equal "tienda-demo" too), so it never
+    // caught the bug. Asserting the actual argument is the fix.
+    expect(getOrderByCode).toHaveBeenCalledWith(store.id, usedCode);
   });
 });
