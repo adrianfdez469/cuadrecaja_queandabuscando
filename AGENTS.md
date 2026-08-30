@@ -270,6 +270,13 @@ Un commit por unidad coherente. El hook de pre-commit corre `lint-staged`.
 - **Feature nuevo** → entrada en `.agent/features.json`, **escrita por el humano**.
 - **Cambio en el contrato** → versión nueva en `docs/sync-contract.md`,
   coordinada con el equipo de cuadrecaja.
+- **Paso operativo nuevo** → una línea en `docs/despliegue.md`, **en el mismo
+  ciclo que lo introduce**. Cuenta como paso operativo un secreto, un cron, un
+  bucket, una regla de plataforma, una migración que hay que revisar a mano o
+  cualquier cosa que haya que hacer al desplegar o al dar de alta un negocio.
+  Lo que **más** importa anotar es lo que ningún sensor puede comprobar: F-019
+  dejó una regla de firewall que no se despliega con el código, no viaja a un
+  entorno nuevo y no rompe ningún test si falta.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
