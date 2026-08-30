@@ -41,10 +41,30 @@ enum CheckoutMode {
 enum OrderStatus {
   PENDING
   PULLED
+  AWAITING_CUSTOMER
   CONFIRMED
   READY
+  IN_TRANSIT
   DELIVERED
   CANCELLED
+  REJECTED_BY_STORE
+}
+
+/// Who closed the order. `cancelReason` stays the free-text human message;
+/// this is what code can branch on (F-019 I4, R9).
+enum OrderCancelledBy {
+  CUSTOMER
+  EXPIRY
+  STORE
+}
+
+/// How the LAST proposal was resolved. Separate from `status` on purpose: the
+/// POS can move the order along afterwards and the proposal's own history
+/// must not get lost (F-019 architecture.md DA1).
+enum ProposalOutcome {
+  APPROVED
+  REJECTED
+  EXPIRED
 }
 
 enum PromotionType {
@@ -196,9 +216,9 @@ model Store {
   whatsapp String?
   email    String?
 
-  address  String?
-  city     String?
-  province String?
+  address   String?
+  city      String?
+  province  String?
   /// Reserved for marketplace proximity search.
   ///
   /// Deliberately plain columns rather than a PostGIS geography: proximity
@@ -211,9 +231,13 @@ model Store {
 
   openingHours Json?
 
-  checkoutMode    CheckoutMode @default(WHATSAPP)
-  deliveryEnabled Boolean      @default(false)
-  deliveryFee     Decimal?     @db.Decimal(14, 2)
+  checkoutMode     CheckoutMode @default(WHATSAPP)
+  deliveryEnabled  Boolean      @default(false)
+  deliveryFee      Decimal?     @db.Decimal(14, 2)
+  /// F-019 R5/R20. Hours a proposal stays open before the clock cancels it.
+  /// A queandabuscando-owned field: the sync never sends it and a STORE event
+  /// never overwrites it (the sync handler writes an explicit column list).
+  orderExpiryHours Int          @default(24)
 
   publishedAt DateTime?
 
@@ -236,7 +260,7 @@ model Store {
   /// other field of the store changed" and only touch `status`/`disabled*`
   /// in the first case — otherwise editing a phone number in the POS would
   /// silently reopen a store the admin closed for vacation.
-  sourceOptIn Boolean?
+  sourceOptIn     Boolean?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -308,7 +332,7 @@ model CanonicalProduct {
 
   /// Concatenated searchable text: name + every alias. Recomputed whenever a
   /// new alias appears — forgetting this silently degrades search.
-  searchDocument String @default("")
+  searchDocument String                   @default("")
   /// Populated by application code with to_tsvector('spanish', unaccent(...)).
   /// GIN index is created in the SQL migration.
   searchVector   Unsupported("tsvector")?
@@ -316,7 +340,7 @@ model CanonicalProduct {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  globalCategory GlobalCategory? @relation(fields: [globalCategoryId], references: [id])
+  globalCategory GlobalCategory?    @relation(fields: [globalCategoryId], references: [id])
   aliases        ProductAlias[]
   storeProducts  StoreProduct[]
   barcodes       CanonicalBarcode[]
@@ -397,7 +421,7 @@ model StoreProduct {
   /// Never written by the sync's or the panel's typed `data`: both of them
   /// call the reindexer, which recomputes it from the row's current state.
   /// That is what makes ADR 0007's ownership hold in both directions.
-  searchDocument String @default("")
+  searchDocument String                   @default("")
   /// Weighted tsvector: A = localName, B = aliases, C = description.
   /// Unsupported: written with raw SQL (ADR 0019). GIN index in the migration.
   searchVector   Unsupported("tsvector")?
@@ -542,8 +566,12 @@ model Order {
   contactEmail    String?
   deliveryAddress String?
 
-  status       OrderStatus @default(PENDING)
+  status       OrderStatus       @default(PENDING)
   cancelReason String?
+  /// R9, criterio 5. `null` while the order is not closed. Which of the
+  /// three terminal outcomes closed it — the customer, the clock, or the
+  /// store — separate from the free-text `cancelReason` above.
+  cancelledBy  OrderCancelledBy?
 
   currencyCode  String
   subtotal      Decimal @db.Decimal(14, 2)
@@ -552,6 +580,31 @@ model Order {
   total         Decimal @db.Decimal(14, 2)
   /// Exchange rates frozen at order time. Historical prices are never recomputed.
   rateSnapshot  Json
+
+  // --- Renegotiation (F-019 architecture.md DA1). All nullable: the store's
+  // proposal lives in the order's own row rather than a separate table, and
+  // only ever has values while a proposal is live or was the last one
+  // resolved. See architecture.md § "Modelo de datos y migraciones".
+  /// R5/R7. Frozen when proposed and never cleared afterwards.
+  expiresAt             DateTime?
+  /// When the current/last proposal was made (E13 restarts the clock).
+  proposedAt            DateTime?
+  /// The store's message to the customer (E2). ≤500 chars, enforced in Zod.
+  proposalMessage       String?
+  /// R3. The "previous total" the customer sees — the totals in effect right
+  /// before this proposal replaced them.
+  previousTotal         Decimal?         @db.Decimal(14, 2)
+  proposedSubtotal      Decimal?         @db.Decimal(14, 2)
+  proposedDiscountTotal Decimal?         @db.Decimal(14, 2)
+  proposedDeliveryFee   Decimal?         @db.Decimal(14, 2)
+  proposedTotal         Decimal?         @db.Decimal(14, 2)
+  /// The proposed lines, amounts as strings (same convention as
+  /// rateSnapshot). Deliberately NOT selected in the pull (DA5).
+  proposedItems         Json?
+  /// Decides E7's 200-idempotent vs 409 rule (DA4).
+  proposalOutcome       ProposalOutcome?
+  /// When the last proposal was decided (approved/rejected/expired).
+  proposalDecidedAt     DateTime?
 
   notes    String?
   pulledAt DateTime?
@@ -645,17 +698,17 @@ model SsoTokenUse {
 /// Inbox pattern. Idempotency is by `eventId` (the id of the row in
 /// cuadrecaja's OutboxEvento), which makes replaying a whole batch safe.
 model SyncEvent {
-  id         String          @id @default(uuid())
-  eventId    String          @unique
-  businessId String
-  entity     SyncEntity
-  operation  SyncOperation
-  occurredAt DateTime
-  payload    Json
-  status     SyncEventStatus @default(PENDING)
-  receivedAt DateTime        @default(now())
+  id          String          @id @default(uuid())
+  eventId     String          @unique
+  businessId  String
+  entity      SyncEntity
+  operation   SyncOperation
+  occurredAt  DateTime
+  payload     Json
+  status      SyncEventStatus @default(PENDING)
+  receivedAt  DateTime        @default(now())
   processedAt DateTime?
-  error      String?
+  error       String?
 
   @@index([status, receivedAt])
   @@index([businessId])

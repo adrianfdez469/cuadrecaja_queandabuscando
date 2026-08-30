@@ -73,14 +73,29 @@ describe("POST /api/internal/orders/status — camino correcto", () => {
     );
   });
 
-  it("acepta los cuatro estados del contrato y ninguno más", async () => {
-    for (const status of ["CONFIRMED", "READY", "DELIVERED", "CANCELLED"]) {
+  it("acepta los seis estados del contrato v5 y ninguno más (F-019 DA6)", async () => {
+    for (const status of [
+      "CONFIRMED",
+      "READY",
+      "IN_TRANSIT",
+      "DELIVERED",
+      "CANCELLED",
+      "REJECTED_BY_STORE",
+    ]) {
       expect((await post({ orderId: "1", status })).status).toBe(200);
     }
     // PENDING y PULLED los pone esta base, no el POS (spec § Datos y contrato).
     for (const status of ["PENDING", "PULLED"]) {
       expect((await post({ orderId: "1", status })).status).toBe(400);
     }
+  });
+
+  it("400 INVALID_BODY para AWAITING_CUSTOMER (E19): solo lo pone /orders/proposal", async () => {
+    const response = await post({ orderId: "1", status: "AWAITING_CUSTOMER" });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("INVALID_BODY");
+    expect(setOrderStatus).not.toHaveBeenCalled();
   });
 });
 

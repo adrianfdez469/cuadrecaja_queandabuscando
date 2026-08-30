@@ -85,3 +85,67 @@ export function buildWhatsappUrl(input: WhatsappOrderInput): string | null {
   const message = buildMessage(input);
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
+
+// ---------------------------------------------------------------------------
+// F-019 — the two renegotiation links. Both pure, both server-only.
+// ---------------------------------------------------------------------------
+
+export type ProposalWhatsappReason = "NO_PHONE_DIGITS";
+
+export type ProposalWhatsappResult = {
+  url: string | null;
+  /** R13: set only when `url` is `null`, so the caller can persist WHY. */
+  reason: ProposalWhatsappReason | null;
+};
+
+/**
+ * The store → customer link E1/E24 return: it is what the ENCARGADO clicks
+ * to send (R12 — nobody here sends anything automatically). Built from the
+ * customer's phone on the persisted order, never from a form the store
+ * fills out by hand.
+ *
+ * Deliberately generic copy, not "hay una propuesta": E1 needs it right
+ * after proposing, but E24 needs the SAME builder for an `ONSITE` order that
+ * never had a proposal at all — the pull returns it for every order (I3),
+ * not only ones with a live proposal. What both need is just a link the
+ * customer can open; the order's own page is what says what changed.
+ *
+ * R13: an unusable phone does not fail the proposal — it returns `null` with
+ * a reason, and the clock still runs (R6 closes it regardless).
+ */
+export function buildProposalWhatsappUrl(input: {
+  customerPhone: string;
+  storeName: string;
+  code: string;
+  orderUrl: string;
+}): ProposalWhatsappResult {
+  const digits = onlyDigits(input.customerPhone);
+  if (!digits) return { url: null, reason: "NO_PHONE_DIGITS" };
+
+  const message = [
+    `Hola, aquí está el enlace a tu pedido en ${input.storeName}.`,
+    `Código: ${formatOrderCode(input.code)}`,
+    input.orderUrl,
+  ].join("\n");
+
+  return { url: `https://wa.me/${digits}?text=${encodeURIComponent(message)}`, reason: null };
+}
+
+/**
+ * The short customer → store link ("Escribirle a la tienda", design.md § "El
+ * wa.me corto hacia la tienda"). Deliberately carries no amount: the totals
+ * are in discussion while a proposal is live, and putting either version in
+ * the message would lock one in.
+ */
+export function buildCustomerContactUrl(input: {
+  storeWhatsappNumber: string | null;
+  storeName: string;
+  code: string;
+}): string | null {
+  if (!input.storeWhatsappNumber) return null;
+  const digits = onlyDigits(input.storeWhatsappNumber);
+  if (!digits) return null;
+
+  const message = `Hola ${input.storeName}, es sobre mi pedido ${formatOrderCode(input.code)}.`;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}

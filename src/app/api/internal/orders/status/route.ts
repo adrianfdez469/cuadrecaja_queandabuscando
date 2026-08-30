@@ -6,9 +6,19 @@ import { setOrderStatus } from "@/features/orders/server/status";
 
 export const dynamic = "force-dynamic";
 
+// F-019 DA6/E19: AWAITING_CUSTOMER stays OUT of this enum on purpose — it is
+// the one status only `/orders/proposal` may set (the only action that also
+// fixes an `expiresAt`), so it falls through to INVALID_BODY (400) here.
 const bodySchema = z.object({
   orderId: z.string().min(1),
-  status: z.enum(["CONFIRMED", "READY", "DELIVERED", "CANCELLED"]),
+  status: z.enum([
+    "CONFIRMED",
+    "READY",
+    "IN_TRANSIT",
+    "DELIVERED",
+    "CANCELLED",
+    "REJECTED_BY_STORE",
+  ]),
   reason: z.string().max(500).nullish(),
 });
 

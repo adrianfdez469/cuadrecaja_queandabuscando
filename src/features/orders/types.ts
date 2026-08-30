@@ -106,3 +106,59 @@ export type CreateOrderError =
   | { error: "PRICE_CHANGED"; lines: PriceChangedLine[]; total: string }
   | { error: "TOO_MANY_ORDERS"; retryAfterSeconds: number }
   | { error: "ORDER_CREATE_FAILED" };
+
+// ---------------------------------------------------------------------------
+// F-019 — renegotiation wire types (architecture.md § Contratos, § Tipos de
+// hilo). Not Zod, same reason as the rest of this file: the Zod schemas in
+// `features/orders/schemas.ts` are checked against these with `satisfies`.
+// ---------------------------------------------------------------------------
+
+export type ProposalItem = {
+  storeProductId: string | null;
+  name: string;
+  unitPrice: string;
+  currencyCode: string;
+  quantity: string;
+  lineTotal: string;
+  originalUnitPrice?: string;
+  originalCurrencyCode?: string;
+};
+
+/** Body of `POST /api/internal/orders/proposal` (architecture.md DA2). */
+export type ProposalPayload = {
+  orderId: string;
+  currencyCode: string;
+  subtotal: string;
+  discountTotal?: string;
+  deliveryFee: string;
+  total: string;
+  message?: string | null;
+  items: ProposalItem[];
+};
+
+/** `200` body of `POST /api/internal/orders/proposal`. */
+export type ProposalResponse = {
+  ok: true;
+  status: "AWAITING_CUSTOMER";
+  expiresAt: string;
+  currencyCode: string;
+  previousTotal: string;
+  proposedTotal: string;
+  orderUrl: string;
+  /** Toward the CUSTOMER (R12) — `null` with a reason when unusable (R13). */
+  customerWhatsappUrl: string | null;
+  customerWhatsappReason: "NO_PHONE_DIGITS" | null;
+};
+
+export type ProposalError =
+  | { error: "INVALID_JSON" }
+  | { error: "INVALID_BODY"; issues: InvalidBodyIssue[] }
+  | { error: "INVALID_ORDER_ID" }
+  | { error: "CURRENCY_MISMATCH" }
+  | { error: "UNKNOWN_ORDER" }
+  | { error: "ORDER_NOT_PROPOSABLE"; status: string }
+  | { error: "PROPOSAL_FAILED" };
+
+/** Values of the `decision` field on `POST /[slug]/pedido/[code]/respuesta`
+ *  (architecture.md DA4) — see `ORDER_PROPOSAL_DECISION` for the constants. */
+export type ProposalDecision = "aprobar" | "rechazar";

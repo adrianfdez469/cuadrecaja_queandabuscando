@@ -24,6 +24,17 @@ function dbOrder(overrides: Record<string, unknown> = {}) {
     total: { toString: () => "900.00" },
     notes: null,
     createdAt: new Date("2026-08-26T02:00:00.000Z"),
+    cancelledBy: null,
+    proposedAt: null,
+    expiresAt: null,
+    proposalMessage: null,
+    previousTotal: null,
+    proposedSubtotal: null,
+    proposedDiscountTotal: null,
+    proposedDeliveryFee: null,
+    proposedTotal: null,
+    proposedItems: null,
+    proposalOutcome: null,
     store: {
       slug: null,
       name: "La Rampa",
@@ -34,6 +45,7 @@ function dbOrder(overrides: Record<string, unknown> = {}) {
     },
     items: [
       {
+        storeProductId: "sp-1",
         name: "Café Cubita",
         unitPrice: { toString: () => "450.00" },
         currencyCode: "CUP",
@@ -141,5 +153,95 @@ describe("orderWhatsappUrl()", () => {
     const url = orderWhatsappUrl(snapshot!)!;
     expect(url).toMatch(/^https:\/\/wa\.me\/5350000001\?text=/);
     expect(decodeURIComponent(url)).toContain("Código: A7K3M-9PQR2");
+  });
+});
+
+describe("getOrderByCode() — F-019 proposal + cancelledBy", () => {
+  it("proposal is null when the order never had one", async () => {
+    orderFindFirst.mockResolvedValue(dbOrder());
+    const snapshot = await getOrderByCode(STORE_ID, "A7K3M9PQR2");
+    expect(snapshot?.proposal).toBeNull();
+    expect(snapshot?.cancelledBy).toBeNull();
+  });
+
+  it("proposal is populated with the PROPOSED amounts while AWAITING_CUSTOMER (E2)", async () => {
+    orderFindFirst.mockResolvedValue(
+      dbOrder({
+        status: "AWAITING_CUSTOMER",
+        proposedAt: new Date("2026-08-30T14:19:43.000Z"),
+        expiresAt: new Date("2026-08-31T14:19:43.000Z"),
+        proposalMessage: "El envío a Playa cuesta 180.",
+        previousTotal: { toString: () => "880.00" },
+        proposedSubtotal: { toString: () => "1000.00" },
+        proposedDiscountTotal: { toString: () => "0" },
+        proposedDeliveryFee: { toString: () => "180.00" },
+        proposedTotal: { toString: () => "1180.00" },
+        proposedItems: [
+          {
+            storeProductId: "sp-1",
+            name: "Café Cubita",
+            unitPrice: "500.00",
+            currencyCode: "CUP",
+            quantity: "2",
+            lineTotal: "1000.00",
+          },
+        ],
+        proposalOutcome: null,
+      }),
+    );
+    const snapshot = await getOrderByCode(STORE_ID, "A7K3M9PQR2");
+    expect(snapshot?.proposal).toEqual({
+      proposedAt: "2026-08-30T14:19:43.000Z",
+      expiresAt: "2026-08-31T14:19:43.000Z",
+      message: "El envío a Playa cuesta 180.",
+      previousTotal: "880.00",
+      subtotal: "1000.00",
+      discountTotal: "0",
+      deliveryFee: "180.00",
+      total: "1180.00",
+      items: [
+        {
+          storeProductId: "sp-1",
+          name: "Café Cubita",
+          unitPrice: "500.00",
+          currencyCode: "CUP",
+          quantity: "2",
+          lineTotal: "1000.00",
+        },
+      ],
+      outcome: null,
+    });
+  });
+
+  it("proposal STAYS populated after an approval (PP3 — only a SECOND proposal overwrites it)", async () => {
+    orderFindFirst.mockResolvedValue(
+      dbOrder({
+        status: "CONFIRMED",
+        proposedAt: new Date("2026-08-30T14:19:43.000Z"),
+        expiresAt: new Date("2026-08-31T14:19:43.000Z"),
+        previousTotal: { toString: () => "880.00" },
+        proposedSubtotal: { toString: () => "1000.00" },
+        proposedDiscountTotal: { toString: () => "0" },
+        proposedDeliveryFee: { toString: () => "180.00" },
+        proposedTotal: { toString: () => "1180.00" },
+        proposedItems: [],
+        proposalOutcome: "APPROVED",
+      }),
+    );
+    const snapshot = await getOrderByCode(STORE_ID, "A7K3M9PQR2");
+    expect(snapshot?.proposal?.outcome).toBe("APPROVED");
+    expect(snapshot?.proposal?.previousTotal).toBe("880.00");
+  });
+
+  it("cancelledBy carries the three R9 attributions through unchanged", async () => {
+    orderFindFirst.mockResolvedValue(dbOrder({ status: "CANCELLED", cancelledBy: "EXPIRY" }));
+    const snapshot = await getOrderByCode(STORE_ID, "A7K3M9PQR2");
+    expect(snapshot?.cancelledBy).toBe("EXPIRY");
+  });
+
+  it("items carry storeProductId (needed to diff proposed vs current, A5)", async () => {
+    orderFindFirst.mockResolvedValue(dbOrder());
+    const snapshot = await getOrderByCode(STORE_ID, "A7K3M9PQR2");
+    expect(snapshot?.items[0].storeProductId).toBe("sp-1");
   });
 });
