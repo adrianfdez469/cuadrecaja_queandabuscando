@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { cached, storeCatalogTag, storeTag, storefrontTag } from "@/lib/cache";
@@ -5,6 +6,11 @@ import { canonicalSlug, asPublicSlug, type PublicSlug } from "@/lib/publicSlug";
 import { presentationContact } from "@/lib/storeContact";
 import { indexPromotions, type AppliedPromotion, type PromotionRow } from "@/lib/promotions";
 import type { BranchResolution, SelectorResolution } from "@/features/storefront/server/resolve";
+import {
+  deriveStoreCategories,
+  productsOfCategory,
+  type StoreCategory,
+} from "@/features/catalog/storeCategories";
 
 /** Only what these reads actually need: a `BranchResolution` satisfies it,
  *  and so does a lighter object built once for `generateStaticParams`. */
@@ -61,6 +67,11 @@ export type CatalogProduct = {
   availability: "OUT_OF_STOCK" | "LOW_STOCK" | "AVAILABLE";
   featured: boolean;
   categoryName: string | null;
+  /** F-026: the STABLE identifier of the category in the URL
+   *  (`LocalCategory.slug`), `null` when the product has no category (E6).
+   *  Sits next to `categoryName` because it comes from the same row and the
+   *  same JOIN: zero extra queries (architecture.md § Contratos). */
+  categorySlug: string | null;
   syncedPrice: string;
   syncedPriceCurrency: string;
   priceOverride: string | null;
@@ -210,7 +221,7 @@ async function loadCatalog(storeId: string): Promise<CatalogProduct[]> {
         priceOverride: true,
         priceOverrideCurrency: true,
         localCategoryId: true,
-        localCategory: { select: { name: true } },
+        localCategory: { select: { name: true, slug: true } },
         canonicalProduct: { select: { description: true, imageUrl: true } },
       },
     }),
@@ -262,6 +273,7 @@ async function loadCatalog(storeId: string): Promise<CatalogProduct[]> {
     featured: product.featured,
     promotions: promotionIndex.forProduct(product.id, product.localCategoryId),
     categoryName: product.localCategory?.name ?? null,
+    categorySlug: product.localCategory?.slug ?? null,
     syncedPrice: product.syncedPrice.toString(),
     syncedPriceCurrency: product.syncedPriceCurrency,
     priceOverride: product.priceOverride?.toString() ?? null,
@@ -275,6 +287,54 @@ export function getStoreCatalog(branch: StoreRef): Promise<CatalogProduct[]> {
     tags: [storeCatalogTag(branch.canonicalSlug)],
   })(branch.storeId);
 }
+
+/**
+ * F-026 (RD1): the list for the selector. ZERO new queries and zero new
+ * cache entries (docs/adr/0025-recortes-del-catalogo-como-proyeccion.md) —
+ * a projection of the same `getStoreCatalog()` read that `/[slug]` already
+ * pays for. Wrapped in React's `cache()` so a page's own body and a
+ * sibling call in the same request never re-derive the same list twice,
+ * same technique `resolvePublicSlug` already uses.
+ */
+export const getStoreCategories = cache(async (branch: StoreRef): Promise<StoreCategory[]> => {
+  const catalog = await getStoreCatalog(branch);
+  return deriveStoreCategories(catalog);
+});
+
+export type StoreCategoryView = {
+  category: StoreCategory;
+  /** Same type and same order as `getStoreCatalog` (RD3): `ProductCard`
+   *  and the grid are reused untouched. */
+  products: CatalogProduct[];
+};
+
+/**
+ * F-026 (RD3, RD4): the category view's one entry point. `null` means the
+ * caller should `notFound()` — a `categorySlug` that does not resolve to
+ * any visible product in THIS branch, whether it never existed, belongs to
+ * another branch's business (E9), or lost its last visible product (E5).
+ * Those three are deliberately the same outcome for the shopper.
+ *
+ * Envoltorio fino sobre `getStoreCatalog`: no Prisma, no new query, no new
+ * cache entry — same ADR 0025 as `getStoreCategories`.
+ */
+export const getStoreCategoryView = cache(
+  async (branch: StoreRef, categorySlug: string): Promise<StoreCategoryView | null> => {
+    const catalog = await getStoreCatalog(branch);
+    const products = productsOfCategory(catalog, categorySlug);
+    if (products.length === 0) return null;
+
+    const category = deriveStoreCategories(catalog).find((c) => c.slug === categorySlug);
+    // Unreachable in practice: `products.length > 0` means at least one
+    // product carries this `categorySlug`, which is exactly what puts an
+    // entry in `deriveStoreCategories`' output. Guarded anyway so the
+    // function's return type stays a clean `StoreCategoryView | null`
+    // instead of a non-null assertion.
+    if (!category) return null;
+
+    return { category, products };
+  },
+);
 
 async function loadRates(storeId: string): Promise<Record<string, string>> {
   const rates = await prisma.exchangeRate.findMany({

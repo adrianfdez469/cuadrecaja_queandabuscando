@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import {
   getPublishedStoreSlugs,
   getStoreCatalog,
+  getStoreCategories,
   getStoreRates,
   requireStore,
 } from "@/features/catalog/server/queries";
@@ -11,6 +12,7 @@ import { CATALOG_EAGER_IMAGE_COUNT } from "@/constants/media";
 import { Container } from "@/components/ui/Container";
 import { Alert } from "@/components/ui/Alert";
 import { ProductCard } from "@/components/store/ProductCard";
+import { StoreCategoryNav } from "@/components/store/StoreCategoryNav";
 import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
 import { BranchBar } from "@/components/store/BranchBar";
 import { BranchList } from "@/components/store/BranchList";
@@ -126,9 +128,10 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
     );
   }
 
-  const [products, rates] = await Promise.all([
+  const [products, rates, categories] = await Promise.all([
     getStoreCatalog(resolution),
     getStoreRates(resolution),
+    getStoreCategories(resolution),
   ]);
 
   return (
@@ -143,6 +146,13 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
         <StoreSearchBox storeSlug={store.canonicalSlug} storeName={store.name} />
         <h1 className="mt-8 text-2xl font-semibold">Catálogo</h1>
         {store.description && <p className="text-fg-muted mt-2 max-w-2xl">{store.description}</p>}
+
+        {/* design.md § Inventario, umbral: with fewer than two categories the
+            only choice would be "todo" or "esa una" — the same set, so it is
+            not a choice (RD1, criterio 1). */}
+        {categories.length >= 2 && (
+          <StoreCategoryNav storeSlug={store.canonicalSlug} categories={categories} />
+        )}
 
         {products.length === 0 ? (
           <p className="text-fg-muted mt-10">Esta tienda todavía no tiene productos publicados.</p>

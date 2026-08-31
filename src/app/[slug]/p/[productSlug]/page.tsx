@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AVAILABILITY_LABEL, AVAILABILITY_TONE, isOrderable } from "@/lib/availability";
 import { resolvePrice, type ResolvedPrice } from "@/lib/pricing";
@@ -11,6 +12,7 @@ import {
   getStoreRates,
   requireStore,
 } from "@/features/catalog/server/queries";
+import { storeCategoryPath } from "@/features/catalog/storeCategories";
 import { requireResolution } from "@/features/storefront/server/resolve";
 import { Badge } from "@/components/ui/Badge";
 import { Container } from "@/components/ui/Container";
@@ -187,7 +189,16 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
         </div>
 
         <div>
-          {product.categoryName && <p className="text-fg-muted text-sm">{product.categoryName}</p>}
+          {/* Paso 5b: enlace a la vista de la categoría — una línea, cero
+              JavaScript nuevo (`next/link` ya está en este árbol). */}
+          {product.categoryName && product.categorySlug && (
+            <Link
+              href={storeCategoryPath(store.canonicalSlug, product.categorySlug)}
+              className="text-fg-muted text-sm hover:underline"
+            >
+              {product.categoryName}
+            </Link>
+          )}
           <h1 className="mt-1 text-2xl font-semibold">{product.name}</h1>
 
           <p className="text-brand mt-4 text-3xl font-semibold">

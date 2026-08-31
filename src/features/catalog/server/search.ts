@@ -85,6 +85,13 @@ type SearchRawRow = {
   priceOverride: Prisma.Decimal | null;
   priceOverrideCurrency: string | null;
   categoryName: string | null;
+  /** F-026 (PP1): projected alongside `categoryName` from the SAME
+   *  `LocalCategory` JOIN this CTE already had — no new join, no ranking
+   *  change, no change to the three layers or the pagination. Only here so
+   *  `CatalogProduct` (which `StoreSearchItem` extends) keeps one shape
+   *  across its two readers (AGENTS.md § Prohibiciones: no duplicar
+   *  interfaces). */
+  categorySlug: string | null;
   canonicalDescription: string | null;
   canonicalImageUrl: string | null;
   layer: number | null;
@@ -205,6 +212,7 @@ export function buildStoreSearchSql(input: {
                    sp."syncedPrice", sp."syncedPriceCurrency",
                    sp."priceOverride", sp."priceOverrideCurrency",
                    lc."name"        AS "categoryName",
+                   lc."slug"        AS "categorySlug",
                    cp."description" AS "canonicalDescription",
                    cp."imageUrl"    AS "canonicalImageUrl",
                    h."layer"
@@ -289,6 +297,7 @@ export async function searchStoreProducts(input: StoreSearchInput): Promise<Stor
       availability: row.availability,
       featured: row.featured,
       categoryName: row.categoryName,
+      categorySlug: row.categorySlug,
       syncedPrice: row.syncedPrice.toString(),
       syncedPriceCurrency: row.syncedPriceCurrency,
       priceOverride: row.priceOverride?.toString() ?? null,
