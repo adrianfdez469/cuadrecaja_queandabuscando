@@ -1,0 +1,1698 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="Los dos flujos completos entre cuadrecaja y queandabuscando: configurar una tienda y vender, paso a paso, con el estado de lo implementado."
+    />
+    <style>
+      /* Reset mínimo: el mismo que aplica el visor de artifacts, para que este
+     archivo se vea idéntico abierto directamente en el navegador. */
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+      }
+      img {
+        max-width: 100%;
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+    <title>Cuadrecaja ↔ queandabuscando</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+    />
+
+    <style>
+      :root {
+        --ground: #f1f3f6;
+        --surface: #ffffff;
+        --surface-2: #e7eaef;
+        --ink: #13171e;
+        --ink-2: #49515e;
+        --ink-3: #78818f;
+        --rule: #d5d9e0;
+        --rule-soft: #e3e7ec;
+        --qab: #0b7a8c;
+        --qab-soft: #e2f1f3;
+        --cc: #a4611d;
+        --cc-soft: #f6ece0;
+        --ok: #1f7346;
+        --ok-soft: #e0f0e7;
+        --wait: #8d6205;
+        --wait-soft: #f6eddb;
+        --idea: #5f4fbe;
+        --idea-soft: #ebe8f8;
+        --branch: #1462a8;
+        --branch-soft: #e2edf8;
+
+        --f-display: "IBM Plex Sans Condensed", "Helvetica Neue", Arial, sans-serif;
+        --f-body: "IBM Plex Sans", "Segoe UI", Roboto, system-ui, sans-serif;
+        --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --ground: #0f1217;
+          --surface: #161a20;
+          --surface-2: #1d232b;
+          --ink: #e7eaef;
+          --ink-2: #a6afba;
+          --ink-3: #757f8c;
+          --rule: #29303a;
+          --rule-soft: #212831;
+          --qab: #45c2d3;
+          --qab-soft: #102a30;
+          --cc: #dc9a4c;
+          --cc-soft: #2c2115;
+          --ok: #52c084;
+          --ok-soft: #12291d;
+          --wait: #e2ac41;
+          --wait-soft: #2b2313;
+          --idea: #9e91ec;
+          --idea-soft: #1e1b30;
+          --branch: #64aeee;
+          --branch-soft: #12222f;
+        }
+      }
+
+      :root[data-theme="dark"] {
+        --ground: #0f1217;
+        --surface: #161a20;
+        --surface-2: #1d232b;
+        --ink: #e7eaef;
+        --ink-2: #a6afba;
+        --ink-3: #757f8c;
+        --rule: #29303a;
+        --rule-soft: #212831;
+        --qab: #45c2d3;
+        --qab-soft: #102a30;
+        --cc: #dc9a4c;
+        --cc-soft: #2c2115;
+        --ok: #52c084;
+        --ok-soft: #12291d;
+        --wait: #e2ac41;
+        --wait-soft: #2b2313;
+        --idea: #9e91ec;
+        --idea-soft: #1e1b30;
+        --branch: #64aeee;
+        --branch-soft: #12222f;
+      }
+
+      body {
+        background: var(--ground);
+        color: var(--ink);
+        font-family: var(--f-body);
+        font-size: 16px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .wrap {
+        max-width: 62rem;
+        margin: 0 auto;
+        padding: 3rem 1.25rem 6rem;
+      }
+
+      /* ---------- type ---------- */
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        font-family: var(--f-display);
+        font-weight: 700;
+        text-wrap: balance;
+        line-height: 1.15;
+        margin: 0;
+      }
+
+      h1 {
+        font-size: clamp(2.1rem, 5vw, 3.1rem);
+        letter-spacing: -0.015em;
+      }
+      h2 {
+        font-size: clamp(1.5rem, 3vw, 2rem);
+        letter-spacing: -0.01em;
+      }
+      h3 {
+        font-size: 1.2rem;
+      }
+      h4 {
+        font-size: 1rem;
+        font-weight: 600;
+      }
+
+      p {
+        margin: 0;
+        max-width: 68ch;
+      }
+
+      .eyebrow {
+        font-family: var(--f-mono);
+        font-size: 0.72rem;
+        font-weight: 500;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+      }
+
+      code,
+      .mono {
+        font-family: var(--f-mono);
+        font-size: 0.88em;
+      }
+
+      code {
+        background: var(--surface-2);
+        padding: 0.08em 0.34em;
+        border-radius: 3px;
+        word-break: break-word;
+      }
+
+      a {
+        color: var(--qab);
+      }
+
+      /* ---------- header ---------- */
+
+      header.head {
+        display: flex;
+        flex-direction: column;
+        gap: 1.1rem;
+        padding-bottom: 2rem;
+        border-bottom: 2px solid var(--ink);
+      }
+
+      .head .sub {
+        font-size: 1.06rem;
+        color: var(--ink-2);
+        max-width: 60ch;
+      }
+
+      .head .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem 1.4rem;
+        font-family: var(--f-mono);
+        font-size: 0.76rem;
+        color: var(--ink-3);
+      }
+
+      /* ---------- status chips ---------- */
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4em;
+        font-family: var(--f-mono);
+        font-size: 0.68rem;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        padding: 0.22em 0.55em;
+        border-radius: 3px;
+        white-space: nowrap;
+        border: 1px solid transparent;
+      }
+
+      .chip::before {
+        content: "";
+        width: 0.5em;
+        height: 0.5em;
+        border-radius: 50%;
+        background: currentColor;
+        flex: none;
+      }
+
+      .chip.ok {
+        color: var(--ok);
+        background: var(--ok-soft);
+        border-color: var(--ok);
+      }
+      .chip.branch {
+        color: var(--branch);
+        background: var(--branch-soft);
+        border-color: var(--branch);
+      }
+      .chip.wait {
+        color: var(--wait);
+        background: var(--wait-soft);
+        border-color: var(--wait);
+      }
+      .chip.idea {
+        color: var(--idea);
+        background: var(--idea-soft);
+        border-color: var(--idea);
+      }
+
+      .legend {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+        gap: 0.85rem;
+        margin-top: 2rem;
+      }
+
+      .legend div {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        padding: 0.8rem 0.9rem;
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 5px;
+      }
+
+      .legend span.txt {
+        font-size: 0.83rem;
+        color: var(--ink-2);
+        line-height: 1.45;
+      }
+
+      /* ---------- sections ---------- */
+
+      section {
+        margin-top: 4.5rem;
+      }
+
+      .sec-head {
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+        margin-bottom: 2rem;
+        padding-bottom: 0.9rem;
+        border-bottom: 1px solid var(--rule);
+      }
+
+      .sec-head p {
+        color: var(--ink-2);
+      }
+
+      /* ---------- callout ---------- */
+
+      .callout {
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+        padding: 1.15rem 1.25rem;
+        border-radius: 5px;
+        border: 1px solid var(--rule);
+        border-left: 4px solid var(--cc);
+        background: var(--surface);
+        margin: 1.75rem 0;
+      }
+
+      .callout.warn {
+        border-left-color: var(--wait);
+      }
+      .callout.brand {
+        border-left-color: var(--qab);
+      }
+      .callout p {
+        font-size: 0.94rem;
+        color: var(--ink-2);
+      }
+      .callout strong {
+        color: var(--ink);
+      }
+
+      /* ---------- endpoint table ---------- */
+
+      .scroll {
+        overflow-x: auto;
+        margin: 1.5rem 0;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.87rem;
+        min-width: 40rem;
+      }
+
+      th {
+        font-family: var(--f-mono);
+        font-size: 0.68rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        text-align: left;
+        font-weight: 500;
+        padding: 0 0.7rem 0.55rem 0;
+        border-bottom: 1px solid var(--rule);
+      }
+
+      td {
+        padding: 0.7rem 0.7rem 0.7rem 0;
+        border-bottom: 1px solid var(--rule-soft);
+        vertical-align: top;
+        color: var(--ink-2);
+      }
+
+      td.route {
+        font-family: var(--f-mono);
+        font-size: 0.8rem;
+        color: var(--ink);
+        white-space: nowrap;
+      }
+      td.dir {
+        font-family: var(--f-mono);
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      td.dir.to-qab {
+        color: var(--qab);
+      }
+      td.dir.to-cc {
+        color: var(--cc);
+      }
+      td:last-child,
+      th:last-child {
+        padding-right: 0;
+      }
+
+      /* ---------- flow ---------- */
+
+      .flow {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        margin: 2rem 0;
+      }
+
+      .flow::before {
+        content: "";
+        position: absolute;
+        top: 0.6rem;
+        bottom: 0.6rem;
+        left: 1.1rem;
+        width: 1px;
+        background: var(--rule);
+      }
+
+      .step {
+        position: relative;
+        display: grid;
+        grid-template-columns: 2.25rem minmax(0, 1fr);
+        gap: 0.85rem;
+        align-items: start;
+      }
+
+      .n {
+        font-family: var(--f-mono);
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--ink-3);
+        background: var(--ground);
+        width: 2.25rem;
+        text-align: center;
+        padding: 0.25rem 0;
+        line-height: 1;
+        z-index: 1;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-left: 3px solid var(--rule);
+        border-radius: 5px;
+        padding: 0.95rem 1.1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+      }
+
+      .step.cc .card {
+        border-left-color: var(--cc);
+      }
+      .step.qab .card {
+        border-left-color: var(--qab);
+      }
+      .step.buyer .card {
+        border-left-color: var(--ink-3);
+        border-left-style: dotted;
+      }
+
+      .card-top {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem 0.7rem;
+      }
+
+      .actor {
+        font-family: var(--f-mono);
+        font-size: 0.68rem;
+        font-weight: 600;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+
+      .step.cc .actor {
+        color: var(--cc);
+      }
+      .step.qab .actor {
+        color: var(--qab);
+      }
+      .step.buyer .actor {
+        color: var(--ink-3);
+      }
+
+      .card h4 {
+        flex: 1 1 14rem;
+        min-width: 0;
+      }
+      .card p {
+        font-size: 0.9rem;
+        color: var(--ink-2);
+        max-width: 74ch;
+      }
+      .card ul {
+        margin: 0;
+        padding-left: 1.1rem;
+        font-size: 0.88rem;
+        color: var(--ink-2);
+      }
+      .card li {
+        margin-top: 0.28rem;
+      }
+      .card li::marker {
+        color: var(--ink-3);
+      }
+
+      .note {
+        font-size: 0.83rem;
+        color: var(--ink-3);
+        border-top: 1px dashed var(--rule);
+        padding-top: 0.5rem;
+        font-style: italic;
+      }
+
+      .branchbox {
+        margin-top: 0.3rem;
+        padding: 0.7rem 0.85rem;
+        background: var(--surface-2);
+        border-radius: 4px;
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+      }
+
+      .branchbox .lbl {
+        font-family: var(--f-mono);
+        font-size: 0.68rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+      }
+
+      .branchbox p {
+        font-size: 0.87rem;
+      }
+
+      @media (min-width: 62rem) {
+        .flow::before {
+          left: 50%;
+          transform: translateX(-0.5px);
+        }
+        .step {
+          grid-template-columns: minmax(0, 1fr) 3.5rem minmax(0, 1fr);
+          gap: 0;
+        }
+        .step .n {
+          grid-column: 2;
+          justify-self: center;
+        }
+        .step.cc .card {
+          grid-column: 1;
+          grid-row: 1;
+          margin-right: 0;
+        }
+        .step.qab .card,
+        .step.buyer .card {
+          grid-column: 3;
+          grid-row: 1;
+        }
+        .step.cc .card {
+          border-left: 1px solid var(--rule);
+          border-right: 3px solid var(--cc);
+          text-align: right;
+        }
+        .step.cc .card-top {
+          justify-content: flex-end;
+          flex-direction: row-reverse;
+        }
+        .step.cc .card ul {
+          padding-left: 0;
+          padding-right: 1.1rem;
+          list-style-position: inside;
+        }
+        .step.cc .card li {
+          direction: rtl;
+          text-align: right;
+        }
+        .step.cc .card li > * {
+          direction: ltr;
+        }
+        .step.full .card {
+          grid-column: 1 / -1;
+          grid-row: 1;
+        }
+      }
+
+      /* ---------- gaps grid ---------- */
+
+      .gaps {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+        gap: 1rem;
+        margin-top: 1.75rem;
+      }
+
+      .gap {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 5px;
+        padding: 1rem 1.1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+      }
+
+      .gap h4 {
+        font-family: var(--f-body);
+        font-size: 0.97rem;
+        font-weight: 600;
+      }
+      .gap p {
+        font-size: 0.86rem;
+        color: var(--ink-2);
+      }
+      .gap .id {
+        font-family: var(--f-mono);
+        font-size: 0.72rem;
+        color: var(--ink-3);
+      }
+
+      footer {
+        margin-top: 5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--rule);
+        font-size: 0.83rem;
+        color: var(--ink-3);
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+      }
+
+      footer .mono {
+        font-size: 0.78rem;
+      }
+
+      :where(a, button):focus-visible {
+        outline: 2px solid var(--qab);
+        outline-offset: 2px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="head">
+        <span class="eyebrow">Contrato de integración · v5</span>
+        <h1>Cuadrecaja ↔ queandabuscando</h1>
+        <p class="sub">
+          Los dos flujos completos —configurar una tienda y vender— paso a paso, con el sistema que
+          ejecuta cada paso y el estado real de lo construido.
+        </p>
+        <div class="meta">
+          <span>30 de agosto de 2026</span>
+          <span>CC = cuadrecaja (POS)</span>
+          <span>QAB = queandabuscando (tienda pública)</span>
+        </div>
+      </header>
+
+      <div class="legend">
+        <div>
+          <span class="chip ok">Implementado</span>
+          <span class="txt">Construido, verificado y en <code>main</code>.</span>
+        </div>
+        <div>
+          <span class="chip branch">En rama</span>
+          <span class="txt"
+            >Construido y verificado en <code>f-019-avanzar</code>, sin fusionar todavía.</span
+          >
+        </div>
+        <div>
+          <span class="chip wait">Por implementar</span>
+          <span class="txt"
+            >Especificado en el contrato o en el backlog; nadie lo ha escrito aún.</span
+          >
+        </div>
+        <div>
+          <span class="chip idea">Propuesta</span>
+          <span class="txt"
+            >Idea con criterios escritos en <code>.agent/specs/propuestas/</code>. No es feature
+            hasta que el humano lo decida.</span
+          >
+        </div>
+      </div>
+
+      <div class="callout warn">
+        <h3>El estado que domina todo lo demás</h3>
+        <p>
+          <strong>En cuadrecaja no hay nada de esta integración desarrollado todavía.</strong> El
+          contrato lo dice tres veces (HD5), y es por eso que sus versiones 3, 4 y 5 pudieron romper
+          compatibilidad sin periodo de convivencia: no hay ningún consumidor vivo al que migrar. En
+          la práctica, <em>todos</em> los pasos marcados
+          <span class="chip wait">Por implementar</span> de este documento están del lado de CC. El
+          lado receptor —QAB— existe, está verificado contra los casos del contrato, y hoy solo se
+          ejercita con los guiones de <code>scripts/</code>.
+        </p>
+      </div>
+
+      <section>
+        <div class="sec-head">
+          <span class="eyebrow">El principio</span>
+          <h2>Ninguna base conoce a la otra, y todas las llamadas las inicia el POS</h2>
+          <p>
+            QAB no conoce la URL de cuadrecaja ni ningún secreto suyo. Un SSRF, una dependencia npm
+            comprometida o una fuga de variables de entorno en la tienda pública no alcanza la base
+            con las ventas, porque la credencial no vive en ese runtime. Siete rutas, todas
+            iniciadas desde CC.
+          </p>
+        </div>
+
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Ruta</th>
+                <th>Dirección</th>
+                <th>Para qué</th>
+                <th>Estado QAB</th>
+                <th>Estado CC</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="route">POST /api/internal/sync/catalog</td>
+                <td class="dir to-qab">CC →</td>
+                <td>Tiendas, categorías, productos, monedas y tasas (outbox, ≤500 por lote)</td>
+                <td><span class="chip ok">Impl.</span></td>
+                <td><span class="chip wait">Pendiente</span></td>
+              </tr>
+              <tr>
+                <td class="route">POST /api/internal/sync/availability</td>
+                <td class="dir to-qab">CC →</td>
+                <td>Disponibilidad como enum, nunca el entero de existencia (≤2000)</td>
+                <td><span class="chip ok">Impl.</span></td>
+                <td><span class="chip wait">Pendiente</span></td>
+              </tr>
+              <tr>
+                <td class="route">GET /api/internal/orders</td>
+                <td class="dir to-cc">← QAB</td>
+                <td>Pull de pedidos nuevos, cursor por negocio</td>
+                <td><span class="chip ok">Impl.</span></td>
+                <td><span class="chip wait">Pendiente</span></td>
+              </tr>
+              <tr>
+                <td class="route">POST /api/internal/orders/status</td>
+                <td class="dir to-qab">CC →</td>
+                <td>Reportar el avance del pedido (6 valores)</td>
+                <td><span class="chip ok">Impl.</span></td>
+                <td><span class="chip wait">Pendiente</span></td>
+              </tr>
+              <tr>
+                <td class="route">POST /api/internal/orders/proposal</td>
+                <td class="dir to-qab">CC →</td>
+                <td>Proponer un cambio de importes o líneas (v5)</td>
+                <td><span class="chip branch">En rama</span></td>
+                <td><span class="chip wait">Pendiente</span></td>
+              </tr>
+              <tr>
+                <td class="route">GET /api/internal/reconciliation</td>
+                <td class="dir to-cc">← QAB</td>
+                <td>Hash comparable por tienda, para detectar deriva</td>
+                <td><span class="chip ok">Impl.</span></td>
+                <td><span class="chip wait">Pendiente</span></td>
+              </tr>
+              <tr>
+                <td class="route">GET /api/internal/slug-availability</td>
+                <td class="dir to-cc">← QAB</td>
+                <td>Pronóstico de qué URL quedaría al publicar. Nunca reserva</td>
+                <td><span class="chip ok">Impl.</span></td>
+                <td><span class="chip wait">Opcional</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p style="font-size: 0.9rem; color: var(--ink-2)">
+          Autenticación: <code>Authorization: Bearer &lt;token del negocio&gt;</code>. El token es
+          <strong>por negocio</strong>, no un secreto global — QAB lo acuña, entrega el valor en
+          claro una sola vez y guarda solo su SHA-256. Si ningún negocio tiene token acuñado, el
+          servidor responde <code>503</code>, nunca <code>200</code>: un token ausente jamás
+          significa «deja pasar todo».
+        </p>
+      </section>
+
+      <section>
+        <div class="sec-head">
+          <span class="eyebrow">Fase 0 · una sola vez por negocio</span>
+          <h2>Alta del negocio y de las credenciales</h2>
+          <p>Nada de esto lo hace un cron: son tres actos deliberados de un operador humano.</p>
+        </div>
+
+        <div class="flow">
+          <div class="step qab">
+            <span class="n">0.1</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">Operador · QAB</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>Acuñar el token del negocio</h4>
+              <p>
+                <code>npm run mint:token -- &lt;Negocio.id&gt;</code>. Crea el
+                <code>Business</code> con <code>externalId</code> = el <code>Negocio.id</code> de
+                CC, imprime el token en claro <strong>una sola vez</strong> por stdout y guarda solo
+                el SHA-256 en <code>Business.syncTokenHash</code>.
+              </p>
+              <p class="note">
+                El sync ya no crea negocios (R8/E16): un negocio nace cuando se acuña su token, no
+                cuando llega su primer evento. Re-ejecutar el guion <em>rota</em> el token — el
+                viejo deja de resolver al instante y ningún otro negocio se ve afectado.
+              </p>
+            </div>
+          </div>
+
+          <div class="step cc">
+            <span class="n">0.2</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">CC</span>
+                <span class="chip wait">Por implementar</span>
+              </div>
+              <h4>Guardar el token en la configuración del negocio</h4>
+              <p>
+                Cada negocio guarda el suyo en su propia configuración, del lado de CC. No hay
+                ninguna variable de entorno compartida entre los dos proyectos.
+              </p>
+            </div>
+          </div>
+
+          <div class="step full qab">
+            <span class="n">0.3</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">Ambos</span>
+                <span class="chip ok">Implementado en QAB</span>
+              </div>
+              <h4>El secreto compartido del SSO del panel</h4>
+              <p>
+                <code>SSO_JWT_SECRET</code>, de 32 caracteres o más, presente en los dos
+                despliegues. Es lo único que comparten, y sirve exclusivamente para que CC firme el
+                JWT de un solo uso con el que un administrador entra al panel de QAB.
+                <strong>La contraseña de cuadrecaja nunca llega a este sistema</strong> y ningún
+                hash de contraseña se replica.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="sec-head">
+          <span class="eyebrow">Fase 1 · A</span>
+          <h2>Configuración de la tienda: el alta nace en CC</h2>
+          <p>
+            Una tienda no se crea desde el panel de QAB. Existe porque el POS mandó un evento
+            <code>STORE</code> con su opt-in:
+            <em>la fila existiendo es el opt-in del negocio para ese local</em>.
+          </p>
+        </div>
+
+        <div class="flow">
+          <div class="step cc">
+            <span class="n">1</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">CC</span>
+                <span class="chip wait">Por implementar</span>
+              </div>
+              <h4>El comerciante marca «publicar en tienda»</h4>
+              <p>
+                <code>Tienda.publicarEnTienda = true</code>. El <code>INSERT</code> a
+                <code>OutboxEvento</code> va
+                <strong>dentro de la transacción que ya existe</strong> al mutar la fila: si hay
+                rollback, el evento desaparece con ella. No existe forma de divergir.
+              </p>
+              <p class="note">
+                Requiere las columnas nuevas del schema del POS: <code>publicarEnTienda</code>,
+                <code>slug</code>, <code>direccion</code>, <code>latitud</code>,
+                <code>longitud</code>, <code>horarios</code>, más las tablas
+                <code>OutboxEvento</code> y <code>PedidoEntrante</code>.
+              </p>
+            </div>
+          </div>
+
+          <div class="step cc">
+            <span class="n">2</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">CC · opcional</span>
+                <span class="chip wait">Por implementar</span>
+              </div>
+              <h4>Consultar qué URL va a quedar, antes de publicar</h4>
+              <p>
+                <code>GET /api/internal/slug-availability?slug=&amp;name=&amp;storeId=</code>
+                devuelve <code>resolvedSlug</code> y la <code>url</code> resultante. Es un
+                pronóstico: <strong>no reserva y no garantiza nada</strong> —
+                <code>reserving</code> siempre viene <code>false</code>.
+              </p>
+            </div>
+          </div>
+
+          <div class="step cc">
+            <span class="n">3</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">CC · cron cada 2 min</span>
+                <span class="chip wait">Por implementar</span>
+              </div>
+              <h4>Drenar el outbox</h4>
+              <ul>
+                <li>
+                  <code
+                    >SELECT … WHERE procesadoAt IS NULL AND intentos &lt; 6 LIMIT 500 FOR UPDATE
+                    SKIP LOCKED</code
+                  >
+                  — dos corridas solapadas toman lotes disjuntos.
+                </li>
+                <li>
+                  <code>intentos &lt; 6</code> es lo que impide el bloqueo de cabeza de línea: un
+                  payload corrupto se queda quieto y los demás siguen fluyendo.
+                </li>
+                <li>
+                  POST a <code>/api/internal/sync/catalog</code> con
+                  <code>{ businessId, events[] }</code>.
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="step qab">
+            <span class="n">4</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">QAB</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>El guard resuelve la identidad desde el token</h4>
+              <p>
+                El <code>businessId</code> del cuerpo ya no es autoritativo: se comprueba contra el
+                negocio que el token resolvió. Si no coincide —en la raíz o en el
+                <code>payload</code> de cualquier evento— el <strong>lote entero</strong> se rechaza
+                con <code>403 BUSINESS_MISMATCH</code> y no se escribe nada.
+              </p>
+              <p class="note">
+                Un recurso de otro negocio nunca responde distinto de uno inexistente. Ni
+                <code>/orders/status</code>, ni <code>/reconciliation</code>, ni
+                <code>/slug-availability</code> sirven para averiguar si un id ajeno existe.
+              </p>
+            </div>
+          </div>
+
+          <div class="step qab">
+            <span class="n">5</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">QAB</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>El primer <code>STORE</code> crea marca, sucursal y URL de una vez</h4>
+              <ul>
+                <li>
+                  Escritura anidada única: <code>Storefront</code> (la marca) +
+                  <code>Store</code> (la sucursal) + su fila en el registro <code>Slug</code>.
+                </li>
+                <li>
+                  <code>payload.slug</code> viaja como <strong>semilla de derivación</strong>, nunca
+                  como valor exigido: si está tomado o es reservado, QAB lo convierte en el
+                  siguiente libre en silencio. El evento no falla jamás por el slug.
+                </li>
+                <li>
+                  Un valor de slug <strong>no se reasigna nunca</strong>: al desaparecer el dueño la
+                  fila sobrevive con <code>retiredAt</code> y no vuelve al pool. Un QR impreso no
+                  puede acabar apuntando al negocio de otro.
+                </li>
+                <li>
+                  Guarda anti-rancio con <code>Store.sourceUpdatedAt</code>: un evento reencolado no
+                  resucita una tienda recién cerrada.
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="step qab">
+            <span class="n">6</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">QAB → CC</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>Acuse por id, nunca por lote</h4>
+              <p>
+                <code>207</code> con <code>{ ok, failed, results }</code>. Todo lo que no sea
+                <code>failed</code> entra en <code>ok</code>: son estados terminales y reenviarlos
+                no cambiaría nada. <code>skipped_not_published</code>
+                <strong>no es un error</strong> — es lo que hace funcionar el opt-in por local sin
+                que los dos sistemas se coordinen.
+              </p>
+            </div>
+          </div>
+
+          <div class="step cc">
+            <span class="n">7</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">CC</span>
+                <span class="chip wait">Por implementar</span>
+              </div>
+              <h4>El resto del catálogo</h4>
+              <p>
+                Eventos <code>CATEGORY</code>, <code>CURRENCY</code>, <code>EXCHANGE_RATE</code> y
+                <code>PRODUCT</code>. El de producto lleva <code>barcodes: string[]</code> con
+                <strong>todos</strong> los códigos (v4); <code>[]</code> es válido. La clave
+                <code>barcode</code> singular está <strong>prohibida</strong>: su sola presencia
+                responde <code>400 INVALID_BATCH</code> del lote completo.
+              </p>
+              <p class="note">
+                Nunca se envía costo, margen, el entero de existencia, ventas, movimientos de stock,
+                cierres, usuarios, roles, credenciales ni proveedores. El DTO es la frontera de
+                seguridad: no se puede filtrar lo que nunca se serializó.
+              </p>
+            </div>
+          </div>
+
+          <div class="step qab">
+            <span class="n">8</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">QAB</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>Transformación del producto</h4>
+              <ul>
+                <li>
+                  <code>publishToStore: false</code> → borrado suave del <code>StoreProduct</code>.
+                  Fin.
+                </li>
+                <li>
+                  Identidad canónica: por <code>canonicalProductId</code> si viene; si no, por el
+                  <strong>menor</strong> GTIN válido en orden lexicográfico; si no hay ninguno,
+                  canónico huérfano con <code>isExclusive</code>.
+                </li>
+                <li>
+                  Upsert de <code>StoreProduct</code> por
+                  <code>(storeId, canonicalProductId)</code>; todos los códigos válidos se guardan
+                  en <code>CanonicalBarcode</code> (aditivo, nunca borra).
+                </li>
+                <li>
+                  Alias + <code>useCount++</code>; si el alias es nuevo, se recalcula el
+                  <code>searchDocument</code>.
+                </li>
+              </ul>
+              <p class="note">
+                Nunca hay un producto que no se pueda publicar: uno sin identidad resuelta se
+                publica igual en su tienda, con su nombre local, y solo queda fuera del marketplace.
+              </p>
+            </div>
+          </div>
+
+          <div class="step cc">
+            <span class="n">9</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">CC · cron</span>
+                <span class="chip wait">Por implementar</span>
+              </div>
+              <h4>Disponibilidad, por divergencia y no por cursor de tiempo</h4>
+              <p>
+                Consulta declarativa contra <code>dispPublicada</code> con índice parcial, no
+                <code>WHERE updatedAt &gt; ultimaSincronizacion</code> —que tiene un bug de pérdida
+                de datos cuando el cron corre entre el <code>updatedAt</code> y el commit. Tras el
+                POST se confirma <strong>solo lo que la respuesta devolvió</strong> en
+                <code>confirmed</code>; lo que no aparece sigue divergente y se reintenta solo.
+              </p>
+              <p class="note">
+                Lo que viaja es un enum, nunca el entero: los negocios no exponen su inventario a la
+                competencia, y vender 3 de 40 no genera ninguna escritura.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="sec-head">
+          <span class="eyebrow">Fase 1 · B</span>
+          <h2>Edición: el panel de QAB, con sesión traída de CC</h2>
+          <p>
+            Lo que el sync no posee lo edita el comerciante en el panel de QAB. Entra por SSO desde
+            cuadrecaja y su contraseña no cruza nunca.
+          </p>
+        </div>
+
+        <div class="flow">
+          <div class="step cc">
+            <span class="n">1</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">CC</span>
+                <span class="chip wait">Por implementar</span>
+              </div>
+              <h4>Firmar el enlace de un solo uso</h4>
+              <p>
+                JWT de ~60 s firmado con <code>SSO_JWT_SECRET</code>, con <code>jti</code>,
+                <code>sub</code> (el <code>Usuario.id</code>), <code>name</code>,
+                <code>email</code>, <code>businessId</code> y <code>storeIds</code> — las tiendas
+                que ese usuario gestiona. Se abre <code>/admin/sso?token=…</code>.
+              </p>
+            </div>
+          </div>
+
+          <div class="step qab">
+            <span class="n">2</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">QAB</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>Canje por sesión propia</h4>
+              <ul>
+                <li>
+                  Verifica la firma con 30 s de tolerancia de reloj (son dos máquinas distintas).
+                </li>
+                <li>
+                  Consume el <code>jti</code> con una restricción única — el enlace no se puede
+                  replayear desde el historial del navegador.
+                </li>
+                <li>
+                  <strong>Re-deriva el acceso</strong>: borra <code>AdminStoreAccess</code> y lo
+                  recrea desde el token. Revocar una tienda en el POS surte efecto en el siguiente
+                  inicio de sesión.
+                </li>
+                <li>
+                  Cookie propia <code>qab-admin-session</code>, <code>httpOnly</code>, 12 h.
+                  Redirige a <code>/admin</code>.
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="step qab">
+            <span class="n">3</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">Comerciante · QAB</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>Lo que el panel edita</h4>
+              <ul>
+                <li>
+                  <strong>Producto</strong>: <code>description</code>, <code>imageUrls</code>,
+                  <code>priceOverride</code>, <code>visible</code>, <code>featured</code>.
+                </li>
+                <li>
+                  <strong>Promociones</strong>: alcance producto, categoría o pedido; porcentaje o
+                  fijo; ventana con inicio y fin.
+                </li>
+                <li>
+                  <strong>Marca</strong>: <code>themeTokens</code> del <code>Storefront</code>.
+                  Exige cobertura total: la sesión tiene que traer <em>todas</em> las sucursales
+                  renderizables de la marca, o <code>403</code>.
+                </li>
+                <li>
+                  <strong>Agrupar</strong> dos sucursales bajo una marca, en una transacción por
+                  lotes. Ninguna URL deja de responder; desagrupar no existe.
+                </li>
+                <li>
+                  <strong>Interruptor</strong> abrir/cerrar la vitrina con un motivo de lista fija.
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="step qab">
+            <span class="n">4</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">QAB</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>La frontera de escritura</h4>
+              <p>
+                El panel <strong>nunca comparte columna con el sync</strong>. Todas sus escrituras
+                viven en un solo módulo con lista blanca <em>tipada</em>: poner
+                <code>syncedPrice</code>, <code>localName</code> o <code>availability</code> en una
+                escritura del panel es un error de compilación, no un descubrimiento en producción.
+                Cada escritura revalida el tag de caché de la tienda: escribir sin revalidar no es
+                una opción.
+              </p>
+              <p class="note">
+                La única columna compartida es <code>Store.status</code>, y ahí gana el último que
+                escribe. El POS solo la toca cuando su propio opt-in <em>cambia</em>: cambiar un
+                teléfono en el POS ya no reabre una tienda que el comerciante cerró desde el panel.
+              </p>
+            </div>
+          </div>
+
+          <div class="step full qab">
+            <span class="n">↺</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">Estado compartido</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>Cerrada no es inexistente</h4>
+              <p>
+                <code>SUSPENDED</code> responde <strong>200</strong> con el nombre, la marca y el
+                motivo: sin catálogo, sin carrito, y el checkout rechaza con
+                <code>409 STORE_CLOSED</code>. La página de un pedido ya hecho
+                <strong>sigue accesible</strong> — quien tiene un pedido en curso no pierde su
+                comprobante porque la tienda cerró. <code>DRAFT</code> sí es 404: nunca fue pública
+                y no hay URL que honrar.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout warn">
+          <h3>Lo que hoy no edita nadie</h3>
+          <p>
+            Cuatro columnas de <code>Store</code> deciden cómo se compra, y hoy
+            <strong>solo las escribe el seed</strong>: ni el sync las envía ni el panel las expone.
+          </p>
+          <ul style="font-size: 0.9rem; color: var(--ink-2); margin: 0; padding-left: 1.1rem">
+            <li>
+              <code>checkoutMode</code> (<code>WHATSAPP</code> o <code>ONSITE</code>) — decide si al
+              confirmar hay enlace de WhatsApp al comercio.
+            </li>
+            <li>
+              <code>deliveryEnabled</code> y <code>deliveryFee</code> — si no están puestas, pedir
+              <code>DELIVERY</code> se trata como retiro en tienda.
+            </li>
+            <li>
+              <code>orderExpiryHours</code> — cuántas horas vive una propuesta de cambio. Por
+              defecto 24. El contrato dice que es de QAB y que el POS no la pisa, pero no hay
+              pantalla para tocarla.
+            </li>
+          </ul>
+          <p>
+            Cambiar cualquiera de las cuatro exige hoy un <code>UPDATE</code> a mano contra la base.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <div class="sec-head">
+          <span class="eyebrow">Fase 2</span>
+          <h2>El proceso de compra, de inicio a fin</h2>
+          <p>
+            Dos actores humanos: el <strong>comprador</strong>, que vive entero en QAB, y el
+            <strong>encargado</strong>, que vive entero en CC. Nunca se hablan por el sistema: se
+            hablan por WhatsApp, y lo abre siempre una persona con un clic.
+          </p>
+        </div>
+
+        <div class="flow">
+          <div class="step buyer">
+            <span class="n">1</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">Comprador · QAB</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>Entra al catálogo y arma el carrito</h4>
+              <p>
+                <code>/[slug]</code> servido con ISR desde el CDN. El carrito vive en el navegador,
+                separado por tienda: entrar a otra tienda no borra el carrito de la primera.
+                <strong>No hace falta cuenta en ningún momento.</strong>
+              </p>
+            </div>
+          </div>
+
+          <div class="step buyer">
+            <span class="n">2</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">Comprador · QAB</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>Carrito y cotización en caliente</h4>
+              <p>
+                <code>POST /api/orders/quote</code> recalcula precios, promociones y disponibilidad
+                contra la base, no contra el HTML cacheado. Es la misma función de precio que usa el
+                pedido: no hay dos implementaciones que puedan divergir.
+              </p>
+            </div>
+          </div>
+
+          <div class="step buyer">
+            <span class="n">3</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">Comprador · QAB</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>Checkout: nombre, teléfono, entrega</h4>
+              <p>
+                Si hay sesión de comprador, <code>GET /api/account/profile</code> autocompleta los
+                datos con un tope de 3 s; si falla o tarda, no rellena nada y nadie ve un error. Si
+                no hay sesión, se teclea y ya está.
+              </p>
+            </div>
+          </div>
+
+          <div class="step qab">
+            <span class="n">4</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">QAB</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4><code>POST /api/orders</code> — la única ruta pública de escritura</h4>
+              <ul>
+                <li>
+                  Arranca la resolución de identidad <em>sin esperarla</em>, antes de leer el
+                  cuerpo. Techo de 600 ms; cualquier fallo se trata como invitado. Nunca exige
+                  sesión.
+                </li>
+                <li>
+                  Tienda → tienda cerrada (<code>409</code> antes de gastar cuota) → fusión de
+                  líneas duplicadas → carrito vacío → cotización y disponibilidad → chequeo de
+                  precio (<code>409 PRICE_CHANGED</code>).
+                </li>
+                <li>Una sola consulta para idempotencia y freno de abuso; gana la idempotencia.</li>
+                <li>
+                  <code>create</code> anidado en un round-trip, con las tasas de cambio
+                  <strong>congeladas</strong> en <code>rateSnapshot</code>. Sin
+                  <code>$transaction</code>: el pooler corre en modo transacción.
+                </li>
+                <li>Devuelve <code>201 { code, orderUrl, whatsappUrl }</code>.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="step buyer">
+            <span class="n">5</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">Comprador · QAB</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>La página del pedido</h4>
+              <p>
+                <code>/[slug]/pedido/[code]</code>. El <code>code</code> —10 caracteres Crockford
+                base32, sin <code>I</code>, <code>L</code>, <code>O</code> ni <code>U</code> para
+                poder dictarlo por teléfono— es la <strong>única credencial</strong> de una página
+                que muestra nombre, teléfono y dirección de una persona. En modo
+                <code>WHATSAPP</code> se ofrece además un enlace <code>wa.me</code> hacia el
+                comercio: un atajo opcional, nunca un paso obligatorio.
+              </p>
+            </div>
+          </div>
+
+          <div class="step cc">
+            <span class="n">6</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">CC · cron cada 2 min</span>
+                <span class="chip wait">Por implementar</span>
+              </div>
+              <h4>El POS hace pull de los pedidos</h4>
+              <p>
+                <code>GET /api/internal/orders?since=&amp;limit=100</code>. El cursor es
+                <strong>por negocio</strong>: CC guarda un <code>ultimoPedidoVisto</code> por cada
+                uno. Los ids son un <code>BIGINT</code> global, así que la secuencia de un negocio
+                tiene huecos —eso es correcto y no indica pedidos perdidos.
+              </p>
+              <p class="note">
+                Un solo poller por negocio, secuencial. La lectura y la marca no son atómicas entre
+                sí: dos pollers del mismo negocio entregarían el mismo pedido dos veces. Es
+                responsabilidad de CC no correrlos en paralelo.
+              </p>
+            </div>
+          </div>
+
+          <div class="step qab">
+            <span class="n">7</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">QAB</span>
+                <span class="chip ok">Implementado</span>
+              </div>
+              <h4>Del lado receptor del pull</h4>
+              <p>
+                <code>PENDING → PULLED</code>, y el pedido <strong>no se borra</strong>: la página
+                del comprador sigue funcionando. En la misma llamada, y antes del
+                <code>findMany</code>, corre el barrido de propuestas vencidas de ese negocio — así
+                el POS nunca recibe un <code>AWAITING_CUSTOMER</code> que esa misma llamada acaba de
+                vencer.
+              </p>
+            </div>
+          </div>
+
+          <div class="step cc">
+            <span class="n">8</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">Encargado · CC</span>
+                <span class="chip wait">Por implementar</span>
+              </div>
+              <h4>Reportar el avance</h4>
+              <p>
+                <code>POST /api/internal/orders/status</code> con <code>CONFIRMED</code>,
+                <code>READY</code>, <code>IN_TRANSIT</code>, <code>DELIVERED</code>,
+                <code>CANCELLED</code> o <code>REJECTED_BY_STORE</code>. Sin guardas de transición:
+                el POS es la autoridad. <code>AWAITING_CUSTOMER</code> <strong>no</strong> entra en
+                este enum — <code>400</code>: ese estado solo lo pone proponer un cambio, la única
+                acción que fija un plazo.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout brand">
+          <h3>
+            Ramal: la renegociación
+            <span class="chip branch" style="vertical-align: middle">En rama</span>
+          </h3>
+          <p>
+            F-019, construido y verificado contra Postgres real, pendiente de fusionar. El
+            disparador dominante es el costo de envío, que se fija al gestionar el pedido: por
+            diseño, es frecuente y no excepcional.
+          </p>
+        </div>
+
+        <div class="flow">
+          <div class="step cc">
+            <span class="n">9</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">Encargado · CC</span>
+                <span class="chip wait">Por implementar</span>
+              </div>
+              <h4>Proponer un cambio</h4>
+              <p>
+                <code>POST /api/internal/orders/proposal</code> sobre un pedido en
+                <code>PULLED</code>, <code>CONFIRMED</code> o <code>AWAITING_CUSTOMER</code>. Los
+                importes llegan <strong>ya en <code>Order.currencyCode</code></strong> — aprobar no
+                reconvierte nada. Otra moneda es <code>400 CURRENCY_MISMATCH</code>; otro estado,
+                <code>409 ORDER_NOT_PROPOSABLE</code>. Una segunda propuesta reemplaza a la primera
+                y reinicia el plazo.
+              </p>
+            </div>
+          </div>
+
+          <div class="step qab">
+            <span class="n">10</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">QAB</span>
+                <span class="chip branch">En rama</span>
+              </div>
+              <h4>El pedido pasa a <code>AWAITING_CUSTOMER</code></h4>
+              <p>
+                Se fija <code>expiresAt</code> = ahora + <code>Store.orderExpiryHours</code>, y la
+                respuesta devuelve los dos totales y un <code>customerWhatsappUrl</code> hacia el
+                comprador, construido desde el teléfono <em>persistido</em> en el pedido, nunca
+                desde un formulario.
+              </p>
+              <p class="note">
+                Un teléfono inutilizable no falla la propuesta: devuelve <code>null</code> con
+                <code>customerWhatsappReason: "NO_PHONE_DIGITS"</code>, y el reloj corre igual.
+              </p>
+            </div>
+          </div>
+
+          <div class="step cc">
+            <span class="n">11</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">Encargado · CC</span>
+                <span class="chip wait">Por implementar</span>
+              </div>
+              <h4>Abrir el enlace y escribirle al comprador</h4>
+              <p>
+                <strong>queandabuscando no envía nada solo, nunca.</strong> El mensaje lo abre una
+                persona con un clic sobre <code>customerWhatsappUrl</code>. El texto es
+                deliberadamente genérico: es la página del pedido la que dice qué cambió.
+              </p>
+            </div>
+          </div>
+
+          <div class="step buyer">
+            <span class="n">12</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">Comprador · QAB</span>
+                <span class="chip branch">En rama</span>
+              </div>
+              <h4>Decide en su propia página</h4>
+              <p>
+                La página del pedido muestra el total anterior y el propuesto, el detalle de líneas
+                y el plazo. Dos botones. <code>POST /[slug]/pedido/[code]/respuesta</code> es la
+                <strong>segunda ruta pública de escritura</strong> del sistema —una decisión del
+                peso de la primera, con su propia ADR—: sin sesión, con el <code>code</code> como
+                única credencial, igual que la página que responde.
+              </p>
+              <p class="note">
+                Un contrato, dos representaciones según <code>Accept</code>: un
+                <code>&lt;form method="post"&gt;</code> recibe <code>303</code> (sin diálogo de
+                «¿reenviar?»), <code>curl</code> recibe JSON con su código real. Funciona entero sin
+                JavaScript.
+              </p>
+            </div>
+          </div>
+
+          <div class="step qab">
+            <span class="n">13</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">QAB</span>
+                <span class="chip branch">En rama</span>
+              </div>
+              <h4>Los tres desenlaces</h4>
+              <ul>
+                <li>
+                  <strong>Aprobar</strong> → <code>CONFIRMED</code> con los importes nuevos, y el
+                  <code>rateSnapshot</code> intacto <em>byte a byte</em>, incluido su
+                  <code>capturedAt</code>.
+                </li>
+                <li>
+                  <strong>Rechazar</strong> → <code>CANCELLED</code> con
+                  <code>cancelledBy: "CUSTOMER"</code>.
+                </li>
+                <li>
+                  <strong>Vencer</strong> → <code>CANCELLED</code> con
+                  <code>cancelledBy: "EXPIRY"</code>. Lo hace el barrido de cada pull, y un cron
+                  diario <code>/api/crons/expire-proposals</code> cubre a la tienda que dejó de
+                  hacer pull del todo.
+                </li>
+              </ul>
+              <p class="note">
+                Una propuesta vencida no se puede aprobar aunque el cron todavía no haya corrido:
+                <code>409 PROPOSAL_EXPIRED</code>, fila intacta.
+              </p>
+            </div>
+          </div>
+
+          <div class="step cc">
+            <span class="n">14</span>
+            <div class="card">
+              <div class="card-top">
+                <span class="actor">CC</span>
+                <span class="chip wait">Por implementar</span>
+              </div>
+              <h4>El siguiente pull ve el desenlace</h4>
+              <p>
+                <code>status</code> distingue <code>REJECTED_BY_STORE</code> —que
+                <strong>no</strong> es un <code>CANCELLED</code>—, y
+                <code>cancelledBy</code> distingue los dos cancelados: <code>CUSTOMER</code>,
+                <code>EXPIRY</code> o <code>STORE</code>.
+                <strong
+                  >El enum de <code>status</code> pasa de 6 a 9 valores: esta parte de la v5 no es
+                  aditiva</strong
+                >
+                y un <code>switch</code> exhaustivo del POS se rompe al primer pedido en uno de los
+                tres estados nuevos, sin error HTTP que avise.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout">
+          <h3>Fuera de línea: la reconciliación</h3>
+          <p>
+            Sin ella no hay forma de saber que la sincronización se rompió: los datos simplemente se
+            quedan viejos sin que nada falle. Los dos lados calculan el mismo <code>md5</code> sobre
+            <code>externalId:precio:moneda:disponibilidad</code>, ordenado. Si difieren, CC pone
+            <code>dispPublicada = NULL</code> en ese local —lo que hace que la query convergente lo
+            levante entero— y alerta.
+            <strong>Alertar también si no hubo una corrida exitosa en 30 minutos.</strong>
+          </p>
+          <p>
+            <span class="chip ok">Impl.</span> el endpoint en QAB &nbsp;·&nbsp;
+            <span class="chip wait">Pendiente</span> el cron nocturno y la alerta (F-014, y del lado
+            de CC entero).
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <div class="sec-head">
+          <span class="eyebrow">Estado</span>
+          <h2>Lo que falta, por dónde va</h2>
+          <p>
+            Features del backlog con criterios escritos y sin construir, y propuestas que todavía no
+            son features —el humano decide cuáles entran.
+          </p>
+        </div>
+
+        <h3 style="margin-top: 2rem">Features pendientes que tocan estos dos flujos</h3>
+        <div class="gaps">
+          <div class="gap">
+            <span class="id">F-020 · integración</span>
+            <span class="chip wait">Por implementar</span>
+            <h4>Timbre de Realtime</h4>
+            <p>
+              El POS se entera del pedido al instante en vez de esperar hasta 2 minutos, y lo sigue
+              leyendo por pull. El timbre no lleva datos.
+            </p>
+          </div>
+          <div class="gap">
+            <span class="id">F-014 · integración</span>
+            <span class="chip wait">Por implementar</span>
+            <h4>Reconciliación nocturna</h4>
+            <p>
+              El endpoint existe; falta el cron que lo corre todas las noches y la alerta cuando los
+              hashes divergen.
+            </p>
+          </div>
+          <div class="gap">
+            <span class="id">F-022 · datos</span>
+            <span class="chip wait">Por implementar</span>
+            <h4>Horarios y propiedad de campos</h4>
+            <p>
+              Zona horaria de la tienda, y la tabla exhaustiva de qué columna pertenece a quién
+              dentro del contrato. <code>openingHours</code> ya viaja en el payload y todavía no se
+              usa.
+            </p>
+          </div>
+          <div class="gap">
+            <span class="id">F-030 · calidad</span>
+            <span class="chip wait">Por implementar</span>
+            <h4>Ver cuándo un pedido se queda sin enlazar</h4>
+            <p>
+              Agotar el techo de 600 ms al resolver la identidad es hoy invisible: el pedido sale
+              como de invitado sin log ni métrica.
+            </p>
+          </div>
+          <div class="gap">
+            <span class="id">F-013 · rendimiento</span>
+            <span class="chip wait">Por implementar</span>
+            <h4>Menos JavaScript en la tienda</h4>
+            <p>Reducir el cliente de las páginas públicas de catálogo.</p>
+          </div>
+          <div class="gap">
+            <span class="id">F-026 · F-027 · tienda</span>
+            <span class="chip wait">Por implementar</span>
+            <h4>Categorías y filtros</h4>
+            <p>
+              Selector de categorías con vista propia, y filtros y ordenamiento sobre el catálogo en
+              una ruta dinámica aparte de la estática.
+            </p>
+          </div>
+        </div>
+
+        <h3 style="margin-top: 2.75rem">Propuestas escritas, sin decidir</h3>
+        <div class="gaps">
+          <div class="gap">
+            <span class="id">nota-de-cambio-aprobado</span>
+            <span class="chip idea">Propuesta</span>
+            <h4>Explicar la diferencia entre los dos comprobantes</h4>
+            <p>
+              Al aprobar un cambio, el comprador conserva en WhatsApp el comprobante original con
+              los importes viejos, y la diferencia no tiene explicación en ninguna parte: se lee
+              como un cobro de más. Nació de F-019.
+            </p>
+          </div>
+          <div class="gap">
+            <span class="id">enlace-de-pedido-observable</span>
+            <span class="chip idea">Propuesta</span>
+            <h4>Observar el enlace pedido↔cuenta</h4>
+            <p>
+              Dejó de ser teórico el 30 de agosto: con HS256, resolver la sesión cuesta un viaje de
+              red por llamada, así que un Auth lento degradaría el enlace en silencio.
+            </p>
+          </div>
+          <div class="gap">
+            <span class="id">carritos-abiertos-del-comprador</span>
+            <span class="chip idea">Propuesta</span>
+            <h4>Ver los carritos que uno tiene abiertos</h4>
+            <p>
+              Los carritos de varias tiendas ya se conservan, pero solo se ven estando dentro de
+              cada tienda. Se olvidan compras a medio armar que el negocio nunca llega a ver.
+            </p>
+          </div>
+          <div class="gap">
+            <span class="id">resenas-y-calificaciones</span>
+            <span class="chip idea">Propuesta</span>
+            <h4>Reseñas y calificaciones</h4>
+            <p>Sin decidir.</p>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <span>
+          Fuentes: <span class="mono">docs/sync-contract.md v5</span>, ADRs 0001–0024,
+          <span class="mono">.agent/features.json</span> y el código de
+          <span class="mono">src/features/{sync,admin,orders,account,storefront}</span>.
+        </span>
+        <span>
+          Los estados reflejan el árbol de trabajo en la rama
+          <span class="mono">adrianfdez469/f-019-avanzar</span> al 30 de agosto de 2026.
+        </span>
+        <span>
+          <strong>Se actualiza en el mismo ciclo que lo cambia</strong>, como
+          <span class="mono">docs/despliegue.md</span>: un feature que mueva un paso, un estado o un
+          endpoint de este documento lo corrige aquí antes de cerrarse. Los otros dos que cuentan
+          estos mismos flujos a distinta altura son
+          <span class="mono">docs/guia-del-negocio.md</span> (para quien usa el producto) y
+          <span class="mono">docs/sync-contract.md</span> (lo que implementa cuadrecaja). Actualizar
+          uno solo deja mintiendo a los otros dos, sin que nada falle.
+        </span>
+      </footer>
+    </div>
+  </body>
+</html>
