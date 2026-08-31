@@ -1,9 +1,38 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 4** · 28 de agosto de 2026
+**Versión 5** · 30 de agosto de 2026
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
 existe y está verificado contra los casos de abajo.
+
+## Cambios respecto a la v4
+
+**Esta versión NO es aditiva en el enum de estados de pedido** (F-019, mismo
+motivo que la v3 no lo fue en autenticación y la v4 no lo fue en el `payload`
+de `PRODUCT`: HD5/AP2, en cuadrecaja no hay nada desarrollado de esta
+integración todavía, así que no hay consumidor vivo al que migrar sin cortar).
+Un lector con un `switch` exhaustivo sobre `status` —el mismo patrón que usa la
+insignia de estado de queandabuscando— se rompe con los tres valores nuevos si
+no se actualiza antes de recibirlos. Lo que cambia:
+
+- **El enum de `status` en el pull pasa de 6 a 9 valores.** Se agregan
+  `AWAITING_CUSTOMER`, `IN_TRANSIT` y `REJECTED_BY_STORE` — ver § ③④ para
+  cuándo aparece cada uno.
+- **`POST /orders/status` amplía su enum** a `IN_TRANSIT` y
+  `REJECTED_BY_STORE`, y **rechaza `AWAITING_CUSTOMER` con `400`**: ese estado
+  solo lo pone la acción de proponer un cambio, la única que fija un plazo. La
+  línea de la v2 — «`status` ∈ `CONFIRMED` · `READY` · `DELIVERED` ·
+  `CANCELLED`. Sin cambios en la v2» — deja de ser cierta.
+- **Endpoint nuevo: `POST /api/internal/orders/proposal`.** La tienda propone
+  un cambio de importes y/o líneas sobre un pedido que todavía no está
+  cerrado; ver § ③④ para el cuerpo, la respuesta y las dos reglas que hay que
+  respetar.
+- **Cómo se distinguen los tres desenlaces de un pedido cerrado**: el campo
+  `cancelledBy` en el payload del pull, nuevo y aditivo — ver § ③④.
+- **Dos códigos de error nuevos**: `409 ORDER_NOT_PROPOSABLE` y
+  `400 CURRENCY_MISMATCH` (§ Vocabulario de errores).
+- **`Store.orderExpiryHours` es de queandabuscando**: el POS no lo envía y un
+  evento `STORE` no lo pisa (§ ③④).
 
 ## Cambios respecto a la v3
 
@@ -107,30 +136,34 @@ toca ninguna ruta.
 
 ## Endpoints
 
-| Método | Ruta                                                   | Cuerpo / query                    | Devuelve                                                                         |
-| ------ | ------------------------------------------------------ | --------------------------------- | -------------------------------------------------------------------------------- |
-| `POST` | `/api/internal/sync/catalog`                           | `{ businessId, events[] }` (≤500) | 207 `{ ok, failed, results }`                                                    |
-| `POST` | `/api/internal/sync/availability`                      | `{ businessId, items[] }` (≤2000) | 200 `{ applied, confirmed }`                                                     |
-| `GET`  | `/api/internal/orders?since=&limit=`                   | —                                 | 200 `{ orders, nextCursor }`                                                     |
-| `POST` | `/api/internal/orders/status`                          | `{ orderId, status, reason? }`    | 200 `{ ok: true }`                                                               |
-| `GET`  | `/api/internal/reconciliation?storeId=`                | —                                 | 200 `{ products, hash }`                                                         |
-| `GET`  | `/api/internal/slug-availability?slug=&name=&storeId=` | —                                 | 200 `{ candidate, available, reason, resolvedSlug, url, storeKnown, reserving }` |
+| Método | Ruta                                                   | Cuerpo / query                     | Devuelve                                                                         |
+| ------ | ------------------------------------------------------ | ---------------------------------- | -------------------------------------------------------------------------------- |
+| `POST` | `/api/internal/sync/catalog`                           | `{ businessId, events[] }` (≤500)  | 207 `{ ok, failed, results }`                                                    |
+| `POST` | `/api/internal/sync/availability`                      | `{ businessId, items[] }` (≤2000)  | 200 `{ applied, confirmed }`                                                     |
+| `GET`  | `/api/internal/orders?since=&limit=`                   | —                                  | 200 `{ orders, nextCursor }`                                                     |
+| `POST` | `/api/internal/orders/status`                          | `{ orderId, status, reason? }`     | 200 `{ ok: true }`                                                               |
+| `POST` | `/api/internal/orders/proposal`                        | ver § ③④ «Proponer un cambio» (v5) | 200 ver § ③④                                                                     |
+| `GET`  | `/api/internal/reconciliation?storeId=`                | —                                  | 200 `{ products, hash }`                                                         |
+| `GET`  | `/api/internal/slug-availability?slug=&name=&storeId=` | —                                  | 200 `{ candidate, available, reason, resolvedSlug, url, storeKnown, reserving }` |
 
-### Vocabulario de errores (v4)
+### Vocabulario de errores (v5)
 
-Válido para las seis rutas de arriba. Los tres primeros de `503`/`401` ya
+Válido para las siete rutas de arriba. Los tres primeros de `503`/`401` ya
 existían con otro nombre de variable; los siguientes son de la v3; la fila de
-`400 INVALID_BATCH` es de la v4 (F-024).
+`400 INVALID_BATCH` es de la v4 (F-024); las dos últimas son de la v5 (F-019),
+propias de `POST /api/internal/orders/proposal`.
 
-| Código | Cuerpo                                     | Cuándo                                                                                                                                                                                                                                                            |
-| ------ | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `503`  | `{"error":"SYNC_NOT_CONFIGURED"}`          | Ningún negocio tiene un token acuñado todavía                                                                                                                                                                                                                     |
-| `401`  | `{"error":"UNAUTHORIZED"}`                 | Sin cabecera, esquema distinto de `Bearer`, token vacío/corto, o token que no resuelve ningún negocio                                                                                                                                                             |
-| `400`  | `{"error":"INVALID_BATCH","issues":[...]}` | **Nuevo (v4).** El cuerpo no cumple el schema — incluida la clave `barcode` (singular) en cualquier `payload` de `PRODUCT`. Rechaza el **lote entero**, ninguna `SyncEvent` queda escrita, ni siquiera la de los demás eventos del mismo lote que sí eran válidos |
-| `403`  | `{"error":"BUSINESS_INACTIVE"}`            | El token es válido pero ese negocio está dado de baja                                                                                                                                                                                                             |
-| `403`  | `{"error":"BUSINESS_MISMATCH"}`            | El `businessId` del cuerpo (① o ②) no es el del negocio autenticado — el lote entero se rechaza, no se aplica nada                                                                                                                                                |
-| `404`  | `{"error":"UNKNOWN_ORDER"}`                | El `orderId` no existe **o pertenece a otro negocio** — el mismo código en los dos casos, a propósito                                                                                                                                                             |
-| `404`  | `{"error":"UNKNOWN_STORE"}`                | El `storeId` de ⑤ no existe **o pertenece a otro negocio**                                                                                                                                                                                                        |
+| Código | Cuerpo                                      | Cuándo                                                                                                                                                                                                                                                            |
+| ------ | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `503`  | `{"error":"SYNC_NOT_CONFIGURED"}`           | Ningún negocio tiene un token acuñado todavía                                                                                                                                                                                                                     |
+| `401`  | `{"error":"UNAUTHORIZED"}`                  | Sin cabecera, esquema distinto de `Bearer`, token vacío/corto, o token que no resuelve ningún negocio                                                                                                                                                             |
+| `400`  | `{"error":"INVALID_BATCH","issues":[...]}`  | **Nuevo (v4).** El cuerpo no cumple el schema — incluida la clave `barcode` (singular) en cualquier `payload` de `PRODUCT`. Rechaza el **lote entero**, ninguna `SyncEvent` queda escrita, ni siquiera la de los demás eventos del mismo lote que sí eran válidos |
+| `403`  | `{"error":"BUSINESS_INACTIVE"}`             | El token es válido pero ese negocio está dado de baja                                                                                                                                                                                                             |
+| `403`  | `{"error":"BUSINESS_MISMATCH"}`             | El `businessId` del cuerpo (① o ②) no es el del negocio autenticado — el lote entero se rechaza, no se aplica nada                                                                                                                                                |
+| `404`  | `{"error":"UNKNOWN_ORDER"}`                 | El `orderId` no existe **o pertenece a otro negocio** — el mismo código en los dos casos, a propósito                                                                                                                                                             |
+| `404`  | `{"error":"UNKNOWN_STORE"}`                 | El `storeId` de ⑤ no existe **o pertenece a otro negocio**                                                                                                                                                                                                        |
+| `409`  | `{"error":"ORDER_NOT_PROPOSABLE","status"}` | **Nuevo (v5).** `POST /orders/proposal` sobre un pedido que no está en `PULLED`, `CONFIRMED` ni `AWAITING_CUSTOMER`. Nada se escribe; `status` trae el estado actual                                                                                              |
+| `400`  | `{"error":"CURRENCY_MISMATCH"}`             | **Nuevo (v5).** La propuesta llega en una moneda distinta de `Order.currencyCode`                                                                                                                                                                                 |
 
 Un recurso de otro negocio nunca responde distinto de uno inexistente: ni
 `/orders/status`, ni `/reconciliation`, ni `/slug-availability` (que además
@@ -597,6 +630,109 @@ originales. Un pedido creado antes de esta versión no tiene los originales
 guardados; en ese caso **se emiten los valores ya convertidos como respaldo**,
 así que un lector que espera un número ahí nunca se encuentra con `null`.
 
+### La renegociación (v5, F-019)
+
+**El enum de `status` pasa de 6 a 9 valores.** `PENDING`, `PULLED`,
+`CONFIRMED`, `READY`, `DELIVERED`, `CANCELLED` siguen significando exactamente
+lo mismo. Los tres nuevos:
+
+| Valor               | Cuándo aparece                                                                                                 |
+| ------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `AWAITING_CUSTOMER` | La tienda propuso un cambio (`POST /orders/proposal`, más abajo) y espera la respuesta del comprador           |
+| `IN_TRANSIT`        | Entre `READY` y `DELIVERED`. Lo reporta el POS por `POST /orders/status`, igual que los demás                  |
+| `REJECTED_BY_STORE` | La tienda no pudo atender el pedido. **No** es un `CANCELLED`: se distingue por `status`, no por `cancelledBy` |
+
+**Tres campos nuevos y aditivos en cada pedido del pull:**
+
+```jsonc
+{
+  "id": "42",
+  "status": "AWAITING_CUSTOMER", // el enum de 9 valores — NO es aditivo, ver arriba
+  // NUEVO en v5 — quién cerró el pedido. null mientras no esté cerrado, y en
+  // toda fila de antes de esta versión (no hay forma de reconstruirlo).
+  "cancelledBy": null, // "CUSTOMER" | "EXPIRY" | "STORE" | null
+  // NUEVO en v5 — hacia el COMPRADOR, para que el encargado lo abra con un
+  // clic (nadie en queandabuscando envía nada solo). null sin dígitos
+  // utilizables en el teléfono guardado.
+  "customerWhatsappUrl": "https://wa.me/5355555555?text=...",
+  // NUEVO en v5 — presente SOLO mientras status = "AWAITING_CUSTOMER".
+  "proposal": {
+    "proposedAt": "2026-08-30T14:19:43.000Z",
+    "expiresAt": "2026-08-31T14:19:43.000Z",
+    "previousTotal": "880.00", // el total vigente antes de esta propuesta
+    "subtotal": "1000.00", // los cuatro importes PROPUESTOS
+    "discountTotal": "0",
+    "deliveryFee": "180.00",
+    "total": "1180.00",
+    "message": "El envío a Playa cuesta 180.", // o null, la tienda no está obligada a escribir uno
+  },
+}
+```
+
+`cancelledBy` distingue los tres desenlaces terminales que antes eran
+indistinguibles: `"CUSTOMER"` (el comprador rechazó la propuesta),
+`"EXPIRY"` (venció sin respuesta — `cancelReason` trae, literal, «La
+propuesta venció sin respuesta»), `"STORE"` (lo cerró la tienda, por
+`CANCELLED` o por `REJECTED_BY_STORE`). `proposal.items` **no** viaja: las
+líneas las compuso el propio POS al proponer y no hay ningún camino en el que
+necesite leerlas de vuelta.
+
+**`POST /api/internal/orders/proposal`** — la tienda propone un cambio sobre
+un pedido en `PULLED`, `CONFIRMED` o (si ya había una propuesta viva)
+`AWAITING_CUSTOMER`. Una segunda propuesta **reemplaza** a la primera y
+reinicia el plazo; no se guarda historial de las descartadas.
+
+```jsonc
+// Cuerpo
+{
+  "orderId": "42",
+  "currencyCode": "CUP", // tiene que ser Order.currencyCode — si no, 400 CURRENCY_MISMATCH
+  "subtotal": "1000.00",
+  "discountTotal": "0", // opcional, default "0"
+  "deliveryFee": "180.00",
+  "total": "1180.00", // total = subtotal - discountTotal + deliveryFee, y Σ lineTotal = subtotal
+  "message": "El envío a Playa cuesta 180.", // opcional, ≤500 caracteres
+  "items": [
+    {
+      "storeProductId": null, // el id del producto en queandabuscando si se conoce, o null
+      "name": "Café Cubita 500 g",
+      "unitPrice": "500.00",
+      "currencyCode": "CUP",
+      "quantity": "2",
+      "lineTotal": "1000.00",
+    },
+  ],
+}
+```
+
+```jsonc
+// Respuesta 200
+{
+  "ok": true,
+  "status": "AWAITING_CUSTOMER",
+  "expiresAt": "2026-08-31T14:19:43.000Z",
+  "currencyCode": "CUP",
+  "previousTotal": "880.00",
+  "proposedTotal": "1180.00",
+  "orderUrl": "https://tienda-demo.example.com/tienda-demo/pedido/A7K3M9PQR2",
+  "customerWhatsappUrl": "https://wa.me/5355555555?text=...", // hacia el comprador
+  "customerWhatsappReason": null, // "NO_PHONE_DIGITS" cuando el enlace sale null
+}
+```
+
+Dos reglas que hay que respetar: los importes llegan **ya en
+`Order.currencyCode`** (aprobar no reconvierte nada, y `rateSnapshot` no se
+toca jamás — un pedido aprobado tiene el mismo `rateSnapshot`, byte a byte,
+que tenía al crearse); y **queandabuscando no envía el mensaje de WhatsApp**
+— lo abre una persona, el encargado, con un clic sobre `customerWhatsappUrl`.
+`409 ORDER_NOT_PROPOSABLE` (con el `status` actual) cuando el pedido no está
+en un estado proponible; `400 CURRENCY_MISMATCH` cuando la moneda no
+coincide; ninguno de los dos escribe nada.
+
+**`Store.orderExpiryHours` es de queandabuscando** (cuántas horas dura una
+propuesta antes de que el reloj la cancele sola, 24 por defecto): el POS
+**no** lo envía y un evento `STORE` **no** lo pisa.
+
 ### Formato de `Order.code`
 
 Diez caracteres del alfabeto Crockford base32 en mayúsculas, sin separador:
@@ -612,8 +748,13 @@ POST /api/internal/orders/status
 { "orderId": "42", "status": "CONFIRMED", "reason": null }
 ```
 
-`status` ∈ `CONFIRMED` · `READY` · `DELIVERED` · `CANCELLED`. Sin cambios en
-la v2.
+`status` ∈ `CONFIRMED` · `READY` · `IN_TRANSIT` · `DELIVERED` · `CANCELLED` ·
+`REJECTED_BY_STORE` (v5 — **la línea de arriba, vigente hasta la v4, decía
+solo cuatro valores y ya no es cierta**). `AWAITING_CUSTOMER` **no** entra en
+este enum: responde `400 INVALID_BODY` — ese estado solo lo pone
+`POST /orders/proposal`, la única acción que fija un plazo. Sin guardas de
+transición: el POS es la autoridad y puede reportar cualquiera de los seis
+valores sobre cualquier pedido que le pertenezca.
 
 ---
 
@@ -695,15 +836,16 @@ Más: el índice parcial de divergencia con `CREATE INDEX CONCURRENTLY`, el cron
 
 ## Modos de falla
 
-| Falla                                               | Qué le pasa al usuario                                                                                                                                                                        | Recuperación                                                                                                                                                            |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| La tienda está caída                                | Nada: el POS sigue vendiendo                                                                                                                                                                  | La outbox no se drena, `intentos++`. Se recupera solo                                                                                                                   |
-| El POS está caído                                   | La tienda sirve el último snapshot y **acepta pedidos igual**                                                                                                                                 | Los pedidos esperan a que el POS vuelva a hacer pull                                                                                                                    |
-| El cron no corre                                    | Precios y disponibilidad se atrasan                                                                                                                                                           | La reconciliación lo detecta. Alerta a los 30 min                                                                                                                       |
-| Evento con payload inválido                         | Ese producto queda viejo; el resto fluye                                                                                                                                                      | `intentos > 5` → DLQ + alerta                                                                                                                                           |
-| Se perdió `dispPublicada`                           | Resincroniza todo el stock una vez                                                                                                                                                            | Idempotente, sin intervención                                                                                                                                           |
-| El token de un negocio se filtró                    | Alguien podría escribir catálogo falso a nombre de ESE negocio, ninguno más                                                                                                                   | Re-acuñar el token de ese negocio (invalida el viejo al instante, no toca a los demás). Motivo para pasar a HMAC                                                        |
-| **Un POS todavía en v3 envía `barcode` (singular)** | **No sincroniza catálogo en absoluto**: el lote entero responde `400 INVALID_BATCH` y ni siquiera queda una `SyncEvent` para reintentar — no es un producto el que falla, es el lote completo | Migrar el payload de `PRODUCT` a `barcodes: string[]` (v4). No hay periodo de gracia ni modo de compatibilidad: es el mismo corte que hizo la v3 en autenticación (HD5) |
+| Falla                                                                                     | Qué le pasa al usuario                                                                                                                                                                        | Recuperación                                                                                                                                                            |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| La tienda está caída                                                                      | Nada: el POS sigue vendiendo                                                                                                                                                                  | La outbox no se drena, `intentos++`. Se recupera solo                                                                                                                   |
+| El POS está caído                                                                         | La tienda sirve el último snapshot y **acepta pedidos igual**                                                                                                                                 | Los pedidos esperan a que el POS vuelva a hacer pull                                                                                                                    |
+| El cron no corre                                                                          | Precios y disponibilidad se atrasan                                                                                                                                                           | La reconciliación lo detecta. Alerta a los 30 min                                                                                                                       |
+| Evento con payload inválido                                                               | Ese producto queda viejo; el resto fluye                                                                                                                                                      | `intentos > 5` → DLQ + alerta                                                                                                                                           |
+| Se perdió `dispPublicada`                                                                 | Resincroniza todo el stock una vez                                                                                                                                                            | Idempotente, sin intervención                                                                                                                                           |
+| El token de un negocio se filtró                                                          | Alguien podría escribir catálogo falso a nombre de ESE negocio, ninguno más                                                                                                                   | Re-acuñar el token de ese negocio (invalida el viejo al instante, no toca a los demás). Motivo para pasar a HMAC                                                        |
+| **Un POS todavía en v3 envía `barcode` (singular)**                                       | **No sincroniza catálogo en absoluto**: el lote entero responde `400 INVALID_BATCH` y ni siquiera queda una `SyncEvent` para reintentar — no es un producto el que falla, es el lote completo | Migrar el payload de `PRODUCT` a `barcodes: string[]` (v4). No hay periodo de gracia ni modo de compatibilidad: es el mismo corte que hizo la v3 en autenticación (HD5) |
+| **Un POS todavía en v4 no reconoce `AWAITING_CUSTOMER`/`IN_TRANSIT`/`REJECTED_BY_STORE`** | Un `switch` exhaustivo sobre `status` se rompe al primer pedido en uno de los tres estados nuevos — no hay error HTTP que avise, es un fallo del lado del POS                                 | Migrar el lector del enum antes de recibir tráfico real. No hay periodo de convivencia: mismo corte que la v3/v4 (F-019)                                                |
 
 ---
 
@@ -722,6 +864,19 @@ node scripts/send-catalog-batch.mjs --stale         # stale
 node scripts/send-catalog-batch.mjs --singular-barcode  # 400 INVALID_BATCH (v4, F-024)
 node scripts/send-availability-batch.mjs OUT_OF_STOCK
 node scripts/send-catalog-batch.mjs --token=<otro-token-de-otro-negocio>  # 403 BUSINESS_MISMATCH
+```
+
+La renegociación (v5, F-019) se verifica con `scripts/renegotiate-order.mjs`,
+que acuña su propio token y siembra sus propios pedidos:
+
+```bash
+node scripts/renegotiate-order.mjs --propose         # AWAITING_CUSTOMER + los dos totales
+node scripts/renegotiate-order.mjs --approve         # CONFIRMED con los importes propuestos; rateSnapshot intacto
+node scripts/renegotiate-order.mjs --reject          # CANCELLED, cancelledBy CUSTOMER
+node scripts/renegotiate-order.mjs --expire          # el reloj cancela solo, cancelledBy EXPIRY
+node scripts/renegotiate-order.mjs --outcomes        # REJECTED_BY_STORE y los dos CANCELLED, distinguibles
+node scripts/renegotiate-order.mjs --transit         # IN_TRANSIT sobre READY, envío y retiro
+node scripts/renegotiate-order.mjs --link-on-create  # customerWhatsappUrl en el pull, también para ONSITE
 ```
 
 El criterio 6 de F-024 —cuántos productos canónicos comparten códigos entre

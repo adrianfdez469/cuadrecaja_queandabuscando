@@ -31,3 +31,52 @@ export const ORDER_NOTES_MAX_LENGTH = 500;
 
 /** The wa.me message keeps only this many lines before summarizing the rest. */
 export const WHATSAPP_MESSAGE_MAX_LINES = 10;
+
+// ---------------------------------------------------------------------------
+// F-019 — renegotiation
+// ---------------------------------------------------------------------------
+
+/** architecture.md § Modelo de datos: the store's message to the customer. */
+export const ORDER_PROPOSAL_MESSAGE_MAX_LENGTH = 500;
+
+/**
+ * Values of the `decision` form field on
+ * `POST /[slug]/pedido/[code]/respuesta` (architecture.md DA4). Spanish, like
+ * `?admin=sesion-requerida` in `src/proxy.ts` — this is what the customer's
+ * own browser submits.
+ */
+export const ORDER_PROPOSAL_DECISION = {
+  APPROVE: "aprobar",
+  REJECT: "rechazar",
+} as const;
+export type OrderProposalDecision =
+  (typeof ORDER_PROPOSAL_DECISION)[keyof typeof ORDER_PROPOSAL_DECISION];
+
+/**
+ * Values of the `?r=` redirect param the response route uses to tell the
+ * page what just happened (architecture.md DA4 § "Un contrato, dos
+ * representaciones"). An unrecognized or absent value paints nothing (A3).
+ */
+export const ORDER_RESPONSE_OUTCOME = {
+  APPROVED: "aprobada",
+  REJECTED: "rechazada",
+  CONFLICT: "conflicto",
+  EXPIRED: "vencida",
+  UNAVAILABLE: "no-disponible",
+  RATE_LIMITED: "demasiados-intentos",
+} as const;
+export type OrderResponseOutcome =
+  (typeof ORDER_RESPONSE_OUTCOME)[keyof typeof ORDER_RESPONSE_OUTCOME];
+
+/**
+ * DA3: rejecting is a route the customer reaches with NO free-text field —
+ * ADR 0024 defensa 6, "el comprador no aporta texto". `cancelReason` is this
+ * fixed, server-owned string, not anything typed by a person.
+ */
+export const ORDER_REJECTED_BY_CUSTOMER_REASON = "El comprador rechazó el cambio propuesto.";
+
+/** R6: literal text, exactly. Criterio 4 greps for this string. */
+export const ORDER_EXPIRED_PROPOSAL_REASON = "La propuesta venció sin respuesta";
+
+/** ADR 0024 defensa 7: hard cap on the response route's body. */
+export const ORDER_RESPONSE_MAX_BODY_BYTES = 1024;

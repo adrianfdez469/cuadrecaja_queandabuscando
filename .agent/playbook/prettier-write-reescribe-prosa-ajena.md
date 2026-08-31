@@ -3,7 +3,7 @@ slug: prettier-write-reescribe-prosa-ajena
 sintoma: "format:check señala un .md de .agent/ que no escribiste tú, y `npm run format` lo arregla cambiando lo que dice"
 firma: \[warn\] \.agent/(progress|specs)/
 etapa: format
-visto_en: F-015, F-018, F-011, F-021, F-023, F-010, F-012
+visto_en: F-015, F-018, F-011, F-021, F-023, F-010, F-012, F-019
 creado: 2026-08-27T14:44:00Z
 promovido_a_agents: sí
 arreglo: no formatees a ciegas un documento ajeno — copia, formatea, diffea, y si prettier cambió el sentido de una línea reescribe esa línea a mano (normalmente un `+` o un `-` que quedó al principio de una línea de continuación) y vuelve a formatear

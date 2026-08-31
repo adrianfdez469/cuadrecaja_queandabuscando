@@ -344,9 +344,10 @@
         "rateSnapshot no cambia entre la creacion del pedido y la aprobacion de la modificacion.",
         "El comprador recibe un enlace a la pagina de su pedido por WhatsApp al crearlo.",
         "El enum de estados ampliado esta documentado en docs/sync-contract.md.",
+        "Reportar IN_TRANSIT sobre un pedido READY deja la fila en IN_TRANSIT y GET /[slug]/pedido/[code] lo muestra con copia propia, distinta de READY.",
         "'bash .agent/verify.sh F-019 --full' termina con codigo 0."
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Anadido el 2026-08-26 por indicacion expresa del humano, no por iniciativa del agente (regla 4). Alcance en .agent/specs/propuestas/pedido-renegociacion.md. Faltaban las dos mitades que hacen operable el flujo ya acordado: no habia estado para 'hay una modificacion esperando al cliente' ni reloj que lo venza. Y el disparador mas frecuente NO es la falta de stock: es el costo de envio definido al gestionar, que por diseno ocurre en todos los pedidos de esa modalidad — es el camino normal, no la excepcion. El comprador es invitado y pudo cerrar la pestana, asi que sin reloj el encargado se queda con medio pedido colgado. Los tres disparadores (stock, deriva de precio, envio) usan el MISMO bucle. FUERA: reserva de stock — dos compradores pueden pedir la ultima unidad y lo resuelve la confirmacion manual; reservar exigiria escribir en el camino de venta del POS, que es lo que evita ADR 0003. PREGUNTAS ABIERTAS: SP1 al vencer, cancelar o despachar lo disponible; SP2 si el reloj corre con la tienda cerrada (depende de Store.timezone, F-022); SP3 si el enlace de WhatsApp es automatico o lo manda el encargado."
     },
     {

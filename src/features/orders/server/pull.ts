@@ -1,5 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { money, multiply } from "@/lib/money";
+import { publicEnv } from "@/lib/env";
+import { canonicalSlug } from "@/lib/publicSlug";
+import { routingWhatsappNumber } from "@/lib/storeContact";
+import { buildProposalWhatsappUrl } from "../whatsapp";
+import { expireProposalsQuery } from "./expiry";
 
 /**
  * Order pull.
@@ -18,10 +23,36 @@ import { money, multiply } from "@/lib/money";
  * they are today: everything in the order's own currency, with
  * `Σ lineTotal = subtotal`. The originals below are informative only and
  * never sumable (R5b) — nothing here derives a total from them.
+ *
+ * v5 (F-019, NOT additive in the status enum — architecture.md § "Los siete
+ * puntos del contrato"): `cancelledBy`, `customerWhatsappUrl` and `proposal`
+ * are additive fields; the enum growing from 6 to 9 values is not, and the
+ * contract says so. `select` is now EXPLICIT instead of `include`:
+ * `proposedItems` (a `Json?`, potentially several KB — architecture.md §
+ * Escalabilidad) is never read here, on purpose (DA5/DA1).
+ *
+ * DA5: the barrido — the `AWAITING_CUSTOMER` proposals this business's own
+ * clock ran out on — happens in the SAME round-trip as the read, via
+ * `$transaction([...])` in ARRAY form (never the interactive callback: the
+ * pooler runs in transaction mode and the global client has no "inside" to
+ * misuse there, ficha `pooler-transaccion-deadlock`). Going first is what
+ * lets the `findMany` right after it see its own write: the POS never
+ * receives an `AWAITING_CUSTOMER` this same call just expired.
  */
 
 /** The exact shape frozen into `Order.rateSnapshot` at checkout time (R9). */
 type RateSnapshot = { base: string; capturedAt: string; rates: Record<string, string> };
+
+export type PulledOrderProposal = {
+  proposedAt: string;
+  expiresAt: string;
+  previousTotal: string;
+  subtotal: string;
+  discountTotal: string;
+  deliveryFee: string;
+  total: string;
+  message: string | null;
+};
 
 export type PulledOrder = {
   id: string;
@@ -38,6 +69,14 @@ export type PulledOrder = {
   createdAt: string;
   /** New in v2: the rates frozen at checkout, for reconstructing the conversion. */
   rateSnapshot: RateSnapshot;
+  /** New in v5: R9 — `null` while the order is not closed. */
+  cancelledBy: "CUSTOMER" | "EXPIRY" | "STORE" | null;
+  /** New in v5: toward the customer, for EVERY order (E24/I3), `null` with
+   *  no usable digits (R13). Never sent by anyone here — the encargado
+   *  opens it (R12). */
+  customerWhatsappUrl: string | null;
+  /** New in v5: present ONLY while `status === "AWAITING_CUSTOMER"`. */
+  proposal: PulledOrderProposal | null;
   items: {
     storeProductExternalId: string | null;
     name: string;
@@ -54,65 +93,161 @@ export type PulledOrder = {
   }[];
 };
 
+function orderUrlFor(storeSlug: string, code: string): string {
+  return new URL(`/${storeSlug}/pedido/${code}`, publicEnv.siteUrl).toString();
+}
+
 export async function pullOrders(
   businessId: string,
   since: bigint,
   limit: number,
 ): Promise<{ orders: PulledOrder[]; nextCursor: string | null }> {
-  const rows = await prisma.order.findMany({
-    where: { businessId, id: { gt: since } },
-    orderBy: { id: "asc" },
-    take: limit,
-    include: {
-      store: { select: { externalId: true } },
-      items: { include: { storeProduct: { select: { externalId: true } } } },
-    },
-  });
-
-  const orders: PulledOrder[] = rows.map((order) => ({
-    id: order.id.toString(),
-    code: order.code,
-    storeExternalId: order.store.externalId,
-    status: order.status,
-    contact: {
-      name: order.contactName,
-      phone: order.contactPhone,
-      email: order.contactEmail,
-      address: order.deliveryAddress,
-    },
-    currencyCode: order.currencyCode,
-    subtotal: order.subtotal.toString(),
-    discountTotal: order.discountTotal.toString(),
-    deliveryFee: order.deliveryFee.toString(),
-    total: order.total.toString(),
-    notes: order.notes,
-    createdAt: order.createdAt.toISOString(),
-    rateSnapshot: order.rateSnapshot as RateSnapshot,
-    items: order.items.map((item) => {
-      const unitPrice = item.unitPrice.toString();
-      const currencyCode = item.currencyCode;
-      const lineTotal = item.lineTotal.toString();
-
-      const hasOriginal = item.originalUnitPrice !== null && item.originalCurrencyCode !== null;
-      const originalUnitPrice = hasOriginal ? item.originalUnitPrice!.toString() : unitPrice;
-      const originalCurrencyCode = hasOriginal ? item.originalCurrencyCode! : currencyCode;
-      const originalLineTotal = hasOriginal
-        ? multiply(money(originalUnitPrice, originalCurrencyCode), item.quantity.toString()).amount
-        : lineTotal;
-
-      return {
-        storeProductExternalId: item.storeProduct?.externalId ?? null,
-        name: item.name,
-        unitPrice,
-        currencyCode,
-        quantity: item.quantity.toString(),
-        lineTotal,
-        originalUnitPrice,
-        originalCurrencyCode,
-        originalLineTotal,
-      };
+  const [, rows] = await prisma.$transaction([
+    expireProposalsQuery(businessId),
+    prisma.order.findMany({
+      where: { businessId, id: { gt: since } },
+      orderBy: { id: "asc" },
+      take: limit,
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        contactName: true,
+        contactPhone: true,
+        contactEmail: true,
+        deliveryAddress: true,
+        currencyCode: true,
+        subtotal: true,
+        discountTotal: true,
+        deliveryFee: true,
+        total: true,
+        notes: true,
+        createdAt: true,
+        rateSnapshot: true,
+        cancelledBy: true,
+        proposedAt: true,
+        expiresAt: true,
+        previousTotal: true,
+        proposedSubtotal: true,
+        proposedDiscountTotal: true,
+        proposedDeliveryFee: true,
+        proposedTotal: true,
+        proposalMessage: true,
+        // proposedItems is DELIBERATELY not selected (DA1/DA5): the POS
+        // composed those lines itself when it proposed; the pull never
+        // reads them back.
+        store: {
+          select: {
+            externalId: true,
+            slug: true,
+            name: true,
+            whatsapp: true,
+            phone: true,
+            storefront: { select: { slug: true, stores: { select: { id: true } } } },
+          },
+        },
+        items: {
+          select: {
+            name: true,
+            unitPrice: true,
+            currencyCode: true,
+            quantity: true,
+            lineTotal: true,
+            originalUnitPrice: true,
+            originalCurrencyCode: true,
+            storeProduct: { select: { externalId: true } },
+          },
+        },
+      },
     }),
-  }));
+  ]);
+
+  const orders: PulledOrder[] = rows.map((order) => {
+    const storeSlug = canonicalSlug({
+      storeSlug: order.store.slug,
+      brandSlug: order.store.storefront.slug,
+      brandBranchCount: order.store.storefront.stores.length,
+    });
+    const whatsappNumber = routingWhatsappNumber(order.store);
+    const customerWhatsappUrl = whatsappNumber
+      ? buildProposalWhatsappUrl({
+          customerPhone: order.contactPhone,
+          storeName: order.store.name,
+          code: order.code,
+          orderUrl: orderUrlFor(storeSlug, order.code),
+        }).url
+      : null;
+
+    const proposal: PulledOrderProposal | null =
+      order.status === "AWAITING_CUSTOMER" &&
+      order.expiresAt &&
+      order.proposedAt &&
+      order.previousTotal !== null &&
+      order.proposedSubtotal !== null &&
+      order.proposedDiscountTotal !== null &&
+      order.proposedDeliveryFee !== null &&
+      order.proposedTotal !== null
+        ? {
+            proposedAt: order.proposedAt.toISOString(),
+            expiresAt: order.expiresAt.toISOString(),
+            previousTotal: order.previousTotal.toString(),
+            subtotal: order.proposedSubtotal.toString(),
+            discountTotal: order.proposedDiscountTotal.toString(),
+            deliveryFee: order.proposedDeliveryFee.toString(),
+            total: order.proposedTotal.toString(),
+            message: order.proposalMessage,
+          }
+        : null;
+
+    return {
+      id: order.id.toString(),
+      code: order.code,
+      storeExternalId: order.store.externalId,
+      status: order.status,
+      contact: {
+        name: order.contactName,
+        phone: order.contactPhone,
+        email: order.contactEmail,
+        address: order.deliveryAddress,
+      },
+      currencyCode: order.currencyCode,
+      subtotal: order.subtotal.toString(),
+      discountTotal: order.discountTotal.toString(),
+      deliveryFee: order.deliveryFee.toString(),
+      total: order.total.toString(),
+      notes: order.notes,
+      createdAt: order.createdAt.toISOString(),
+      rateSnapshot: order.rateSnapshot as RateSnapshot,
+      cancelledBy: order.cancelledBy,
+      customerWhatsappUrl,
+      proposal,
+      items: order.items.map((item) => {
+        const unitPrice = item.unitPrice.toString();
+        const currencyCode = item.currencyCode;
+        const lineTotal = item.lineTotal.toString();
+
+        const hasOriginal = item.originalUnitPrice !== null && item.originalCurrencyCode !== null;
+        const originalUnitPrice = hasOriginal ? item.originalUnitPrice!.toString() : unitPrice;
+        const originalCurrencyCode = hasOriginal ? item.originalCurrencyCode! : currencyCode;
+        const originalLineTotal = hasOriginal
+          ? multiply(money(originalUnitPrice, originalCurrencyCode), item.quantity.toString())
+              .amount
+          : lineTotal;
+
+        return {
+          storeProductExternalId: item.storeProduct?.externalId ?? null,
+          name: item.name,
+          unitPrice,
+          currencyCode,
+          quantity: item.quantity.toString(),
+          lineTotal,
+          originalUnitPrice,
+          originalCurrencyCode,
+          originalLineTotal,
+        };
+      }),
+    };
+  });
 
   // Mark as pulled so the admin panel can show what the POS has already seen.
   const pendingIds = rows.filter((o) => o.status === "PENDING").map((o) => o.id);

@@ -31,7 +31,13 @@
 
   /* Status — availability badges live off these */
   --color-positive: oklch(0.6 0.14 155);
-  --color-warning: oklch(0.72 0.15 75);
+  /* Darkened from 0.72 (F-019, human-authorized): text-warning measured
+     2.17-2.53:1 against its real composed background (canvas 1x1, not the
+     declared color — see the playbook entry
+     alert-tone-hereda-color-en-body-de-texto-largo.md), below 4.5:1 in every
+     warning-tone text usage in the app, not just F-019's. 0.5 measures
+     4.61-6.09:1 across those same usages in light mode. */
+  --color-warning: oklch(0.5 0.15 75);
   --color-danger: oklch(0.58 0.2 25);
 
   /* Shape. Named so `rounded-sm|md|lg` and `shadow-card` resolve to var(). */

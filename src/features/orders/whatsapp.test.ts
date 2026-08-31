@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { money } from "@/lib/money";
-import { buildWhatsappUrl, type WhatsappOrderInput } from "./whatsapp";
+import {
+  buildCustomerContactUrl,
+  buildProposalWhatsappUrl,
+  buildWhatsappUrl,
+  type WhatsappOrderInput,
+} from "./whatsapp";
 
 const baseInput: WhatsappOrderInput = {
   storeName: "La Rampa · Vedado",
@@ -63,5 +68,50 @@ describe("buildWhatsappUrl()", () => {
     expect(decoded).toContain("Producto 9");
     expect(decoded).not.toContain("Producto 10");
     expect(decoded).toContain("… y 5 productos más (están en el enlace).");
+  });
+});
+
+describe("buildProposalWhatsappUrl() — F-019 R12/R13, E1/E24", () => {
+  const input = {
+    customerPhone: "+5355555555",
+    storeName: "La Rampa · Vedado",
+    code: "A7K3M9PQR2",
+    orderUrl: "https://tienda-demo.example.com/tienda-demo/pedido/A7K3M9PQR2",
+  };
+
+  it("returns a wa.me link toward the CUSTOMER's phone, with the order URL", () => {
+    const { url, reason } = buildProposalWhatsappUrl(input);
+    expect(url).toMatch(/^https:\/\/wa\.me\/5355555555\?text=/);
+    expect(reason).toBeNull();
+    const decoded = decodeURIComponent(url!.split("text=")[1]);
+    expect(decoded).toContain(input.orderUrl);
+  });
+
+  it("R13: no usable digits → null url with NO_PHONE_DIGITS, proposal still creatable", () => {
+    const result = buildProposalWhatsappUrl({ ...input, customerPhone: "n/a" });
+    expect(result).toEqual({ url: null, reason: "NO_PHONE_DIGITS" });
+  });
+});
+
+describe("buildCustomerContactUrl() — 'Escribirle a la tienda' (design.md § El wa.me corto)", () => {
+  it("returns null when the store has no number", () => {
+    expect(
+      buildCustomerContactUrl({
+        storeWhatsappNumber: null,
+        storeName: "La Rampa",
+        code: "A7K3M9PQR2",
+      }),
+    ).toBeNull();
+  });
+
+  it("carries only the store name and the formatted code — no amounts", () => {
+    const url = buildCustomerContactUrl({
+      storeWhatsappNumber: "+5350000001",
+      storeName: "La Rampa",
+      code: "A7K3M9PQR2",
+    })!;
+    expect(url).toMatch(/^https:\/\/wa\.me\/5350000001\?text=/);
+    const decoded = decodeURIComponent(url.split("text=")[1]);
+    expect(decoded).toBe("Hola La Rampa, es sobre mi pedido A7K3M-9PQR2.");
   });
 });

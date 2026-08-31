@@ -4,6 +4,10 @@
     {
       "path": "/api/crons/purge-sso-tokens",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/crons/expire-proposals",
+      "schedule": "0 5 * * *"
     }
   ]
 }

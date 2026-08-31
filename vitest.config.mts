@@ -73,10 +73,13 @@ export default defineConfig({
           // Real network round trips against Postgres; the default 5s
           // ceiling is tuned for mocked server tests, not this project.
           testTimeout: 20_000,
-          // Techo declarado (architecture.md § Escalabilidad): 6
-          // `*.db.test.ts` files max, each its own PrismaClient (max: 5). No
-          // fileParallelism override here — today there are 2 files, well
-          // under the ceiling that would force one.
+          // Techo declarado (F-015 architecture.md § Escalabilidad): 6
+          // `*.db.test.ts` files max in parallel, each its own PrismaClient
+          // (max: 5) — ≤30 connections against a max_connections of 100
+          // locally and in CI's postgres:16. F-019's expiry.db.test.ts is
+          // the 7th file, past that ceiling, so this project now runs its
+          // files serially instead of raising `max` on every client.
+          fileParallelism: false,
         },
       },
     ],

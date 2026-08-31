@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { formatMoney, isZero, money } from "@/lib/money";
 import type { OrderSnapshotItem } from "../server/read";
 
@@ -5,6 +6,11 @@ import type { OrderSnapshotItem } from "../server/read";
  * The frozen lines of a persisted order (R8, E20) — server component, no
  * directive. Every amount here comes straight from the snapshot, never
  * recomputed from the current catalogue.
+ *
+ * F-019 (design.md § Componentes de UI): `title`/`badge` are optional so the
+ * SAME component can render "Tu pedido si aceptas el cambio" + `Badge
+ * Propuesta` for the proposed lines (E3), with no change for the two
+ * existing call sites that pass neither.
  */
 export function OrderLinesTable({
   items,
@@ -12,19 +18,26 @@ export function OrderLinesTable({
   subtotal,
   deliveryFee,
   total,
+  title = "Tu pedido",
+  badge,
 }: {
   items: OrderSnapshotItem[];
   currencyCode: string;
   subtotal: string;
   deliveryFee: string;
   total: string;
+  title?: string;
+  badge?: ReactNode;
 }) {
   const deliveryFeeMoney = money(deliveryFee, currencyCode);
   const hasDeliveryFee = !isZero(deliveryFeeMoney);
 
   return (
     <div>
-      <h2 className="text-lg font-semibold">Tu pedido</h2>
+      <h2 className="flex items-center gap-2 text-lg font-semibold">
+        {title}
+        {badge}
+      </h2>
       <ul className="divide-border mt-3 divide-y">
         {items.map((item, index) => (
           <li key={index} className="flex items-center justify-between gap-3 py-2 text-sm">

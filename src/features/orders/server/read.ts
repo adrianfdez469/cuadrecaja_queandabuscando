@@ -4,8 +4,9 @@ import { money } from "@/lib/money";
 import { publicEnv } from "@/lib/env";
 import { canonicalSlug, type PublicSlug } from "@/lib/publicSlug";
 import { routingWhatsappNumber } from "@/lib/storeContact";
-import type { CheckoutMode, OrderStatus } from "@/generated/prisma/enums";
+import type { CheckoutMode, OrderCancelledBy, OrderStatus } from "@/generated/prisma/enums";
 import { buildWhatsappUrl } from "../whatsapp";
+import type { ProposalItem } from "../types";
 
 /**
  * Lectura del pedido — the snapshot frozen at checkout time (R8), never
@@ -21,11 +22,32 @@ import { buildWhatsappUrl } from "../whatsapp";
  */
 
 export type OrderSnapshotItem = {
+  storeProductId: string | null;
   name: string;
   unitPrice: string;
   currencyCode: string;
   quantity: string;
   lineTotal: string;
+};
+
+/**
+ * F-019: present whenever the order has ever HAD a proposal — live
+ * (`status === "AWAITING_CUSTOMER"`) or resolved (an approval keeps these
+ * columns, PP3/DA1: only a SECOND proposal overwrites them). The page tells
+ * "still live" from "already decided" by `status` and `proposalOutcome`,
+ * not by whether this object exists at all.
+ */
+export type OrderSnapshotProposal = {
+  proposedAt: string;
+  expiresAt: string;
+  message: string | null;
+  previousTotal: string;
+  subtotal: string;
+  discountTotal: string;
+  deliveryFee: string;
+  total: string;
+  items: ProposalItem[];
+  outcome: "APPROVED" | "REJECTED" | "EXPIRED" | null;
 };
 
 export type OrderSnapshot = {
@@ -48,6 +70,10 @@ export type OrderSnapshot = {
   total: string;
   notes: string | null;
   createdAt: string;
+  /** R9. `null` while the order is not closed, and for every row from
+   *  before this feature. */
+  cancelledBy: OrderCancelledBy | null;
+  proposal: OrderSnapshotProposal | null;
   items: OrderSnapshotItem[];
 };
 
@@ -73,6 +99,17 @@ export async function getOrderByCode(
       total: true,
       notes: true,
       createdAt: true,
+      cancelledBy: true,
+      proposedAt: true,
+      expiresAt: true,
+      proposalMessage: true,
+      previousTotal: true,
+      proposedSubtotal: true,
+      proposedDiscountTotal: true,
+      proposedDeliveryFee: true,
+      proposedTotal: true,
+      proposedItems: true,
+      proposalOutcome: true,
       store: {
         select: {
           slug: true,
@@ -85,6 +122,7 @@ export async function getOrderByCode(
       },
       items: {
         select: {
+          storeProductId: true,
           name: true,
           unitPrice: true,
           currencyCode: true,
@@ -95,6 +133,28 @@ export async function getOrderByCode(
     },
   });
   if (!order) return null;
+
+  const proposal: OrderSnapshotProposal | null =
+    order.expiresAt !== null &&
+    order.proposedAt !== null &&
+    order.previousTotal !== null &&
+    order.proposedSubtotal !== null &&
+    order.proposedDiscountTotal !== null &&
+    order.proposedDeliveryFee !== null &&
+    order.proposedTotal !== null
+      ? {
+          proposedAt: order.proposedAt.toISOString(),
+          expiresAt: order.expiresAt.toISOString(),
+          message: order.proposalMessage,
+          previousTotal: order.previousTotal.toString(),
+          subtotal: order.proposedSubtotal.toString(),
+          discountTotal: order.proposedDiscountTotal.toString(),
+          deliveryFee: order.proposedDeliveryFee.toString(),
+          total: order.proposedTotal.toString(),
+          items: (order.proposedItems as unknown as ProposalItem[] | null) ?? [],
+          outcome: order.proposalOutcome,
+        }
+      : null;
 
   return {
     code: order.code,
@@ -111,12 +171,15 @@ export async function getOrderByCode(
     fulfillment: order.deliveryAddress ? "DELIVERY" : "PICKUP",
     deliveryAddress: order.deliveryAddress,
     currencyCode: order.currencyCode,
+    cancelledBy: order.cancelledBy,
+    proposal,
     subtotal: order.subtotal.toString(),
     deliveryFee: order.deliveryFee.toString(),
     total: order.total.toString(),
     notes: order.notes,
     createdAt: order.createdAt.toISOString(),
     items: order.items.map((item) => ({
+      storeProductId: item.storeProductId,
       name: item.name,
       unitPrice: item.unitPrice.toString(),
       currencyCode: item.currencyCode,
