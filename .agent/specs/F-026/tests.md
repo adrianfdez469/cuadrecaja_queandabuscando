@@ -1,7 +1,7 @@
 ---
 feature: F-026
 agente: sdd-tester
-actualizado: 2026-08-31T04:40:00Z
+actualizado: 2026-08-31T05:10:00Z
 estado: listo
 veredicto: listo
 ---
@@ -179,9 +179,13 @@ no lo asumas») y así se hizo, con clic real, no con `curl -I`.
 
 ## Fallos encontrados
 
-Ninguno de los 15 criterios falló. Dos hallazgos que **no** rompen ningún
+Ninguno de los 15 criterios falló. Cuatro hallazgos que **no** rompen ningún
 criterio literal pero que vale la pena que alguien decida qué hacer con ellos
-— ver § Preguntas al humano.
+— ver § Preguntas al humano. Los dos primeros salieron del primer ciclo de
+pruebas (HTTP y sync); el 3 y el 4 salieron de escribir
+`.agent/specs/F-026/visual.mjs` en el segundo ciclo, a pedido del
+coordinador, porque `bash .agent/sdd.sh done F-026` se negaba sin él
+(`design.md` § Verificación visual, V1–V11, nunca se había ejecutado).
 
 1. **[hallazgo, no bloqueante] El 404 de categoría no se puede navegar sin
    JavaScript — y es un problema de toda la app, no de este feature.**
@@ -222,8 +226,10 @@ catálogo"}`, con las comillas escapadas de verdad,
    no ven los cambios de la base entre uno y otro.** Se hizo el
    experimento sin querer: tras las mutaciones de sync de los criterios
    9-11 (borrar «Panadería», crear «Café»/«CAFÉ»), un `npm run build`
-   fresco siguió listando `tienda-demo/c/panaderia` en
-   `.next/prerender-manifest.json` y **no** listaba `cafe`/`cafe-2` — los
+   fresco siguió listando `tienda-demo/c/panaderia` en el manifiesto de
+   prerenderizado de Next (`prerender-manifest.json`, bajo `.next/`, un
+   artefacto de build, no un archivo del repositorio) y **no** listaba
+   `cafe`/`cafe-2` — los
    archivos de `.next/cache/fetch-cache/` tenían fecha de 18 minutos antes
    del build (dentro del `STOREFRONT_REVALIDATE` de 3600 s de
    `src/lib/cache.ts`) y ninguno se tocó durante el build. Es
@@ -247,6 +253,88 @@ catálogo"}`, con las comillas escapadas de verdad,
    `sdd-architect`** para decidir si vale una nota en
    `docs/despliegue.md` o en un ADR — no bloquea el veredicto de este
    feature porque no lo causa ni lo prueba ningún criterio.
+
+3. **[hallazgo, va a `sdd-designer`/`sdd-implementer`] Tabulando por el
+   selector a 360px, el chip «Bebidas» se queda con el anillo de foco
+   parcialmente fuera de la pantalla — `design.md` § V5 exige que se vea
+   **entero**.** Medido con Playwright (`.agent/specs/F-026/visual.mjs`,
+   V5), estable en **cinco** corridas seguidas, con y sin `.next/cache`
+   limpio: al enfocar «Bebidas» con `Tab`, `nav.scrollLeft` sigue en `0` —
+   el navegador NO desplaza la fila. Comprobado que sí lo hace con
+   «Panadería» (que arranca **totalmente** fuera de pantalla): el
+   mecanismo nativo de scroll-al-enfocar de Chromium solo actúa cuando el
+   elemento está **completamente** fuera de vista; si ya asoma aunque sea
+   un poco (como «Bebidas», que empieza dentro de los 360px y termina
+   fuera — el propio caso que V1 pide), el navegador lo da por «ya
+   visible» y no completa el desplazamiento. No es un artefacto de
+   Playwright: el mismo evento de teclado sí dispara correctamente el
+   estilo `:focus-visible` en ese mismo chip (comprobado, `outline-width >
+0`) — es el comportamiento real y documentado de scroll-into-view del
+   navegador, no una limitación del arnés de prueba. **Por qué no lo
+   ablando**: R9 prohíbe una línea de JavaScript para arreglarlo
+   (`scrollIntoView` manual sería exactamente el `"use client"` que R9
+   veta), así que esto no tiene arreglo dentro de las reglas que el propio
+   `design.md` se puso — necesita que alguien decida: aceptarlo por
+   escrito (como PP2 aceptó el contraste heredado), o cambiar el diseño
+   (más espacio entre chips para que ninguno asome parcialmente al
+   entrar en pantalla, por ejemplo). **Relacionado, mismo paso V1**: el
+   propio texto de `design.md` da por hecho que el chip que asoma cortado
+   es «Panadería» («la cuarta [categoría]»); medido de verdad, el que
+   asoma es «Bebidas» (la tercera) y «Panadería» queda totalmente oculta.
+   `visual.mjs` ya no asume el nombre — verifica la propiedad estructural
+   (cuál sea que asome, que asome cortado) — pero la discrepancia con el
+   nombre que dan por sentado tanto `design.md` como este mismo hallazgo
+   de V5 (que si el diseño hubiera dicho «Bebidas» habría acertado el chip
+   real) es la misma raíz: **quien escribió `design.md` midió con datos o
+   una fuente distintos a los de este entorno**, y vale la pena que
+   `sdd-designer` repita la medición aquí antes de decidir sobre V5.
+
+4. **[hallazgo, confirma y amplía el #2] La misma foto vieja de la caché
+   de datos de Next también aparece reiniciando `next dev`, no solo entre
+   dos `npm run build`.** Al escribir `visual.mjs`, cada corrida sucesiva
+   de `bash .agent/verify.sh F-026 --visual` (que arranca su propio
+   `next dev` cuando no reutiliza uno propio) mostraba, en criterios V1 y
+   V5, categorías **de la corrida ANTERIOR** («Visual Categoria NN
+   `<sufijo-viejo>`») que ya no existían en la base — confirmado con
+   `psql` en el momento exacto: la base ya estaba limpia (5 `LocalCategory`
+   reales), pero la RESPUESTA seguía sirviendo las 20 de la corrida
+   anterior. `rm -rf .next` antes de levantar el servidor lo resuelve por
+   completo (verificado: con `.next` borrado, la corrida es idéntica a una
+   invocación manual y solo queda el hallazgo #3). Causa: `.next/cache/
+fetch-cache/` sobrevive al reinicio del proceso de `next dev` en disco,
+   y el `revalidateTag()` de la limpieza de la corrida anterior —que
+   `visual.mjs` y `smoke.sh` ya hacían mal al principio (limpiaban con
+   `DELETE` directo de `psql`, que **nunca** invalida la caché — se
+   corrigió en ambos guiones en este mismo ciclo, con un evento
+   `PRODUCT/UPDATE` trivial al final de la limpieza) alcanzó a escribirse
+   en memoria, pero puede no haberse asentado a tiempo en el manifiesto de
+   disco antes de que `verify.sh` matara el proceso. **No es un bug de
+   F-026** (mismo mecanismo de F-004 que ya documentaba el hallazgo #2),
+   pero si `sdd-architect` decide actuar sobre el #2, esta es la mitad que
+   falta: afecta también a `next dev`, no solo a `next build`.
+
+## Qué cubre el visual y qué no
+
+`.agent/specs/F-026/visual.mjs` (nuevo, este ciclo) traduce los **once** pasos
+V1–V11 de `design.md` § Verificación visual. Corre con
+`bash .agent/verify.sh F-026 --visual`; **hay que borrar `.next` antes de la
+primera corrida de una sesión** (hallazgo #4) o los primeros pasos (V1, V5)
+pueden leer una foto vieja de una corrida anterior — no es opcional, es la
+diferencia entre un guion que prueba algo y uno que prueba su propia caché.
+
+| Paso | Se tradujo                                                                                                                                                                                                                                                                                                                                                 | Resultado                                                                                                                        |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| V1   | Sí                                                                                                                                                                                                                                                                                                                                                         | **LISTO**, con una nota: el chip que asoma cortado es «Bebidas», no «Panadería» como asume el texto de `design.md` (hallazgo #3) |
+| V2   | Sí (envuelve con volumen real se comprueba en V10, no aquí — con las 4 categorías reales no hace falta envolver, y forzar esa aserción habría sido un falso fallo, no un hallazgo)                                                                                                                                                                         | **LISTO**                                                                                                                        |
+| V3   | Sí                                                                                                                                                                                                                                                                                                                                                         | **LISTO**                                                                                                                        |
+| V4   | Sí (columnas, ancho de tarjeta y `gap`, comparados con cajas medidas en los tres anchos, no a ojo)                                                                                                                                                                                                                                                         | **LISTO**                                                                                                                        |
+| V5   | Sí                                                                                                                                                                                                                                                                                                                                                         | **NO LISTO** para el chip «Bebidas» — hallazgo #3, va a `sdd-designer`/`sdd-implementer`                                         |
+| V6   | Sí (radio de esquina, verde de marca, contraste en oscuro)                                                                                                                                                                                                                                                                                                 | **LISTO**                                                                                                                        |
+| V7   | **Deliberadamente no traducido** — `smoke.sh` ya lo cubre con `curl`, que no ejecuta ni un byte de JavaScript: más estricto que cualquier navegador con JS desactivado. Traducirlo aquí también no habría aportado nada distinto                                                                                                                           | —                                                                                                                                |
+| V8   | Sí (sin fila ni en el catálogo ni en la vista de categoría bajo `SUSPENDED`)                                                                                                                                                                                                                                                                               | **LISTO**                                                                                                                        |
+| V9   | Sí — y aporta algo que `smoke.sh` no puede: sigue el enlace de verdad (clic real, headless) y comprueba a dónde ATERRIZA, algo que `curl` no puede ver porque nunca resuelve un `href` relativo contra la URL actual. Reemplaza la comprobación manual con la extensión de Chrome (que pedía un humano) por una reproducible en cualquier máquina con Bash | **LISTO**                                                                                                                        |
+| V10  | Sí, con 15 categorías sembradas y limpiadas por sync real (nunca `psql` a secas — hallazgo #4)                                                                                                                                                                                                                                                             | **LISTO** (incluida la comprobación de que SÍ envuelve a 768/1280 con volumen, que es donde V2 de verdad se ejercita)            |
+| V11  | Sí, con una sucursal sintética creada y borrada por sync + SQL de sucursal completa (cascada `Storefront → Store → StoreProduct`)                                                                                                                                                                                                                          | **LISTO**                                                                                                                        |
 
 ## Huecos de cobertura
 
@@ -304,17 +392,37 @@ elección real, a diferencia de `/[slug]` con una sola categoría, donde las
 dos opciones muestran lo mismo), pero lo firma `sdd-designer` o `sdd-spec`,
 no yo.
 
-**TP2 — Los dos hallazgos de § Fallos encontrados (el 404 sin salida
+**TP2 — Los hallazgos 1 y 2 de § Fallos encontrados (el 404 sin salida
 navegable sin JavaScript, transversal a tres features; y la posible
-foto vieja de un `next build` si el pipeline de despliegue cachea
-`.next/cache` entre builds) ¿abren feature/ficha aparte, o se aceptan por
-escrito como en PP2 de `plan.md`?** Los dos son pre-existentes (no los causa
-F-026) y ninguno rompe un criterio de los 15, pero el primero contradice la
-letra de R6 en el caso límite de "sin JavaScript", y el segundo es un riesgo
-operativo real si algún día se cachea `.next/cache` en CI/CD. Recomiendo
-`sdd-architect` para los dos, con la misma lógica que ya usó `plan.md` para
-PP2: aceptar por escrito o abrir feature/ficha, decisión del arquitecto con
-el humano si toca alcance.
+foto vieja de un `next build`/`next dev` si no se borra `.next/cache` entre
+invocaciones — confirmado también en `next dev`, hallazgo #4) ¿abren
+feature/ficha aparte, o se aceptan por escrito como en PP2 de `plan.md`?**
+Los dos son pre-existentes (no los causa F-026) y ninguno rompe un criterio
+de los 15, pero el primero contradice la letra de R6 en el caso límite de
+"sin JavaScript", y el segundo es un riesgo operativo real si algún día se
+cachea `.next/cache` en CI/CD. Recomiendo `sdd-architect` para los dos, con
+la misma lógica que ya usó `plan.md` para PP2: aceptar por escrito o abrir
+feature/ficha, decisión del arquitecto con el humano si toca alcance.
+
+**TP3 — El hallazgo 3 (V5: el chip «Bebidas» no se desplaza entero a la
+vista al enfocarlo con `Tab` a 360px) ¿se acepta como límite del propio
+mecanismo nativo del navegador (sin JS, por R9), o `design.md` cambia el
+espaciado de los chips para que ninguno empiece a asomar antes de estar
+totalmente fuera de pantalla?** Confirmado estable en cinco corridas,
+independiente de caché o de qué categoría real ocupe esa posición: es el
+propio comportamiento de scroll-al-enfocar de Chromium (actúa solo si el
+elemento está **totalmente** fuera de vista), no un defecto del código de
+F-026 ni del arnés de prueba. Arreglarlo con una línea de `scrollIntoView`
+violaría R9 (`AGENTS.md` § Prohibiciones) tal como el propio `design.md` ya
+anticipó («No hay JavaScript que lleve la fila hasta el chip activo, y no
+lo va a haber»); esa frase habla de la fila SIGUIENDO al chip activo al
+navegar, no del navegador completando su propio scroll nativo al enfocar
+con `Tab`, así que no cierra la pregunta por sí sola. Recomiendo
+`sdd-designer`: o se acepta por escrito (mismo patrón que PP2), o se ajusta
+`gap`/gap del contenedor para que ningún chip quede a medias al entrar en
+pantalla. De paso, `sdd-designer` puede confirmar si «Bebidas» (no
+«Panadería») es de verdad el chip que se midió al escribir V1 — con los
+datos de esta base de desarrollo, es «Bebidas» el que asoma cortado.
 
 ## Veredicto
 
@@ -322,8 +430,27 @@ el humano si toca alcance.
 ejecutando algo real (HTTP, sync, build, navegador), ninguno se dio por bueno
 leyendo código, y `bash .agent/verify.sh F-026 --full` termina en 0 dos veces
 seguidas al cierre de esta sesión, con la fixture de la base de desarrollo
-restaurada carácter a carácter a como estaba al empezar. Los dos hallazgos de
-§ Fallos encontrados son reales y quedan documentados y con prueba
-(`CONOCIDO` en `smoke.sh` para el primero), pero ninguno de los 15 criterios,
-tal como están escritos, los exige — por eso no bajan el veredicto, y por eso
-van a `sdd-architect` como preguntas (TP2), no como bloqueo.
+restaurada carácter a carácter a como estaba al empezar.
+
+**`bash .agent/verify.sh F-026 --visual` NO termina en 0**: sale en **2**
+(`ESTANCADO`, la misma firma cinco veces seguidas: `VISUAL FAIL V5 — a
+360px, el chip enfocado ("Bebidas") queda dentro de la ventana`). Es el
+hallazgo #3 de § Fallos encontrados, confirmado estable, único, y aislado de
+cualquier ruido de caché (§ hallazgo #4) — no un guion roto. **No baja el
+veredicto de los 15 criterios** porque design.md § V1–V11 es una capa de
+verificación **del diseñador**, distinta de `.agent/features.json` § los 15
+`acceptance_criteria` que gobiernan este campo (la propia plantilla de este
+documento lo dice: LISTO exige que se verifiquen los criterios de
+aceptación, no cada paso V* de cada `design.md`). Pero **es un fallo real,
+reproducible y sin ablandar**, y por eso: `bash .agent/verify.sh F-026
+--visual` queda en rojo a propósito, documentado aquí y en el propio guion
+(`VISUAL FAIL`, no un `note()` que lo esconda), y las preguntas TP2/TP3
+piden una decisión de `sdd-designer`/`sdd-architect` antes de que alguien
+intente ponerlo en verde sin más contexto que el código de salida.
+
+Los cuatro hallazgos de § Fallos encontrados son reales y quedan
+documentados y con prueba (`CONOCIDO` en `smoke.sh` para el primero,
+`VISUAL FAIL` estable para el tercero), pero ninguno de los 15 criterios,
+tal como están escritos, los exige — por eso no bajan el veredicto de los 15,
+y por eso van a `sdd-architect`/`sdd-designer` como preguntas (TP2, TP3), no
+como bloqueo silencioso.

@@ -384,16 +384,14 @@ if [ -n "$TOKEN" ]; then
 
   # ------------------------------------------------- limpieza ----
   # Todo lo sintético de ESTA corrida (siempre con "$SUFFIX" en su
-  # externalId) se borra al final, en SQL directo — nunca por sync,
-  # nunca revalidado: son fixtures desechables, creadas y destruidas
-  # dentro de la misma ejecución, no algo que una página tenga que
-  # reflejar. Sin este bloque, cada corrida de `--smoke` deja categorías
-  # y productos huérfanos para siempre y la base de desarrollo compartida
-  # crece sin límite (28 StoreProduct/5 LocalCategory de hoy no
-  # significarían nada la próxima vez que alguien los lea). No limpia lo
-  # que dejaron corridas ANTERIORES (llevan otro sufijo) — si esta base
-  # ya acumuló fixtures de una corrida vieja, se borran a mano con el
-  # mismo patrón (`externalId LIKE 'smoke-%'`), una sola vez.
+  # externalId) se borra al final, en SQL directo. Sin este bloque, cada
+  # corrida de `--smoke` deja categorías y productos huérfanos para
+  # siempre y la base de desarrollo compartida crece sin límite (28
+  # StoreProduct/5 LocalCategory de hoy no significarían nada la próxima
+  # vez que alguien los lea). No limpia lo que dejaron corridas ANTERIORES
+  # (llevan otro sufijo) — si esta base ya acumuló fixtures de una corrida
+  # vieja, se borran a mano con el mismo patrón (`externalId LIKE
+  # 'smoke-%'`), una sola vez.
   psql_val "
     DELETE FROM \"StoreProduct\" WHERE \"externalId\" LIKE 'smoke-prod%-$SUFFIX';
     DELETE FROM \"LocalCategory\" WHERE \"externalId\" LIKE 'smoke-cat%-$SUFFIX';
@@ -401,6 +399,20 @@ if [ -n "$TOKEN" ]; then
       WHERE NOT EXISTS (SELECT 1 FROM \"StoreProduct\" sp WHERE sp.\"canonicalProductId\" = cp.id)
         AND cp.name LIKE '%$SUFFIX';
   " >/dev/null
+
+  # El DELETE de arriba es SQL directo: NUNCA pasa por `revalidateTag()`, así
+  # que el servidor que atendió esta corrida (si sigue vivo, que es la norma
+  # en desarrollo) se queda sirviendo, desde su Data Cache, la versión CON
+  # los productos/categorías sintéticos hasta que expire
+  # STOREFRONT_REVALIDATE (3600s) — la base ya está limpia, la RESPUESTA no.
+  # Se descubrió DE VERDAD escribiendo `.agent/specs/F-026/visual.mjs`
+  # (tests.md § Fallos encontrados): `curl /tienda-demo` seguía trayendo
+  # categorías ya borradas de la base. Un evento de sync real, aunque no
+  # cambie nada (mismo precio de siempre), es lo único que dispara
+  # `revalidateStores()` de verdad.
+  if [ -n "$TOKEN" ]; then
+    sync_catalog "[$(product_event "evt-cleanup-revalidate-$SUFFIX" "seed-tienda-1-p0" "seed-producto-0" "Refresco de cola 1.5 L" "seed-cat-bebidas" 450 true)]" >/dev/null
+  fi
 fi
 
 # ---------------------------------------------------------------------------
