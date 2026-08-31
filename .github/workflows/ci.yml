@@ -187,7 +187,32 @@ jobs:
         run: node scripts/storage-dev-keys.mjs --write
 
       - name: Start the Storage + Auth emulators
-        run: docker compose up -d --wait --wait-timeout 180
+        # `--wait` cannot cover the whole file. `storage-bucket-init` is a
+        # one-shot: it seeds the bucket and exits, and compose counts a service
+        # that FINISHES as a failure of the wait — even on exit 0. It bites
+        # intermittently, depending on whether the container is done before
+        # compose starts watching, which is why this passed for weeks and then
+        # failed twice in a row on a docs-only diff.
+        #
+        # So: bring everything up, then wait only on the services meant to STAY
+        # up. The list is derived from the compose file itself, not written out
+        # here, so a service added later is covered without touching this.
+        run: |
+          docker compose up -d
+          docker compose up -d --wait --wait-timeout 180 \
+            $(docker compose config --services | grep -vx storage-bucket-init)
+
+      - name: The storage bucket was seeded
+        # Asserted on its own, which the single `--wait` never really did: it
+        # could not tell "the one-shot finished" from "the one-shot failed".
+        # `docker wait` returns the container's own exit code.
+        run: |
+          code=$(docker wait queandabuscando-storage-bucket-init)
+          if [ "$code" != "0" ]; then
+            echo "storage-bucket-init exited with $code"
+            docker compose logs storage-bucket-init
+            exit 1
+          fi
 
       - name: Migrations apply cleanly to an empty database
         run: npx prisma migrate deploy
