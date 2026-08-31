@@ -2,6 +2,12 @@
  * Store search (F-021): everything about the three-layer read and its
  * pagination that is NOT shared with the marketplace search — the tokens
  * here are `StoreSearch`'s alone (architecture.md § Componentes, "etapa 1").
+ *
+ * F-027 (architecture.md § Dónde vive el módulo, RD5): `STORE_SEARCH_PAGE_SIZE`
+ * and `STORE_SEARCH_MAX_PAGE` below are ALSO the catalogue-filter page size
+ * and page cap (`src/features/catalog/catalogFilters.ts` imports them) — a
+ * second constant with the same value would be a divergence waiting to
+ * happen. This file is no longer only the store search's own.
  */
 
 /** A2/A4 (design.md): the number of results per page. 24 is a multiple of

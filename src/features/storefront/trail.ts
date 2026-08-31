@@ -150,6 +150,9 @@ export const TRAIL_LABEL = {
   checkout: "Pagar",
   branchSwitch: "Cambiar de sucursal",
   search: "Buscar",
+  /** F-027 (design.md § Textos): the same three words as the entry link and
+   *  the `<h1>` of `/[slug]/catalogo` — one vocabulary for one screen. */
+  filter: "Filtrar y ordenar",
 } as const;
 
 export function catalogTrail(store: TrailStore): Trail {
@@ -175,6 +178,14 @@ export function searchTrail(store: TrailStore, term: string | null): Trail {
   return storeTrail(store, {
     current: term === null ? TRAIL_LABEL.search : `${TRAIL_LABEL.search} «${term}»`,
   });
+}
+
+/** F-027 (plan.md paso 10): the gemelo of `searchTrail` for the filtered
+ *  catalogue — a fixed label (design.md § Textos: "las mismas tres palabras
+ *  en el enlace, en el título y en el rastro"), never one that varies with
+ *  what got applied. */
+export function filterTrail(store: TrailStore): Trail {
+  return storeTrail(store, { current: TRAIL_LABEL.filter });
 }
 
 export function cartTrail(store: TrailStore): Trail {

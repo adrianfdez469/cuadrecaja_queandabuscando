@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import {
   getPublishedStoreSlugs,
   getStoreCatalog,
@@ -8,6 +9,8 @@ import {
 } from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
 import { branchTrailStore, brandTrailStore, catalogTrail } from "@/features/storefront/trail";
+import { catalogEntryHref, shouldOfferCatalogEntryLink } from "@/features/catalog/catalogFilters";
+import { CATALOG_ROUTE_SEGMENT } from "@/constants/catalog";
 import { publicEnv } from "@/lib/env";
 import { CATALOG_EAGER_IMAGE_COUNT } from "@/constants/media";
 import { Container } from "@/components/ui/Container";
@@ -153,7 +156,22 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
       <Container className="pt-4 pb-8">
         <StoreTrail trail={trail} jsonLd />
         <StoreSearchBox storeSlug={store.canonicalSlug} storeName={store.name} />
-        <h1 className="mt-8 text-2xl font-semibold">Catálogo</h1>
+        <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold">Catálogo</h1>
+          {/* design.md § Decisión 4/6: enlace de entrada, solo con 2+
+              productos visibles — no toca el conjunto ni el orden (criterio 1)
+              y va sin prefetch: apunta a una ruta dinámica (design.md § Coste
+              de cliente). */}
+          {shouldOfferCatalogEntryLink(products.length) && (
+            <Link
+              href={catalogEntryHref(`/${store.canonicalSlug}/${CATALOG_ROUTE_SEGMENT}`)}
+              prefetch={false}
+              className="text-brand min-h-11 content-center font-medium"
+            >
+              Filtrar y ordenar
+            </Link>
+          )}
+        </div>
         {store.description && <p className="text-fg-muted mt-2 max-w-2xl">{store.description}</p>}
 
         {/* design.md § Inventario, umbral: with fewer than two categories the
