@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Container } from "@/components/ui/Container";
 
 /**
@@ -9,14 +8,14 @@ import { Container } from "@/components/ui/Container";
  * shows the store's own header instead of losing the tienda's frame
  * entirely (R6).
  *
- * `not-found.tsx` receives no `params` in Next, so the way out is a
- * RELATIVE link, resolved by the browser against the current URL
- * (`/[slug]/c/[categorySlug]`, three path segments): a single `href=".."`
- * lands on `/[slug]` — verified with `new URL("..", currentUrl)`, the same
- * WHATWG resolution `next/link` hands straight to the `<a>` it renders in
- * the app router. Same single level as
- * `src/app/[slug]/pedido/[code]/not-found.tsx`, whose own segment sits at
- * the same depth.
+ * F-025: lost its own relative `<Link>` up a level. That link resolved
+ * against whatever slug the browser was on, so entering through an alias
+ * sent a shopper back to the alias instead of the canonical slug (I10, the
+ * same defect I3 already named) — and `not-found.tsx` gets no `params` in
+ * this Next version, so it cannot know which slug is canonical to build a
+ * better one itself. The way out is now the header's own link
+ * (`src/app/[slug]/layout.tsx:85-90`), which does have the canonical slug
+ * (architecture.md § Los dos `not-found.tsx` sin `params`).
  */
 export default function CategoryNotFound() {
   return (
@@ -26,9 +25,6 @@ export default function CategoryNotFound() {
         Puede que la tienda la haya quitado o que sus productos hayan cambiado de sitio. Siguen en
         el catálogo.
       </p>
-      <Link href=".." className="text-brand mt-8 underline underline-offset-4">
-        Ver todo el catálogo
-      </Link>
     </Container>
   );
 }
