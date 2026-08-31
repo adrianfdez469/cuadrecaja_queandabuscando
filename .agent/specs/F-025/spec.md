@@ -1,7 +1,7 @@
 ---
 feature: F-025
 agente: sdd-spec
-actualizado: 2026-08-29T04:00:00Z
+actualizado: 2026-08-31T13:26:39Z
 estado: listo
 ---
 
@@ -21,6 +21,15 @@ estado: listo
 > navegación. Las otras viven en F-026 (categorías), F-027 (filtros y orden) y
 > `.agent/specs/propuestas/resenas-y-calificaciones.md` (todavía sin promover:
 > el humano pidió revisarla antes).
+>
+> **Actualizado el 2026-08-31** con SP4 y SP5, que el humano resolvió después de
+> que F-026 cerrara en `passes: true` y añadiera una **décima** pantalla pública
+> que este documento no contemplaba: `/[slug]/c/[categorySlug]`. Lo que cambia:
+> esa pantalla gana su rastro y la ficha de producto gana un eslabón de
+> categoría, con el «atrás» de la ficha apuntando a la categoría. Los 14
+> criterios que ya están en `.agent/features.json` **no se tocan** (regla 3);
+> los que exige SP4 se proponen aquí marcados `[nuevo]` y los añade el humano
+> (regla 4). Todo lo demás —SP1, SP2 y SP3 incluidos— se conserva.
 
 ## Problema
 
@@ -33,6 +42,9 @@ enlace por página, cada uno inventado aparte y ninguno en la mayoría:
 - `src/app/[slug]/sucursales/page.tsx:44` — un «← Volver a {nombre}» propio.
 - `src/app/[slug]/pedido/[code]/not-found.tsx:17` — un `<Link href="..">`
   relativo.
+- `src/app/[slug]/c/[categorySlug]/not-found.tsx:29` — **otro** `<Link href="..">`
+  relativo, con el mismo defecto. No estaba en esta lista porque F-026 lo creó
+  después de escribirse este documento (I10).
 - `src/app/[slug]/pedido/[code]/page.tsx:126` — un «Seguir comprando», y encima
   con `<a>` en vez de `<Link>`.
 - `src/features/cart/components/CartView.tsx:163` — un «Volver a la tienda» que
@@ -53,7 +65,8 @@ del navegador vacío**: el «atrás» del teléfono lo saca del sitio.
 ### Dentro
 
 1. **Un rastro de navegación** (`breadcrumb`) clicable, calculado por la ruta,
-   presente en las nueve pantallas públicas de tienda: catálogo de sucursal,
+   presente en las **diez** pantallas públicas de tienda: catálogo de sucursal,
+   **catálogo por categoría** (`/[slug]/c/[categorySlug]`, la que añadió F-026),
    selector de marca, ficha de producto, resultados de búsqueda, búsqueda vacía,
    carrito, checkout, página de pedido y cambio de sucursal.
 2. **Un control de «volver atrás»** derivado del **mismo** rastro: es su
@@ -71,6 +84,20 @@ del navegador vacío**: el «atrás» del teléfono lo saca del sitio.
 6. **La sustitución** del «← Volver a {nombre}» de
    `src/app/[slug]/sucursales/page.tsx:44` por el rastro. No se apilan dos
    controles de vuelta en la misma pantalla (R14).
+7. **El eslabón de categoría** (RESUELTO por SP4), en las dos pantallas donde
+   hay dato: la vista de categoría (`{M}` › `{S}` › `{Categoría}`) y la ficha de
+   producto (`{M}` › `{S}` › `{Categoría}` › `{Producto}`). No cuesta ninguna
+   consulta nueva: `categoryName` y `categorySlug` ya viajan en `CatalogProduct`
+   (`src/features/catalog/server/queries.ts:69-74`, rellenados en la línea
+   275-276) y la ficha ya los pinta como chip
+   (`src/app/[slug]/p/[productSlug]/page.tsx:194-201`); el `href` lo construye
+   `storeCategoryPath()` (`src/features/catalog/storeCategories.ts:78`), que ya
+   usa el slug canónico.
+8. **La sustitución** del `<Link href="..">` relativo de
+   `src/app/[slug]/c/[categorySlug]/not-found.tsx:29` por una salida con slug
+   canónico. Es exactamente el defecto de I3 —el relativo conserva el slug
+   pedido, así que entrando por un alias devuelve al alias—, sobre un archivo
+   que F-026 creó después de escribirse I3 (I10).
 
 ### Fuera (explícito)
 
@@ -82,8 +109,19 @@ del navegador vacío**: el «atrás» del teléfono lo saca del sitio.
 - **Recordar de dónde venía el comprador.** El rastro es función de la URL, no
   del camino (R1). En particular, volver desde una ficha a los resultados de
   búsqueda queda fuera: RESUELTO por SP2 — siempre al catálogo.
-- **Un eslabón de categoría.** Lo decide F-026; aquí solo se deja el hueco
-  (§ No decidido a propósito): el rastro es una lista construida, no JSX a mano.
+- **La subcategoría.** El eslabón de **categoría** ya no está fuera: entra por
+  SP4 (§ Dentro, punto 7). F-026 no lo decidió, lo **delegó aquí** —
+  «esta propuesta le entrega el dato (tienda › categoría › producto); la forma
+  la decide F-025» (`.agent/specs/F-026/spec.md:543-544`), y su
+  `.agent/specs/F-026/architecture.md:739-744` repite que el dato está. Lo que
+  **sigue fuera** es un segundo nivel de taxonomía: `LocalCategory` no tiene
+  campo de padre y `GlobalCategory` solo tiene cuatro filas planas sin padre
+  (`.agent/specs/F-026/spec.md:118-120` y § Datos de ese documento), y su SP1
+  dejó las subcategorías como feature futuro. Sin dato no hay eslabón (R7).
+- **Tocar `StoreCategoryNav`** (`src/components/store/StoreCategoryNav.tsx`).
+  Su chip «Todo el catálogo» apunta a `/[slug]`, igual que el «atrás» del rastro
+  en la vista de categoría, pero es un **selector**, no navegación de cabecera:
+  mismo reparto que con `BranchBar` (R14, R21).
 - **Conservar filtros y ordenamientos al volver.** F-027.
 - **Tocar `BranchBar`** (`src/components/store/BranchBar.tsx`). Sigue igual: es
   una **acción** («Cambiar de sucursal»), no una ubicación. RESUELTO por SP3.
@@ -107,11 +145,17 @@ Precondiciones:
   (Storefront → Store) y F-021 (`/[slug]/buscar`) están en `passes: true`. Las
   cuatro aportan pantallas al rastro; **F-004 y F-017 son las dependencias
   duras**: sin la resolución marca/sucursal no hay jerarquía que dibujar.
+- **F-026 también está en `passes: true`**, y desde SP4 es una dependencia real
+  aunque no figure en el `depends_on` de F-025 (I11). Aporta la décima pantalla,
+  `categorySlug` en `CatalogProduct` y `storeCategoryPath()`.
 - No hace falta ninguna consulta nueva: `brandSlug`, `brandName`,
   `canonicalSlug` y `branchCount` ya vienen en `BranchResolution`
   (`src/features/storefront/server/resolve.ts:41`), y el nombre del producto, el
   término de búsqueda y el código del pedido ya los tiene cargados cada página
-  (R7).
+  (R7). Lo mismo vale para el eslabón nuevo: `categoryName`/`categorySlug`
+  vienen en la fila del producto (`src/features/catalog/server/queries.ts:275-276`)
+  y la vista de categoría ya tiene `view.category` en la mano
+  (`src/app/[slug]/c/[categorySlug]/page.tsx:120`).
 
 ## Comportamiento esperado
 
@@ -128,11 +172,19 @@ abre `/bodega-uno`, entonces el rastro es `{Marca} › {Bodega Uno}` con el prim
 eslabón enlazando a `/{brandSlug}` y el segundo sin enlace, y el control de
 «atrás» apunta a `/{brandSlug}`.
 
-**E3 — la ficha de producto vuelve al catálogo de su sucursal.**
-Dada la ficha `/tienda-demo/p/{productSlug}`, cuando se renderiza, entonces el
-último eslabón es el **nombre del producto** sin enlace, el penúltimo es la
-sucursal con `href="/tienda-demo"`, y el control de «atrás» apunta a esa misma
-URL. Todo ello está en el HTML servido, antes de cualquier JavaScript.
+**E3 — la ficha de producto cuelga de su categoría.**
+Dada la ficha `/tienda-demo/p/{productSlug}` de un producto **con** categoría,
+cuando se renderiza, entonces el rastro es
+`{M} › {S} › {Categoría} › {nombre del producto}`: el último eslabón es el
+nombre del producto sin enlace, el **penúltimo es la categoría**, con el `href`
+que devuelve `storeCategoryPath(store.canonicalSlug, product.categorySlug)`
+(`/tienda-demo/c/{categorySlug}`), y el control de «atrás» apunta a esa misma
+URL de categoría. El eslabón de la sucursal sigue ahí, un escalón más arriba,
+con `href="/tienda-demo"`. Todo ello está en el HTML servido, antes de cualquier
+JavaScript. Hasta el 2026-08-31 este escenario decía que el penúltimo eslabón
+era la sucursal; lo cambia SP4, y que el «atrás» le siga a la categoría en vez
+de al catálogo lo zanja SP5 a favor de R2. Un producto **sin** categoría es
+E19.
 
 **E4 — el enlace directo sin historial se comporta igual.**
 Dado un comprador que llega a `/tienda-demo/p/{productSlug}` escaneando un QR
@@ -184,12 +236,22 @@ Dada una marca con dos sucursales y su propia URL `/{brandSlug}` en modo
 selector, entonces el rastro tiene un solo eslabón (el nombre de la marca, sin
 enlace) y no hay «atrás».
 
-**E13 — una sucursal cerrada tiene el mismo rastro que una abierta.**
+**E13 — una sucursal cerrada tiene el mismo rastro que una abierta, hasta donde
+llega el dato.**
 Dada `tienda-cerrada` (`status: SUSPENDED`), cuando el comprador abre
-`/tienda-cerrada/p/{cualquiera}`, entonces responde 200 con el aviso de cerrada
-y con el rastro completo, cuyo «atrás» lleva a `/tienda-cerrada` — que es
-justamente la pantalla que trae el teléfono y el WhatsApp del negocio
-(`src/components/store/StoreClosedNotice.tsx`).
+`/tienda-cerrada/carrito`, `/tienda-cerrada/checkout`, `/tienda-cerrada/buscar`,
+`/tienda-cerrada/sucursales` o `/tienda-cerrada/pedido/{code}`, entonces
+responde 200 con el aviso de cerrada y con **el mismo rastro** que tendría
+abierta (R6): esas pantallas no necesitan leer el catálogo para etiquetar sus
+eslabones.
+En cambio `/tienda-cerrada/p/{cualquiera}` y `/tienda-cerrada/c/{cualquiera}`
+**nunca leen el catálogo** cuando la tienda no está `PUBLISHED` —es HD11, y está
+escrito en el código: `src/app/[slug]/p/[productSlug]/page.tsx:106-131` y
+`src/app/[slug]/c/[categorySlug]/page.tsx:85-108`—, así que no existe el nombre
+del producto ni el de la categoría y su rastro **se detiene en la sucursal**
+(R20, I9). Sigue respondiendo 200 y sigue enseñando el teléfono y el WhatsApp
+del negocio, que es lo que importaba: los trae el propio contenido de la página
+(`src/components/store/StoreClosedNotice.tsx`), no el rastro.
 
 **E14 — sin JavaScript, funciona.**
 Dado un navegador con JavaScript deshabilitado, cuando el comprador pulsa
@@ -216,6 +278,46 @@ suspensivos (CSS), el texto completo sigue en el DOM —así el lector de pantal
 lo lee entero— y el rastro no empuja al contenido fuera de la pantalla ni obliga
 a desplazamiento horizontal.
 
+**E18 — la vista por categoría tiene su propio rastro.**
+Dada `/tienda-demo/c/bebidas` —la ruta que añadió F-026, ya en `passes: true`—,
+cuando se renderiza, entonces el rastro es `{M} › {S} › Bebidas`: el último
+eslabón lleva la etiqueta de `view.category.name`
+(`src/app/[slug]/c/[categorySlug]/page.tsx:120`) sin enlace y con
+`aria-current="page"`, el anterior es la sucursal con `href="/tienda-demo"`, y
+el «atrás» apunta a `/tienda-demo`, el catálogo completo. La fila de chips de
+`StoreCategoryNav` (`<nav aria-label="Categorías">`) se queda donde está y no
+cuenta como segundo control de vuelta (R21).
+
+**E19 — un producto sin categoría conserva el rastro corto.**
+Dado un producto cuyo `localCategoryId` es nulo —un estado real, no hipotético:
+un `CATEGORY`/`DELETE` del POS lo produce porque la clave ajena es
+`ON DELETE SET NULL` (`.agent/specs/F-026/spec.md:165-169`)—, cuando se abre su
+ficha, entonces `product.categorySlug` y `product.categoryName` valen `null`, el
+eslabón de categoría **no se pone** (R7, R19) y el rastro vuelve a ser
+`{M} › {S} › {Producto}` con el «atrás» en el catálogo. Es exactamente la misma
+condición con la que hoy se pinta o no el chip de la ficha
+(`src/app/[slug]/p/[productSlug]/page.tsx:194`): los dos campos, o ninguno.
+
+**E20 — la vista por categoría de una tienda cerrada no tiene eslabón de
+categoría.**
+Dada `/tienda-cerrada/c/{lo-que-sea}`, que responde **200** con el aviso de
+cerrada para cualquier `categorySlug`, exista o no —comprobado por F-026 en
+`.agent/specs/F-026/smoke.sh:203-204`—, cuando se renderiza, entonces el rastro
+es `{M} › {S}` con la sucursal como eslabón actual (sin `href`,
+`aria-current="page"`) y sin control de «atrás» si la marca tiene una sola
+sucursal (R2, R20). Es la única forma honesta: la página no leyó el catálogo, no
+tiene nombre que poner, y poner el `categorySlug` crudo de la URL sería inventar
+una etiqueta que el comerciante nunca escribió.
+
+**E21 — una categoría que ya no existe sale de la tienda por la puerta canónica.**
+Dada `/bodega-central-vedado/c/no-existe`, que hoy responde 404 dentro del marco
+de la tienda con `src/app/[slug]/c/[categorySlug]/not-found.tsx`, cuando se
+renderiza, entonces su salida al catálogo usa el slug **canónico**
+(`/bodega-central`) y ya no el `<Link href="..">` relativo de la línea 29, que
+devuelve al alias por el que se entró (I3, I10). `not-found.tsx` no recibe
+`params` en Next: el apaño que se elija tiene que ser **uno solo**, el mismo que
+para `src/app/[slug]/pedido/[code]/not-found.tsx` — lo cierra `sdd-architect`.
+
 ## Reglas de negocio
 
 - **R1 — el rastro es función de la URL resuelta, y de nada más.** Ni historial,
@@ -223,7 +325,18 @@ a desplazamiento horizontal.
   misma URL ven exactamente el mismo rastro.
 - **R2 — el «atrás» es el penúltimo eslabón.** Un rastro de un solo eslabón no
   dibuja «atrás». Una sola definición para las dos cosas que pidió el humano:
-  imposible que se contradigan.
+  imposible que se contradigan. **Desde SP4 esto tiene una consecuencia
+  concreta**: el penúltimo eslabón de la ficha de producto es la categoría, así
+  que el «atrás» de la ficha va a `/[slug]/c/[categorySlug]`, no al catálogo
+  completo. Entre R2 y la lectura literal de SP2 **gana R2** (RESUELTO por SP5),
+  y SP2 queda **matizado, no roto**: SP2 se escribió contra marcar la
+  procedencia en la URL (`?from=buscar&q=…`), que obligaría a leer
+  `searchParams` en la ficha, la volvería `ƒ` y rompería el criterio 1 de F-004
+  (I7). La categoría no incurre en nada de eso: es un segmento de ruta
+  determinista, sin `searchParams`, y F-026 dejó esa ruta pre-renderizada en `●`
+  (`.agent/specs/F-026/tests.md:70`). Volver desde una ficha a los **resultados
+  de búsqueda** sigue estando fuera, exactamente como decidió SP2. Un producto
+  sin categoría vuelve al catálogo por R19, que es la regla, no una excepción.
 - **R3 — todo `href` del rastro usa el slug canónico**, el que devuelve
   `canonicalSlug()` (`src/lib/publicSlug.ts:32`), nunca el slug pedido. Es lo
   que fija `docs/adr/0018-registro-de-slugs-y-slug-canonico.md`, y lo que evita
@@ -247,9 +360,15 @@ a desplazamiento horizontal.
   cada página.
 - **R10 — orden vertical fijo**: header (layout) → `BranchBar` cuando la haya →
   rastro → contenido. El rastro va siempre por encima del `<h1>` y siempre en el
-  mismo sitio, en las nueve pantallas.
+  mismo sitio, en las diez pantallas. En `/[slug]` y en `/[slug]/c/[categorySlug]`
+  la pila real es `BranchBar` → `StoreSearchBox` → `<h1>` → `StoreCategoryNav` →
+  rejilla (`src/app/[slug]/page.tsx:139-154`,
+  `src/app/[slug]/c/[categorySlug]/page.tsx:128-145`): el rastro entra por
+  encima de todo eso, y la fila de chips no se mueve.
 - **R11 — etiquetas.** Marca: `Storefront.name`. Sucursal: `Store.name`.
-  Producto: el nombre del producto. Búsqueda: `Buscar «{término normalizado}»`.
+  Categoría: `LocalCategory.name` tal y como llega en `categoryName` /
+  `view.category.name` — nunca el `categorySlug` de la URL (E20). Producto: el
+  nombre del producto. Búsqueda: `Buscar «{término normalizado}»`.
   Pedido: `Pedido {formatOrderCode(code)}`. Carrito: `Carrito`. Checkout:
   `Pagar`. Cambio de sucursal: `Cambiar de sucursal`. Todas en español
   (AGENTS.md § Idioma); el código, en inglés.
@@ -257,8 +376,17 @@ a desplazamiento horizontal.
   pulsar: eso es JavaScript. En pantallas estrechas se recorta cada eslabón
   (E17), no se esconde ninguno.
 - **R13 — `BreadcrumbList` solo donde se indexa.** En `/[slug]` (modo sucursal y
-  modo selector) y en `/[slug]/p/[productSlug]`. Nunca en `/carrito`,
-  `/checkout`, `/pedido/[code]`, `/sucursales` ni `/buscar`: las cinco declaran
+  modo selector), en `/[slug]/p/[productSlug]` y **también en
+  `/[slug]/c/[categorySlug]`**. Este último se comprobó en el código, no se
+  supuso: su `generateMetadata` pone `robots: { index: false }` **solo** en la
+  rama de tienda cerrada (`src/app/[slug]/c/[categorySlug]/page.tsx:50-52`); la
+  rama publicada devuelve título, descripción y `alternates.canonical` sin
+  ningún `robots`, con el comentario «indexable on purpose, no
+  `robots: { index: false }` — unlike `/[slug]/buscar`, which sets it
+  deliberately» (líneas 63-69). Corolario coherente con esa misma rama: una
+  tienda cerrada no lleva `BreadcrumbList` en ninguna de sus pantallas, porque
+  todas se declaran no indexables. Nunca en `/carrito`, `/checkout`,
+  `/pedido/[code]`, `/sucursales` ni `/buscar`: las cinco declaran
   `robots: { index: false }` hoy, y meter datos estructurados en una página que
   se pide no indexar es contradecirse en el mismo HTML.
 - **R14 — un solo control de vuelta por pantalla.** El «← Volver a {nombre}» de
@@ -276,10 +404,40 @@ a desplazamiento horizontal.
 - **R17 — área táctil de 44 px** (`min-h-11`) en cada eslabón enlazable, como el
   resto del storefront (`src/components/store/BranchBar.tsx:35`,
   `src/components/store/StoreSearchBox.tsx`).
-- **R18 — el rastro no rompe el estático.** `/[slug]` y
-  `/[slug]/p/[productSlug]` siguen marcándose `●` en el build. Cualquier
-  implementación que necesite `headers()`, `cookies()` o `searchParams` en esas
-  dos rutas está descartada por esta regla (I1, I7).
+- **R18 — el rastro no rompe el estático.** `/[slug]`,
+  `/[slug]/p/[productSlug]` y `/[slug]/c/[categorySlug]` siguen marcándose `●`
+  en el build —las tres lo están hoy (`.agent/specs/F-026/tests.md:70`)—.
+  Cualquier implementación que necesite `headers()`, `cookies()` o
+  `searchParams` en esas rutas está descartada por esta regla (I1, I7).
+- **R19 — sin categoría no hay eslabón de categoría.** Si
+  `product.categorySlug` o `product.categoryName` es `null`, la ficha pinta
+  `{M} › {S} › {Producto}` y su «atrás» vuelve a ser el catálogo (E19). Es R7
+  aplicado —«si un eslabón necesitara un dato que no está, el eslabón no se
+  pone»—, no una excepción a R2: el penúltimo eslabón sigue siendo el destino
+  del «atrás»; lo que cambia es cuál es el penúltimo. Nunca se inventa una
+  categoría «Sin categoría», que es la misma decisión que ya tomó F-026 para su
+  selector (`.agent/specs/F-026/spec.md:153-158`).
+- **R20 — en una tienda cerrada el rastro se detiene donde se acaba el dato.**
+  `/[slug]/p/[productSlug]` y `/[slug]/c/[categorySlug]` no leen el catálogo
+  cuando `Store.status !== "PUBLISHED"` (HD11), así que su último eslabón es la
+  sucursal, sin `href` y con `aria-current="page"` (E13, E20, I9). Las demás
+  pantallas cerradas conservan su rastro completo, y con ellas el criterio 7 de
+  `.agent/features.json`, que es sobre `/tienda-cerrada/carrito`. Esta regla
+  **matiza R6**, que se escribió sin mirar HD11.
+- **R21 — el rastro no es el selector de categorías, y no lo sustituye.**
+  `src/components/store/StoreCategoryNav.tsx` sigue tal cual en `/[slug]` y en
+  `/[slug]/c/[categorySlug]`. Que su chip «Todo el catálogo» apunte al mismo
+  sitio que el «atrás» del rastro no viola R14: uno es un **selector** —la misma
+  categoría de cosa que `BranchBar`— y el otro es la ubicación. Las dos
+  regiones son `<nav>` con `aria-label` distinto («Ruta» y «Categorías»), así
+  que un lector de pantalla las distingue por nombre.
+- **R22 — la etiqueta y el destino de la categoría salen de un solo sitio.**
+  Etiqueta: `categoryName` (ficha) o `view.category.name` (vista de categoría).
+  Destino: `storeCategoryPath(store.canonicalSlug, categorySlug)`
+  (`src/features/catalog/storeCategories.ts:78`), nunca una plantilla escrita a
+  mano — es lo que garantiza R3 sobre esta ruta y lo que hace que un cambio en
+  `CATEGORY_ROUTE_SEGMENT` (`src/constants/catalog.ts`) no deje el rastro
+  apuntando a una URL muerta.
 
 ## Casos límite y errores
 
@@ -313,6 +471,51 @@ a desplazamiento horizontal.
 - **Producto inexistente / slug de tienda inexistente.** El primero pasa a
   resolverse dentro de la tienda (E15). El segundo —`/tienda-que-no-existe`—
   no tiene tienda que dibujar y se queda con `src/app/not-found.tsx`, como hoy.
+- **Producto sin categoría.** Rastro de tres eslabones y «atrás» al catálogo
+  (E19, R19). No se inventa etiqueta ni se deja un eslabón vacío: `null` en
+  `categorySlug`/`categoryName` es un estado esperado, no un error.
+- **Categoría inexistente, mal formada, de otra sucursal o que se quedó sin
+  productos visibles.** Las cuatro dan 404 hoy, por diseño de F-026
+  (`src/app/[slug]/c/[categorySlug]/page.tsx:118`, «cero productos visibles ⇒
+  `notFound()`»; nunca una lista vacía). Ese 404 se pinta dentro del marco de la
+  tienda con `src/app/[slug]/c/[categorySlug]/not-found.tsx`, y lo único que
+  cambia aquí es su salida: slug canónico en vez de `href=".."` (E21, I10).
+- **Un producto visible cuya categoría no tiene vista.** No puede ocurrir por
+  construcción: `getStoreCategoryView` deriva la categoría de la misma lista de
+  productos visibles (`src/features/catalog/server/queries.ts:321-337`), así que
+  si el producto se ve, su categoría tiene al menos un producto y su URL
+  responde 200. El eslabón de categoría de la ficha nunca apunta a un 404
+  **dentro de la misma sucursal**. La excepción conocida y aceptada: los
+  resultados de búsqueda, que proyectan `categorySlug` desde otra consulta
+  (`src/features/catalog/server/search.ts:214-215`) — pero la búsqueda no pinta
+  eslabón de categoría (§ Datos y contrato).
+- **Nombre de categoría largo junto a nombre de producto largo, en 360 px.** La
+  ficha pasa a tener cuatro eslabones y dos de ellos pueden venir del POS sin
+  ningún tope de longitud. **E17 basta como regla** —recorte visual por CSS,
+  texto completo en el DOM, sin desplazamiento horizontal— y R12 sigue
+  prohibiendo colapsar eslabones. Lo que E17 no dice, y sigue sin decirse a
+  propósito, es **cómo se reparte el ancho** entre cuatro eslabones cuando dos
+  compiten: es aspecto, lo cierra `sdd-designer` (§ No decidido a propósito),
+  con el precedente de que el `<h1>` de la vista de categoría ya usa
+  `break-words` (`src/app/[slug]/c/[categorySlug]/page.tsx:136`).
+- **Renombrar o borrar una categoría en el POS con la ficha en caché.** No hace
+  falta invalidación nueva y esta vez se puede afirmar, no suponer: la etiqueta
+  del eslabón sale de `getStoreCatalog()`, la **misma** lectura cacheada que ya
+  pinta el producto, tageada con `storeCatalogTag(canonicalSlug)`
+  (`src/features/catalog/server/queries.ts:283-289`, `src/lib/cache.ts:29`) y
+  expirada por `revalidateStores()` (`src/lib/cache.ts:86-91`), que es lo que
+  dispara el handler de `CATEGORY` que F-026 reescribió. Y el nombre ya no puede
+  quedarse rancio por entrega desordenada: F-026 **cerró su I8** añadiendo la
+  guarda anti-rancia a `handleCategory`
+  (`.agent/specs/F-026/architecture.md:549-556`,
+  `src/features/sync/server/handlers/misc.ts`) precisamente porque «deja de dar
+  igual en cuanto el nombre es un elemento de navegación» — que es lo que este
+  feature acaba de convertirlo. La comprobación sigue siendo obligatoria: mismo
+  fallo fichado en
+  `.agent/playbook/revalida-solo-lo-que-se-escribe-no-lo-que-cambia-de-significado.md`.
+- **Alias de sucursal en la vista de categoría.** `/bodega-central-vedado/c/x`
+  responde 200 sin redirección (F-026, RD7) y su rastro habla en `bodega-central`
+  por R3 + R22, porque `storeCategoryPath()` recibe `store.canonicalSlug`.
 - **`/[slug]/sucursales` de una marca de una sola sucursal.** Ya responde 404
   (`src/app/[slug]/sucursales/page.tsx:33`). No cambia.
 - **Prefetch.** Tres `<Link>` más por página que Next puede prefetchear al
@@ -342,20 +545,40 @@ export type Trail = readonly [Crumb, ...Crumb[]];
 export function backTarget(trail: Trail): Crumb | null;
 ```
 
+**El tipo sigue bastando con SP4 dentro.** Un eslabón de categoría es un
+`Crumb` más —etiqueta y `href`—, no una clase distinta de eslabón: `backTarget`
+sigue siendo «el penúltimo» y el `BreadcrumbList` sigue siendo «la lista
+numerada». No hace falta ni un campo de tipo de eslabón ni una variante. Lo
+único que cambia es **quién construye el rastro de la ficha**: necesita recibir
+`categoryName` y `categorySlug`, los dos anulables, y no poner el eslabón si
+alguno falta (R19). Anulables **a la vez**: `CatalogProduct` los rellena de la
+misma fila (`src/features/catalog/server/queries.ts:275-276`), así que «uno sí y
+otro no» no es un estado alcanzable — y aun así el constructor exige los dos,
+como ya hace el chip de la ficha.
+
 Tabla del rastro por ruta (`{M}` = marca, presente solo si `branchCount > 1`,
 R4; `{S}` = sucursal):
 
-| Ruta                      | Rastro                                  |
-| ------------------------- | --------------------------------------- |
-| `/[slug]` selector        | `{M}`                                   |
-| `/[slug]` sucursal        | `{M}` › `{S}`                           |
-| `/[slug]/p/[productSlug]` | `{M}` › `{S}` › `{nombre del producto}` |
-| `/[slug]/buscar` sin `q`  | `{M}` › `{S}` › `Buscar`                |
-| `/[slug]/buscar?q=…`      | `{M}` › `{S}` › `Buscar «{término}»`    |
-| `/[slug]/carrito`         | `{M}` › `{S}` › `Carrito`               |
-| `/[slug]/checkout`        | `{M}` › `{S}` › `Carrito` › `Pagar`     |
-| `/[slug]/pedido/[code]`   | `{M}` › `{S}` › `Pedido {código}`       |
-| `/[slug]/sucursales`      | `{M}` › `{S}` › `Cambiar de sucursal`   |
+| Ruta                                                | Rastro                                                                        |
+| --------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `/[slug]` selector                                  | `{M}`                                                                         |
+| `/[slug]` sucursal                                  | `{M}` › `{S}`                                                                 |
+| `/[slug]/c/[categorySlug]`                          | `{M}` › `{S}` › `{Categoría}` — nuevo, SP4 (E18)                              |
+| `/[slug]/p/[productSlug]`                           | `{M}` › `{S}` › `{Categoría}` › `{nombre del producto}` — cambia con SP4 (E3) |
+| `/[slug]/p/[productSlug]` sin categoría             | `{M}` › `{S}` › `{nombre del producto}`, como antes de SP4 (E19, R19)         |
+| `/[slug]/buscar` sin `q`                            | `{M}` › `{S}` › `Buscar`                                                      |
+| `/[slug]/buscar?q=…`                                | `{M}` › `{S}` › `Buscar «{término}»`                                          |
+| `/[slug]/carrito`                                   | `{M}` › `{S}` › `Carrito`                                                     |
+| `/[slug]/checkout`                                  | `{M}` › `{S}` › `Carrito` › `Pagar`                                           |
+| `/[slug]/pedido/[code]`                             | `{M}` › `{S}` › `Pedido {código}`                                             |
+| `/[slug]/sucursales`                                | `{M}` › `{S}` › `Cambiar de sucursal`                                         |
+| `/[slug]/p/…` y `/[slug]/c/…` con la tienda cerrada | `{M}` › `{S}` — el dato no se lee (R20, E13, E20)                             |
+
+La búsqueda **no** gana eslabón de categoría aunque sus filas también traigan
+`categorySlug` (`src/features/catalog/server/search.ts:214-215`): sus resultados
+mezclan categorías, así que no hay una a la que colgarlos. La ficha a la que se
+llega desde la búsqueda sí lo tiene, porque el rastro es función de la URL de la
+ficha y de nada más (R1).
 
 Límites: cada `label` se recorta visualmente por CSS, no en el servidor (E17).
 Ninguna etiqueta se trunca en el DOM salvo el término de búsqueda, que ya llega
@@ -366,6 +589,13 @@ truncado a `SEARCH_TERM_MAX_LENGTH` desde F-021.
 Los 14 ya están en `.agent/features.json` bajo F-025 (marcados `[ya]`). Se
 verifican con `curl` contra `next start` y con el build, salvo C2, que necesita
 la etapa `--visual` del arnés.
+
+Los siete `[nuevo]` (15-21) salen de SP4 y **todavía no están en
+`.agent/features.json`**: ese archivo es del humano (reglas 3 y 4), así que este
+agente no lo toca. Se le proponen tal cual están escritos aquí; hasta que él los
+añada, `passes: true` de F-025 se decide con los 14 de siempre y estos siete se
+verifican igual, pero cuentan como comprobación extra, no como criterio del
+backlog.
 
 1. `[ya]` `curl -s http://localhost:3000/tienda-demo/p/<slug>` devuelve HTML que
    contiene un `<nav aria-label="Ruta">`, dentro de él un `<a href="/tienda-demo">`
@@ -406,6 +636,66 @@ la etapa `--visual` del arnés.
     mismo antes y después del cambio, medido con el log de consultas de Prisma y
     anotado en `tests.md` (R7).
 14. `[ya]` `bash .agent/verify.sh F-025 --full` termina con código 0.
+15. `[nuevo]` `curl -s http://localhost:3000/tienda-demo/c/bebidas` responde 200
+    y su HTML contiene un `<nav aria-label="Ruta">` que incluye
+    `href="/tienda-demo"` y, como último elemento de la lista, `Bebidas` con
+    `aria-current="page"` y **sin** `href`.
+16. `[nuevo]` `curl -s http://localhost:3000/tienda-demo/p/jugo-de-mango-1-l`
+    contiene, **dentro** del `<nav aria-label="Ruta">`, `href="/tienda-demo/c/bebidas"`,
+    y su último elemento es `Jugo de mango 1 L` con `aria-current="page"` y sin
+    `href`: tres eslabones, no dos (`tienda-demo` es marca de una sola sucursal,
+    R4).
+17. `[nuevo]` Tras enviar un `PRODUCT`/`UPDATE` firmado con
+    `"localCategoryId":null` sobre ese mismo producto —el mismo generador de
+    eventos que ya usa `.agent/specs/F-026/smoke.sh:140-145`—,
+    `GET /tienda-demo/p/jugo-de-mango-1-l` **no** contiene
+    `href="/tienda-demo/c/bebidas"` dentro del `<nav aria-label="Ruta">` y su
+    rastro queda en dos eslabones; reenviar el evento con su `localCategoryId`
+    original lo restaura (comprobación no destructiva, R19/E19).
+18. `[nuevo]` `GET /tienda-demo/c/bebidas` contiene un
+    `<script type="application/ld+json">` con `"@type":"BreadcrumbList"` y tres
+    `"position"`, y `GET /tienda-cerrada/c/<cualquier-cosa>` responde 200 y **no**
+    lo contiene (R13, R20).
+19. `[nuevo]` `npm run build` sigue marcando `/[slug]/c/[categorySlug]` como `●`
+    (SSG), no como `ƒ` — hoy lo es (`.agent/specs/F-026/tests.md:70`), y este
+    feature no puede degradarlo (R18).
+20. `[nuevo]` `GET /bodega-central-vedado/c/<categoría con stock>` responde 200 y
+    su `<nav aria-label="Ruta">` contiene `href="/bodega-central"` y **cero**
+    apariciones de `bodega-central-vedado` (R3, R22).
+21. `[nuevo]` `GET /bodega-central-vedado/c/no-existe` responde 404 y su HTML
+    contiene un enlace a `/bodega-central`, con **cero** apariciones de
+    `href=".."` y cero de `bodega-central-vedado` (E21, I10).
+
+**Ninguno de los 14 existentes queda invalidado por SP4**, comprobado uno a uno
+contra la redacción literal de `.agent/features.json`:
+
+- **El 1 sobrevive.** Pide «un `<a href="/tienda-demo">`» y «como último
+  elemento, el nombre del producto con `aria-current="page"` y sin href»: las
+  dos cosas siguen siendo ciertas con la categoría en medio, porque el eslabón
+  de la sucursal no desaparece, solo deja de ser el penúltimo. Lo que **no**
+  dice el criterio 1 —y por eso no se rompe— es que el penúltimo sea la
+  sucursal; eso lo decía E3 de este documento, y es lo que se ha corregido.
+- **El 2 sobrevive**: habla del «eslabón de la sucursal», que sigue existiendo y
+  sigue llevando a `/tienda-demo`. Deja de ser el control de «atrás», pero el
+  criterio nunca dijo que lo fuera.
+- **El 10 sobrevive** y se queda corto: sigue siendo cierto que la ficha lleva
+  `BreadcrumbList` y el carrito no. No cubre la ruta de categoría, que ahora
+  también es indexable — por eso el 18.
+- **El 12 sobrevive con una precaución de redacción**: «sin ningún `<a>` dentro»
+  hay que evaluarlo **dentro del `<nav aria-label="Ruta">`**, porque desde F-026
+  `/tienda-demo` monta además un `<nav aria-label="Categorías">` lleno de `<a>`
+  (`src/components/store/StoreCategoryNav.tsx`). El criterio ya dice «el rastro»,
+  así que se cumple; quien escriba el `smoke.sh` tiene que acotar el `grep` a
+  ese `<nav>` o medirá el otro.
+- **El 13 sobrevive y se vuelve más valioso**: el eslabón de categoría reusa
+  `product.categoryName`/`categorySlug` de la fila que la ficha ya carga, así
+  que el número de consultas no cambia. Si alguna implementación llamara a
+  `getStoreCategoryView` desde la ficha, este criterio la pillaría.
+
+Si el humano prefiere que el criterio 1 diga explícitamente que el penúltimo
+eslabón de la ficha es la categoría, eso **no** se reformula en
+`.agent/features.json` (regla 3): se añade como criterio nuevo. Aquí ese papel
+lo hace el 16.
 
 ## Incongruencias detectadas
 
@@ -453,6 +743,34 @@ la etapa `--visual` del arnés.
 - **I8 — «siempre» no es literalmente posible.** En `/tienda-demo` (marca de una
   sola sucursal) no hay ninguna página padre **dentro de la tienda**. RESUELTO
   por SP1: no se dibuja «atrás» en la raíz.
+- **I9 — una tienda cerrada no tiene con qué etiquetar su último eslabón, y este
+  documento daba por hecho que sí.** E13 decía «rastro completo» para
+  `/tienda-cerrada/p/{cualquiera}`, pero la ficha corta antes de leer el
+  producto cuando `Store.status !== "PUBLISHED"`
+  (`src/app/[slug]/p/[productSlug]/page.tsx:106-131`, HD11: «the closed notice,
+  WITHOUT reading the product — not even to decide it exists»), y F-026 copió
+  ese mismo patrón en la vista de categoría
+  (`src/app/[slug]/c/[categorySlug]/page.tsx:85-108`), que además responde 200
+  para **cualquier** `categorySlug`, exista o no. O se abre una consulta —contra
+  HD11 y contra R7— o el rastro se detiene en la sucursal. Se resuelve por
+  escrito con R20: se detiene. La mitad de la ficha es preexistente; la de la
+  categoría la trajo F-026.
+- **I10 — el defecto de I3 se ha duplicado mientras esta spec esperaba.**
+  `src/app/[slug]/c/[categorySlug]/not-found.tsx:29` vuelve a resolver la salida
+  con `<Link href="..">`. Su comentario razona bien la **profundidad** —desde
+  `/[slug]/c/[categorySlug]`, `..` cae en `/[slug]/`, y así es— pero no el
+  **slug**: la resolución relativa conserva el que pidió el navegador, así que
+  entrando por `bodega-central-vedado` la salida es `bodega-central-vedado`,
+  contra `src/lib/publicSlug.ts:1-12` y contra ADR 0018. Son ya dos archivos con
+  el mismo apaño (`src/app/[slug]/pedido/[code]/not-found.tsx:17`) y ninguno de
+  los dos puede leer `params`: la solución tiene que ser una, no dos (E21).
+- **I11 — el `depends_on` de F-025 no incluye F-026, y desde SP4 debería.**
+  `.agent/features.json` lista `["F-004","F-010","F-017","F-021"]`, pero el
+  eslabón de categoría se apoya en la ruta, el campo `categorySlug` y
+  `storeCategoryPath()` que trajo F-026. **No bloquea nada**: F-026 está en
+  `passes: true`, así que la regla 5 se cumple igual. Se anota porque el
+  `depends_on` es del humano (regla 4) y porque un lector futuro que reordene el
+  backlog necesita ver esa flecha.
 
 ## Huecos y preguntas al humano
 
@@ -473,19 +791,60 @@ Se reabre como cambio futuro si el registro de consultas de F-021
 mayoritaria — en ese momento se decide si vale la pena volver `ƒ` la ficha de
 producto para soportar `?from=`.
 
+> **Matizado por SP5 el 2026-08-31, no revocado.** Lo que SP2 cerró —no volver a
+> los **resultados de búsqueda**, no marcar la procedencia en la URL— sigue
+> cerrado exactamente igual. Lo que cambia es que «el catálogo completo» deja de
+> ser el destino del «atrás» de la ficha **cuando el producto tiene categoría**:
+> pasa a serlo su categoría, que es su padre jerárquico real y una URL estática
+> sin `searchParams` (R2, E3). Sin categoría, el destino vuelve a ser el
+> catálogo completo, tal cual dice SP2 (R19, E19).
+
 **SP3 — ¿a dónde apunta el eslabón de la marca: al selector o a «cambiar de
 sucursal»? RESUELTO por el humano el 2026-08-29: opción (a).**
 Al selector `/{brandSlug}`, que es el padre jerárquico real. `/[slug]/sucursales`
 sigue siendo la **acción** «Cambiar de sucursal» que enlaza `BranchBar` (con su
 aviso sobre el carrito) — no se funde con el selector.
 
+**SP4 — F-026 añadió `/[slug]/c/[categorySlug]` y dejó escrito que «la forma del
+breadcrumb la decide F-025; el dato está». Esta spec es anterior y dejó el
+eslabón de categoría fuera. ¿Qué alcance le damos? RESUELTO por el humano el
+2026-08-31: «Ambos: pantalla + eslabón».**
+Literal de la opción elegida: «La vista de categoría gana su rastro
+(`{M} › {S} › {Categoría}`) y la ficha de producto pasa a
+`{M} › {S} › {Categoría} › {Producto}`. El dato ya está en la página
+(`product.categorySlug`/`categoryName`, ya se pinta el chip en la línea 194), así
+que no cuesta consulta nueva. Habría que añadir 1-2 `acceptance_criteria` a
+`features.json` — ese archivo es tuyo.» Comprobado en el código antes de
+escribirlo: el chip está en `src/app/[slug]/p/[productSlug]/page.tsx:194-201`,
+los dos campos se rellenan en `src/features/catalog/server/queries.ts:275-276`
+desde la misma fila, y el `href` lo da
+`storeCategoryPath()` (`src/features/catalog/storeCategories.ts:78`). Los
+criterios que hacen falta son siete, no dos (15-21), porque además de las dos
+pantallas hay que fijar el caso sin categoría, el JSON-LD de la ruta nueva, el
+`●` del build, el alias y el 404 de categoría.
+
+**SP5 — con el eslabón de categoría dentro chocan R2 («atrás» es el penúltimo
+eslabón) y SP2 (desde una ficha siempre se vuelve al catálogo completo). ¿Cuál
+gana? RESUELTO por el humano el 2026-08-31: «Gana R2: atrás va a la categoría».**
+Literal de la opción elegida: «Una sola definición para rastro y atrás,
+imposible que se contradigan — que es justo por lo que R2 existe. SP2 se
+escribió contra el historial de búsqueda (`?from=`), no contra la categoría:
+volver a la categoría sigue siendo una URL determinista, estática y sin
+`searchParams`. Se anota SP2 como matizado, no como roto.» Escrito en R2 y en la
+nota de SP2; el producto **sin** categoría no es una excepción a esto sino una
+aplicación de R7, y vive en R19/E19.
+
 ## No decidido a propósito
 
-- **Un eslabón de categoría entre la sucursal y el producto.** Si F-026 avanza,
-  el rastro querrá `{M} › {S} › {Categoría} › {Producto}`. Aquí **no se
-  diseña**: lo único que se hace es que el rastro sea una **lista construida**,
-  no `JSX` escrito a mano por página, para que insertar eslabones sea añadir
-  elementos y no reescribir nueve pantallas.
+- **Un eslabón de _subcategoría_ entre la categoría y el producto.** El de
+  categoría ya está decidido (SP4) y esta viñeta deja de aplicarle. El segundo
+  nivel sigue sin decidirse porque **no hay dato**: `LocalCategory` no tiene
+  campo de padre y `GlobalCategory` solo tiene cuatro filas planas, como
+  verificó F-026, que dejó las subcategorías como feature futuro (su SP1). Sin
+  dato no hay eslabón (R7). Lo que sí se mantiene, y SP4 acaba de demostrar que
+  valía la pena, es que el rastro sea una **lista construida** y no `JSX`
+  escrito a mano por página: meter la categoría es añadir un elemento a la
+  lista, no reescribir diez pantallas.
 - **Conservar filtros y orden al volver** (`?orden=precio&marca=x` en el eslabón
   del catálogo). Mismo bloqueo que SP2: son `searchParams`. Lo cierra F-027.
 - **El aspecto exacto**: separador, tamaño, si el «atrás» es una fila propia
