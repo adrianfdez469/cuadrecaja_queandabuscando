@@ -4,6 +4,7 @@ import {
   compare,
   convert,
   formatMoney,
+  formatWholeMoney,
   isZero,
   money,
   MoneyError,
@@ -109,6 +110,27 @@ describe("formatMoney()", () => {
   it("falls back for an unknown currency code", () => {
     const output = formatMoney(money("10", "XYZ"), { locale: "en-US", symbol: "¤" });
     expect(output).toMatch(/10\.00/);
+  });
+});
+
+describe("formatWholeMoney() (F-027 RD4)", () => {
+  it("drops the fraction digits a whole amount never needs", () => {
+    const output = formatWholeMoney(money("350", "USD"), { locale: "en-US" });
+    expect(output).not.toContain(".00");
+    expect(output).toContain("350");
+  });
+
+  it("shares the SAME symbol as formatMoney for the same currency", () => {
+    const whole = formatWholeMoney(money("350", "USD"), { locale: "en-US" });
+    const withCents = formatMoney(money("350", "USD"), { locale: "en-US" });
+    const symbol = whole.replace(/[\d.,\s]/g, "");
+    expect(withCents.startsWith(symbol) || withCents.endsWith(symbol)).toBe(true);
+  });
+
+  it("never prints a fraction, on the primary path or the fallback one", () => {
+    const output = formatWholeMoney(money("10", "XYZ"), { locale: "en-US", symbol: "¤" });
+    expect(output).not.toContain(".");
+    expect(output).toMatch(/10/);
   });
 });
 

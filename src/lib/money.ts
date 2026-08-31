@@ -161,26 +161,52 @@ export function convert(value: Money, toCurrency: string, rates: RateTable): Mon
   return { amount: minorToString(converted), currency: toCurrency };
 }
 
+export type FormatMoneyOptions = { locale?: string; symbol?: string };
+
 /**
- * Format for display. Defaults to es-CU; falls back to a plain
- * "<symbol> <amount>" if the runtime lacks the currency in Intl.
+ * F-027 (design.md RD4, architecture.md § El importe entero de la UI): the
+ * ONE place that builds the `Intl.NumberFormat` for a shown amount and its
+ * fallback branch, so `formatMoney` and `formatWholeMoney` can never
+ * disagree on the symbol for the same currency — that is the whole point of
+ * sharing this helper instead of writing a second formatter next to it.
  */
-export function formatMoney(
+function formatWithIntl(
   value: Money,
-  options: { locale?: string; symbol?: string } = {},
+  digits: { minimumFractionDigits: number; maximumFractionDigits?: number },
+  options: FormatMoneyOptions,
 ): string {
   const { locale = "es-CU", symbol } = options;
   try {
     return new Intl.NumberFormat(locale, {
       style: "currency",
       currency: value.currency,
-      minimumFractionDigits: 2,
+      ...digits,
     }).format(Number(value.amount));
   } catch {
     const formatted = new Intl.NumberFormat(locale, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: digits.minimumFractionDigits,
+      maximumFractionDigits: digits.maximumFractionDigits ?? digits.minimumFractionDigits,
     }).format(Number(value.amount));
     return `${symbol ?? value.currency} ${formatted}`;
   }
+}
+
+/**
+ * Format for display. Defaults to es-CU; falls back to a plain
+ * "<symbol> <amount>" if the runtime lacks the currency in Intl.
+ */
+export function formatMoney(value: Money, options: FormatMoneyOptions = {}): string {
+  return formatWithIntl(value, { minimumFractionDigits: 2 }, options);
+}
+
+/**
+ * F-027 (RD4): the same amount with NO fraction digits — "$350", never
+ * "$350.00" — for values that are integers by construction (a URL's
+ * `precio_min`/`precio_max`, a price bracket's cut point). Shares
+ * `formatWithIntl` with `formatMoney`, which is what makes the symbol
+ * structurally unable to discrepar between a chip and a card. Never rounds
+ * anything in practice: every caller already passes an integer amount.
+ */
+export function formatWholeMoney(value: Money, options: FormatMoneyOptions = {}): string {
+  return formatWithIntl(value, { minimumFractionDigits: 0, maximumFractionDigits: 0 }, options);
 }
