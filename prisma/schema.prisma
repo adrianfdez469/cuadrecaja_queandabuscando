@@ -305,15 +305,24 @@ model LocalCategory {
   businessId       String
   externalId       String
   name             String
+  /// F-026: the slug is the identifier PUBLIC of the category in
+  /// `/[slug]/c/[categorySlug]`. Unique per business and frozen on the first
+  /// CREATE: renaming in the POS changes `name`, never this (R8/E7).
   slug             String
   color            String?
   globalCategoryId String?
+  /// F-026 (I8): stale-write guard, same shape as `Store.sourceUpdatedAt`.
+  /// Nullable because rows that already exist do not carry an origin mark:
+  /// the first delivery after the migration sets it, and from there it stays
+  /// protected.
+  sourceUpdatedAt  DateTime?
 
   business       Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
   globalCategory GlobalCategory? @relation(fields: [globalCategoryId], references: [id])
   products       StoreProduct[]
 
   @@unique([businessId, externalId])
+  @@unique([businessId, slug])
   @@index([globalCategoryId])
 }
 

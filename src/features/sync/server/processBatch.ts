@@ -69,6 +69,12 @@ export async function processCatalogBatch(
       if (outcome.touchedSlugValues) {
         for (const value of outcome.touchedSlugValues) touchedSlugValues.add(value);
       }
+      // F-026: a CATEGORY event's affected branches ride in the SAME
+      // `touchedStores` set `revalidateStores` already drains below — zero
+      // new invalidation calls, same as `touchedSlugValues` above.
+      if (outcome.touchedStoreSlugs) {
+        for (const slug of outcome.touchedStoreSlugs) touchedStores.add(slug);
+      }
       if (outcome.purgeObjectPrefix) purgePrefixes.add(outcome.purgeObjectPrefix);
 
       if (outcome.status === "processed") processed.push(event.eventId);

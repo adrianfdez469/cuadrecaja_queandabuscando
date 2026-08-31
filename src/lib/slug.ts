@@ -82,14 +82,25 @@ export function isValidSlug(slug: string): boolean {
  *
  * `taken` is a predicate rather than a Set so the caller can hit the database
  * without this module knowing about Prisma.
+ *
+ * F-026: `honorReserved` defaults to `true` so no existing caller changes
+ * behaviour. `RESERVED_SLUGS` exists to protect the FIRST level of a URL
+ * (`/tienda`, `/buscar`, …) from ever being reassigned to a brand or a
+ * branch; a category slug lives one level DOWN
+ * (`/[slug]/c/[categorySlug]`), where `/tienda/c/buscar` does not compete
+ * with `/tienda/buscar` at all (R11). A caller that scopes its own
+ * namespace below the first level — today only `handleCategory` — passes
+ * `honorReserved: false` so a category literally named "Buscar" keeps the
+ * slug `buscar` instead of the permanently-frozen `buscar-tienda`.
  */
 export async function uniqueSlug(
   input: string,
   taken: (candidate: string) => Promise<boolean> | boolean,
-  options: { fallback?: string } = {},
+  options: { fallback?: string; honorReserved?: boolean } = {},
 ): Promise<string> {
-  const base = slugify(input) || options.fallback || "item";
-  const seed = isReservedSlug(base) ? `${base}-tienda` : base;
+  const { fallback, honorReserved = true } = options;
+  const base = slugify(input) || fallback || "item";
+  const seed = honorReserved && isReservedSlug(base) ? `${base}-tienda` : base;
 
   if (!(await taken(seed))) return seed;
 
