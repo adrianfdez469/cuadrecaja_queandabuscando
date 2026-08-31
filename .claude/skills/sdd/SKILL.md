@@ -26,6 +26,28 @@ equivocada**. Si te descubres editando `src/`, delegaste mal.
 `plan.md` no lo escribe ninguno de los cinco: **lo escribes tú**, y es lo único
 que el humano firma antes de que se programe. El paso 2.5 explica cómo.
 
+## El explorador, que no es del equipo
+
+Hay un sexto agente y no es un especialista: `Explore`, que trae el propio
+Claude Code. Es de solo lectura, no escribe artefacto y no aparece en el ciclo —
+busca por el repo y te devuelve **dónde** está lo que preguntaste. Cubre lo que
+a ti se te da peor: saber qué archivos toca algo antes de repartirlo.
+
+Dos límites, y ninguno es opcional:
+
+- **Es tuyo y de nadie más.** Los subagentes no anidan: ningún `sdd-*` puede
+  llamarlo, y no le añadas la herramienta para que lo intente. Ellos ya leen y
+  buscan solos y su contexto es suyo; lo que ahorra el explorador es el **tuyo**.
+- **Devuelve punteros, no veredictos.** Hacia abajo pasas rutas
+  (`src/features/sync/server/inbox.ts:47`), nunca su resumen ascendido a hecho.
+  El agente que recibe la ruta abre el archivo y lo lee él. Un artefacto que
+  cita lo que dijo un explorador en vez de lo que dice el archivo es una spec
+  que nadie verificó, y este sistema entero existe para no tener de esas.
+
+Vale la pena al situarte en código que no conoces (paso 0) y al escribir el plan,
+para saber sobre qué archivos cae cada paso (paso 2.5). No vale la pena cuando ya
+sabes el archivo: eso se lee, no se delega.
+
 ## La memoria
 
 Vive en `.agent/`, es de archivos y sobrevive a la sesión: `specs/<ID>/` guarda
@@ -54,6 +76,11 @@ bash .agent/sdd.sh start <ID>   # entorno + artefactos + ciclos + próximo paso
 Lee `AGENTS.md`, el feature completo en `.agent/features.json` y —si existen— la
 bitácora y los artefactos. Si el feature no está empezado:
 `bash .agent/sdd.sh new <ID>` (que además avisa si algún `depends_on` no pasa).
+
+Si el feature toca una zona del código que no conoces, lánzale a `Explore` la
+pregunta concreta —«dónde se resuelve hoy el precio de un producto», «qué toca el
+endpoint de sync»— antes de decidir a quién llamas. Repartir sin saber qué
+archivos hay debajo es cómo se escriben planes con pasos que no existen.
 
 Si el humano trae una idea que no está en `features.json`: **no la añadas tú**,
 el backlog es suyo. `bash .agent/sdd.sh propose <slug>` le da un archivo en
@@ -86,6 +113,26 @@ Antes de llamar a alguien, comprueba que sus entradas están `listo`. Llamar al
 implementador con una spec en `borrador` con preguntas abiertas es la forma más
 cara de descubrir que estaba mal.
 
+**Qué se lanza en paralelo lo decide quién escribe, no cuánta prisa tengas.**
+Varias llamadas en el mismo mensaje:
+
+- **Los que solo leen: sí.** `architect ∥ designer` sobre la misma spec, varios
+  `Explore` con preguntas distintas, una revisión por dimensión sobre el mismo
+  diff. No hay nada que se pisen y el reloj lo agradece.
+- **Los que escriben en `src/`: no. Un implementador a la vez.** Dos
+  `sdd-implementer` en marcha —del mismo feature o de dos distintos— comparten
+  el sensor: cada etapa de `verify.sh` es un script del repo entero
+  (`npm run typecheck`, `lint`, `build`), así que el archivo a medio escribir de
+  uno hace fallar la verificación del otro y el fallo deja de ser atribuible. Y
+  si son del mismo feature comparten además el historial:
+  `.agent/runs/<ID>/journal.tsv` cuenta rachas de firma, y mezclar dos agentes
+  ahí dispara `ESTANCADO` falsos y tapa los de verdad. El corte a los tres
+  intentos es lo que impide que un agente insista para siempre; no lo rompas
+  para ganar diez minutos.
+- **`sdd-tester`: a medias.** Escribir pruebas rojas de criterios independientes
+  se reparte bien. Ejecutar el sensor, no. Que las escriban varios y las corra
+  uno.
+
 ### 2.5. El plan, y la firma del humano
 
 Entre planificar y programar hay una puerta, y la abres tú. Cuando `spec.md` y
@@ -96,6 +143,12 @@ es la traducción de tres documentos técnicos a lo que se va a hacer, en qué
 orden, sobre qué archivos, con qué se verifica cada paso y —la mitad que
 importa— **qué queda fuera**. Cada paso sale de una línea de un documento
 anterior; un paso que no sale de ninguno es alcance que te inventaste.
+
+El «sobre qué archivos» es la mitad que más se falsea, porque `architecture.md`
+habla de componentes y el plan tiene que hablar de rutas. Cuando la arquitectura
+no las nombra, no las deduzcas: pregúntaselas a `Explore` y escribe las que te
+devuelva. Un plan que el humano firma con archivos inventados le hace firmar
+otra cosa de la que va a leer.
 
 Luego se lo enseñas al humano. En una tanda, con la herramienta de preguntas de
 tu entorno para lo que haya que decidir, y con la lista de pasos y el «qué queda
