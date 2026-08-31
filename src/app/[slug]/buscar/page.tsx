@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { after } from "next/server";
 import { getStoreRates, requireStore } from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
+import { branchTrailStore, searchTrail } from "@/features/storefront/trail";
 import { searchStoreProducts, type StoreSearchResult } from "@/features/catalog/server/search";
 import { recordStoreSearchQuery } from "@/features/catalog/server/searchLog";
 import { clampSearchPage, normalizeSearchTerm } from "@/lib/searchTerm";
@@ -14,6 +15,7 @@ import { Alert } from "@/components/ui/Alert";
 import { StoreSearchBox } from "@/components/store/StoreSearchBox";
 import { StoreSearchResults } from "@/components/store/StoreSearchResults";
 import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
+import { StoreTrail } from "@/components/store/StoreTrail";
 import { BranchBar } from "@/components/store/BranchBar";
 
 /**
@@ -100,9 +102,11 @@ export default async function StoreSearchPage({
 
   // E14: no catalog/search query at all for a closed store.
   if (store.status !== "PUBLISHED") {
+    const trail = searchTrail(branchTrailStore(resolution, store), null);
     return (
       <>
-        <Container className="py-8">
+        <Container className="pt-4 pb-8">
+          <StoreTrail trail={trail} />
           <StoreClosedNotice
             storeName={store.name}
             disabledReasonCode={store.disabledReasonCode}
@@ -134,6 +138,7 @@ export default async function StoreSearchPage({
 
   // E10: no query, no search, no registered row.
   if (term === null) {
+    const trail = searchTrail(branchTrailStore(resolution, store), null);
     return (
       <>
         <BranchBar
@@ -142,7 +147,8 @@ export default async function StoreSearchPage({
           branchCount={resolution.branchCount}
           isOpen
         />
-        <Container className="py-8">
+        <Container className="pt-4 pb-8">
+          <StoreTrail trail={trail} />
           <StoreSearchBox
             storeSlug={store.canonicalSlug}
             storeName={store.name}
@@ -187,6 +193,7 @@ export default async function StoreSearchPage({
   // A page beyond the last one: `items` is empty but `totalCount` is not —
   // never the same screen as "no results" (design.md § Inventario).
   const outOfRange = !empty && result.items.length === 0;
+  const trail = searchTrail(branchTrailStore(resolution, store), result.term);
 
   return (
     <>
@@ -196,7 +203,8 @@ export default async function StoreSearchPage({
         branchCount={resolution.branchCount}
         isOpen
       />
-      <Container className="py-8">
+      <Container className="pt-4 pb-8">
+        <StoreTrail trail={trail} />
         <StoreSearchBox storeSlug={store.canonicalSlug} storeName={store.name} term={result.term} />
 
         {empty ? (

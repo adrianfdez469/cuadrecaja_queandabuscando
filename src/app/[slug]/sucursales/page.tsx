@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireResolution } from "@/features/storefront/server/resolve";
+import {
+  branchSwitchTrail,
+  branchTrailStore,
+  brandTrailStore,
+  type TrailStore,
+} from "@/features/storefront/trail";
 import { Alert } from "@/components/ui/Alert";
 import { Container } from "@/components/ui/Container";
+import { StoreTrail } from "@/components/store/StoreTrail";
 import { BranchList } from "@/components/store/BranchList";
 import { BranchSwitchNotice } from "@/features/cart/components/BranchSwitchNotice";
 
@@ -39,15 +45,25 @@ export default async function BranchSwitchPage({ params }: PageProps<"/[slug]/su
 
   const anyClosed = branches.some((branch) => branch.status !== "PUBLISHED");
 
+  // No `requireStore()` here on purpose (R7): `current` and `resolution`
+  // already carry every field a `TrailStore` needs — `brandName` comes off
+  // `resolution`, the same value this page already used for its own "←
+  // Volver" text, so this adds zero queries (architecture.md § Cómo se
+  // construye el rastro…, the two screens without a `StoreSummary` at hand).
+  const trailStore: TrailStore =
+    resolution.kind === "branch" && current
+      ? branchTrailStore(resolution, {
+          canonicalSlug: current.canonicalSlug,
+          name: current.name,
+          brandName: resolution.brandName,
+        })
+      : brandTrailStore(resolution);
+  const trail = branchSwitchTrail(trailStore);
+
   return (
-    <Container className="py-8">
-      <Link
-        href={current ? `/${current.canonicalSlug}` : `/${resolution.brandSlug}`}
-        className="text-fg-muted text-sm hover:underline"
-      >
-        {current ? `← Volver a ${current.name}` : "← Volver"}
-      </Link>
-      <h1 className="mt-1 text-2xl font-semibold">Cambiar de sucursal</h1>
+    <Container className="pt-4 pb-8">
+      <StoreTrail trail={trail} />
+      <h1 className="text-2xl font-semibold">Cambiar de sucursal</h1>
 
       <Alert tone="muted" className="mt-4">
         <p>Tu carrito no se mueve: cada sucursal guarda el suyo.</p>

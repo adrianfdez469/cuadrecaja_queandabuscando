@@ -7,6 +7,7 @@ import {
   requireStore,
 } from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
+import { branchTrailStore, brandTrailStore, catalogTrail } from "@/features/storefront/trail";
 import { publicEnv } from "@/lib/env";
 import { CATALOG_EAGER_IMAGE_COUNT } from "@/constants/media";
 import { Container } from "@/components/ui/Container";
@@ -14,6 +15,7 @@ import { Alert } from "@/components/ui/Alert";
 import { ProductCard } from "@/components/store/ProductCard";
 import { StoreCategoryNav } from "@/components/store/StoreCategoryNav";
 import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
+import { StoreTrail } from "@/components/store/StoreTrail";
 import { BranchBar } from "@/components/store/BranchBar";
 import { BranchList } from "@/components/store/BranchList";
 import { StoreSearchBox } from "@/components/store/StoreSearchBox";
@@ -79,8 +81,10 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
   // cliente: `BranchList` es de servidor.
   if (resolution.kind === "selector") {
     const allClosed = resolution.branches.every((branch) => branch.status !== "PUBLISHED");
+    const trail = catalogTrail(brandTrailStore(resolution));
     return (
-      <Container className="py-8">
+      <Container className="pt-4 pb-8">
+        <StoreTrail trail={trail} />
         <h1 className="text-2xl font-semibold">Elige tu sucursal</h1>
         <p className="text-fg-muted mt-2 max-w-2xl">
           {resolution.brandName} tiene {resolution.branches.length} sucursales. Los precios y los
@@ -105,9 +109,11 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
   // HD11: no catalog query at all for a closed store — one fewer query, and
   // no chance of ever leaking catalog data through this branch.
   if (store.status !== "PUBLISHED") {
+    const trail = catalogTrail(branchTrailStore(resolution, store));
     return (
       <>
-        <Container className="py-8">
+        <Container className="pt-4 pb-8">
+          <StoreTrail trail={trail} />
           <StoreClosedNotice
             storeName={store.name}
             disabledReasonCode={store.disabledReasonCode}
@@ -134,6 +140,8 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
     getStoreCategories(resolution),
   ]);
 
+  const trail = catalogTrail(branchTrailStore(resolution, store));
+
   return (
     <>
       <BranchBar
@@ -142,7 +150,8 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
         branchCount={resolution.branchCount}
         isOpen
       />
-      <Container className="py-8">
+      <Container className="pt-4 pb-8">
+        <StoreTrail trail={trail} jsonLd />
         <StoreSearchBox storeSlug={store.canonicalSlug} storeName={store.name} />
         <h1 className="mt-8 text-2xl font-semibold">Catálogo</h1>
         {store.description && <p className="text-fg-muted mt-2 max-w-2xl">{store.description}</p>}

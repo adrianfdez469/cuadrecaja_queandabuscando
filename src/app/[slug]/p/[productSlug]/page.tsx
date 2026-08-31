@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AVAILABILITY_LABEL, AVAILABILITY_TONE, isOrderable } from "@/lib/availability";
 import { resolvePrice, type ResolvedPrice } from "@/lib/pricing";
@@ -12,13 +11,14 @@ import {
   getStoreRates,
   requireStore,
 } from "@/features/catalog/server/queries";
-import { storeCategoryPath } from "@/features/catalog/storeCategories";
 import { requireResolution } from "@/features/storefront/server/resolve";
+import { branchTrailStore, catalogTrail, productTrail } from "@/features/storefront/trail";
 import { Badge } from "@/components/ui/Badge";
 import { Container } from "@/components/ui/Container";
 import { ResponsiveImage } from "@/components/ui/ResponsiveImage";
 import { AddToCartButton } from "@/features/cart/components/AddToCartButton";
 import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
+import { StoreTrail } from "@/components/store/StoreTrail";
 import { BranchBar } from "@/components/store/BranchBar";
 import { StoreSearchBox } from "@/components/store/StoreSearchBox";
 
@@ -111,9 +111,11 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
   // decide it exists. One fewer query, and no way to leak whether a given
   // productSlug exists in a store nobody can browse right now.
   if (store.status !== "PUBLISHED") {
+    const trail = catalogTrail(branchTrailStore(resolution, store));
     return (
       <>
-        <Container className="py-8">
+        <Container className="pt-4 pb-8">
+          <StoreTrail trail={trail} />
           <StoreClosedNotice
             storeName={store.name}
             disabledReasonCode={store.disabledReasonCode}
@@ -161,6 +163,7 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
   const winningPromotion = product.promotions.find((p) => p.id === resolved?.promotionId) ?? null;
 
   const image = product.imageUrls[0];
+  const trail = productTrail(branchTrailStore(resolution, store), product);
 
   return (
     <>
@@ -170,7 +173,8 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
         branchCount={resolution.branchCount}
         isOpen
       />
-      <Container className="pt-6">
+      <Container className="pt-4">
+        <StoreTrail trail={trail} jsonLd />
         <StoreSearchBox storeSlug={store.canonicalSlug} storeName={store.name} />
       </Container>
       <Container className="grid gap-8 py-8 md:grid-cols-2">
@@ -189,17 +193,11 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
         </div>
 
         <div>
-          {/* Paso 5b: enlace a la vista de la categoría — una línea, cero
-              JavaScript nuevo (`next/link` ya está en este árbol). */}
-          {product.categoryName && product.categorySlug && (
-            <Link
-              href={storeCategoryPath(store.canonicalSlug, product.categorySlug)}
-              className="text-fg-muted text-sm hover:underline"
-            >
-              {product.categoryName}
-            </Link>
-          )}
-          <h1 className="mt-1 text-2xl font-semibold">{product.name}</h1>
+          {/* PP1/DP1 (2026-08-31): la línea de categoría de encima del <h1>
+              se quitó — el eslabón de vuelta del rastro es ahora el único
+              sitio de la ficha donde se ve la categoría (mismo nombre,
+              mismo href). El <h1> pasa a ser el primer hijo de la columna. */}
+          <h1 className="text-2xl font-semibold">{product.name}</h1>
 
           <p className="text-brand mt-4 text-3xl font-semibold">
             {price ?? <span className="text-fg-muted">Consultar precio</span>}

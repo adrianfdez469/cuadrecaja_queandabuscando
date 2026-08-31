@@ -8,12 +8,14 @@ import {
   requireStore,
 } from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
+import { branchTrailStore, catalogTrail, categoryTrail } from "@/features/storefront/trail";
 import { publicEnv } from "@/lib/env";
 import { CATALOG_EAGER_IMAGE_COUNT } from "@/constants/media";
 import { Container } from "@/components/ui/Container";
 import { ProductCard } from "@/components/store/ProductCard";
 import { StoreCategoryNav } from "@/components/store/StoreCategoryNav";
 import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
+import { StoreTrail } from "@/components/store/StoreTrail";
 import { BranchBar } from "@/components/store/BranchBar";
 import { StoreSearchBox } from "@/components/store/StoreSearchBox";
 
@@ -83,9 +85,11 @@ export default async function StoreCategoryPage({ params }: PageProps<"/[slug]/c
   // cualquier categorySlug bajo una tienda SUSPENDED enseña el aviso, exista
   // o no (architecture.md § La petición de /[slug]/c/[categorySlug]).
   if (store.status !== "PUBLISHED") {
+    const trail = catalogTrail(branchTrailStore(resolution, store));
     return (
       <>
-        <Container className="py-8">
+        <Container className="pt-4 pb-8">
+          <StoreTrail trail={trail} />
           <StoreClosedNotice
             storeName={store.name}
             disabledReasonCode={store.disabledReasonCode}
@@ -122,6 +126,7 @@ export default async function StoreCategoryPage({ params }: PageProps<"/[slug]/c
     products.length === 1
       ? `1 producto en ${store.name}.`
       : `${products.length} productos en ${store.name}.`;
+  const trail = categoryTrail(branchTrailStore(resolution, store), category);
 
   return (
     <>
@@ -131,7 +136,8 @@ export default async function StoreCategoryPage({ params }: PageProps<"/[slug]/c
         branchCount={resolution.branchCount}
         isOpen
       />
-      <Container className="py-8">
+      <Container className="pt-4 pb-8">
+        <StoreTrail trail={trail} jsonLd />
         <StoreSearchBox storeSlug={store.canonicalSlug} storeName={store.name} />
         <h1 className="mt-8 text-2xl font-semibold break-words">{category.name}</h1>
         <p className="text-fg mt-2">{countLabel}</p>

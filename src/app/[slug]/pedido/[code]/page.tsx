@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formatOrderCode } from "@/lib/orderCode";
 import { getOrderByCode, orderWhatsappUrl } from "@/features/orders/server/read";
@@ -12,6 +13,8 @@ import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { requireStore } from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
+import { branchTrailStore, orderTrail } from "@/features/storefront/trail";
+import { StoreTrail } from "@/components/store/StoreTrail";
 import { buildCustomerContactUrl } from "@/features/orders/whatsapp";
 import { buildProposalDiff } from "@/features/orders/proposalDiff";
 import { isProposalExpired } from "@/features/orders/deadline";
@@ -122,8 +125,11 @@ export default async function OrderPage({
         })
       : [];
 
+  const trail = orderTrail(branchTrailStore(resolution, store), order.code);
+
   return (
-    <Container className="max-w-2xl py-8 lg:max-w-4xl">
+    <Container className="max-w-2xl pt-4 pb-8 lg:max-w-4xl">
+      <StoreTrail trail={trail} />
       {/* HD11: an order already placed stays fully visible even after the
           store closes — the receipt is the shopper's, not the storefront's. */}
       {store.status !== "PUBLISHED" && (
@@ -296,9 +302,9 @@ export default async function OrderPage({
         Actualiza la página para ver el estado más reciente.
       </p>
 
-      <a href={`/${store.canonicalSlug}`} className="text-brand mt-8 inline-block underline">
+      <Link href={`/${store.canonicalSlug}`} className="text-brand mt-8 inline-block underline">
         Seguir comprando
-      </a>
+      </Link>
     </Container>
   );
 }
