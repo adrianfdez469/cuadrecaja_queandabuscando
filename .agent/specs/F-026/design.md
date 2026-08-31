@@ -1,7 +1,7 @@
 ---
 feature: F-026
 agente: sdd-designer
-actualizado: 2026-08-31T04:52:43Z
+actualizado: 2026-08-31T05:49:51Z
 estado: listo
 ---
 
@@ -20,6 +20,14 @@ estado: listo
 > **TP1, que levantó `sdd-tester`, también está resuelto:** el umbral de dos o
 > más categorías es **solo de `/[slug]`**; la vista de categoría dibuja la fila
 > **siempre**. Está escrito como regla en § Inventario, en las dos pantallas.
+>
+> **Y una corrección de este documento, no de la implementación:** el fallo de
+> V5 que levantó `sdd-tester` era una tensión real de § Decisión 1 —el asomo que
+> señala «esto se desliza» es lo que impide que el navegador arrastre a la vista
+> el chip enfocado—. Se cierra **con CSS puro**, `scroll-padding-inline: 50%`,
+> comprobado en el navegador contra siete repartos de anchos. Está en § El asomo
+> tenía un precio escondido, en § Componentes de UI, en § Accesibilidad (donde
+> el ciclo 1 afirmaba algo falso), como **RD9** y partiendo V5 en V5a y V5b.
 >
 > **Lo que el humano ya cerró y aquí no se reabre:** SP2 (ruta propia y estática
 > por categoría, no un panel ni un query param), SP3 (slug legible y congelado
@@ -172,14 +180,77 @@ Lo que se gana con la mezcla: a 360 px el selector cuesta **52 px** fijos, entre
 categorías = 3 filas a 768, 2 filas a 1280). Y a 360 px la fila se sangra a los
 bordes de la pantalla (`-mx-4 px-4`), de modo que el chip siguiente asoma
 cortado en el borde derecho: es el indicio de «esto se desliza», medido en
-`3 chips enteros + 1 asomando` con los nombres reales de la base de desarrollo.
+`3 chips enteros + 1 asomando` con los nombres reales de la base de desarrollo
+(«Todo el catálogo», «Alimentos» y «Aseo» enteros, **«Bebidas» asomando 29 px de
+sus 79**, y «Panadería» entera fuera de pantalla).
 
 **Lo que se pierde, dicho sin adornos:** a 360 px, con más de tres categorías,
 las demás están detrás de un deslizamiento. No hay JavaScript que lleve la fila
-hasta el chip activo, y **no lo va a haber**: sería `"use client"` en algo que
-renderiza catálogo. Lo compensa que en la vista de categoría el `<h1>` es el
-nombre de la categoría, justo encima de la fila: el «dónde estoy» nunca depende
-de que el chip activo se vea.
+hasta el chip **activo** al cargar la página, y **no lo va a haber**: sería
+`"use client"` en algo que renderiza catálogo. Lo compensa que en la vista de
+categoría el `<h1>` es el nombre de la categoría, justo encima de la fila: el
+«dónde estoy» nunca depende de que el chip activo se vea.
+
+### El asomo tenía un precio escondido, y se paga con una línea de CSS
+
+Esto es una corrección del ciclo 1, escrita aquí porque el error estaba aquí.
+`sdd-tester` tradujo V5 a `.agent/specs/F-026/visual.mjs` y **falló**, cinco
+corridas iguales: al tabular, el chip que **asoma** se queda asomando. La causa
+no es la implementación, es la tensión de este mismo apartado: Chromium arrastra
+a la vista un elemento enfocado solo cuando está **totalmente fuera** de la
+región útil del scrollport; un chip que asoma está _parcialmente_ dentro, así
+que el navegador decide que no hay nada que hacer. El asomo que da la señal de
+«esto se desliza» es exactamente lo que desarma el arrastre nativo. Y
+`scrollIntoView()` está cerrado por R9.
+
+**Hay una tercera vía y es CSS puro:
+`scroll-padding-inline: 50%` en el contenedor desplazable.** `scroll-padding`
+encoge la «región de visionado óptimo» que el navegador usa para decidir si un
+elemento enfocado está dentro; al 50 % por cada lado esa región **colapsa a un
+punto en el centro**, así que ningún chip puede estar «parcialmente dentro»:
+todos cuentan como fuera, y el navegador centra el que recibe el foco. Es una
+propiedad de scroll, **no de maquetación**: no mueve nada, no cambia el ancho de
+nada y **no toca el asomo**.
+
+Comprobado en el navegador, no razonado. Ejecuté el bucle de tabulación de V5
+sobre `/tienda-demo` a 360 px —con las 19 categorías que la base tenía en ese
+momento— y además contra siete repartos de anchos sintéticos, para no atar la
+decisión a los nombres de hoy. Chips que acaban **fuera** de la ventana al
+enfocarse, sobre el total:
+
+| Reparto de anchos                         | sin nada | `2rem` | `4rem` | `6rem` | `9.5rem` | **`50%`** |
+| ----------------------------------------- | -------- | ------ | ------ | ------ | -------- | --------- |
+| Los 4 reales de hoy                       | 1 / 5    | 1 / 5  | 0      | 0      | 0        | **0**     |
+| Los 4 reales + 15 nombres largos (226 px) | 9 / 20   | 9 / 20 | 7 / 20 | 0      | 0        | **0**     |
+| Todos estrechos (60 px)                   | 2 / 13   | 0      | 0      | 0      | 0        | **0**     |
+| Estrecho y ancho alternando (60 / 153 px) | 4 / 9    | 4 / 9  | 4 / 9  | 4 / 9  | 3 / 9    | **0**     |
+| Todos medianos (93 px)                    | 3 / 13   | 0      | 0      | 0      | 0        | **0**     |
+| Uno monstruoso de 266 px entre otros      | 2 / 7    | 2 / 7  | 1 / 7  | 1 / 7  | 1 / 7    | **0**     |
+
+**Por eso el valor es `50%` y no un número fijo de `rem`.** Un valor fijo
+funciona con los nombres de hoy y falla con otros: la fila «estrecho y ancho
+alternando» sigue rompiéndose hasta con 9.5 rem, porque cuánto padding hace
+falta depende del ancho de cada chip y del siguiente. Los nombres los pone el
+POS del comerciante y no los controla nadie de este lado, así que el único valor
+defendible es el que **no depende de los datos**. `50%` lo es.
+
+**Lo que sigue sin poder cumplirse, y queda aceptado por escrito:** un chip **más
+ancho que el propio scrollport** —un nombre de categoría de unos 45 caracteres
+en un móvil de 360 px— no puede quedar entero dentro de la ventana por mucho que
+la fila se desplace. Es una imposibilidad física, no un fallo del mecanismo: no
+hay CSS ni JavaScript que la arregle, solo truncar el nombre, que R13 prohíbe.
+Está anotado como el límite de V5.
+
+Efecto secundario, medido y aceptado: con la región colapsada, la fila se mueve
+en **casi cada** `Tab` en vez de solo cuando el chip está fuera (18 movimientos
+en 20 chips, frente a 8). Para quien navega con teclado es una mejora, no un
+ruido: el chip enfocado queda **siempre centrado**, lo que es más predecible que
+«a veces salta y a veces no». Y no afecta a quien desliza con el dedo: el
+desplazamiento manual no pasa por este algoritmo.
+
+A partir de `sm:` la propiedad es **inerte**, porque la fila deja de ser
+contenedor desplazable (`sm:overflow-visible`). Verificado a 768 px:
+`overflow-x: visible`, nada que desplazar, ningún cambio de comportamiento.
 
 **Dónde se sitúa exactamente.** Inmediatamente **encima de la rejilla**, en las
 dos pantallas, sin excepción. Es lo que hace que las dos se sientan la misma
@@ -382,7 +453,8 @@ lo que dicen § Tokens y § Accesibilidad):
 
 ```
 <nav aria-label="Categorías"
-     class="mt-6 -mx-4 overflow-x-auto px-4 py-1 sm:mx-0 sm:overflow-visible sm:px-0">
+     class="mt-6 -mx-4 overflow-x-auto px-4 py-1 scroll-px-[50%]
+            sm:mx-0 sm:overflow-visible sm:px-0">
   <ul class="flex gap-2 sm:flex-wrap">
     <li class="shrink-0"> <a …> </li>
   </ul>
@@ -401,6 +473,15 @@ vertical, así que sin él el anillo de foco (`outline-offset-2`, 2 px de grosor
 se corta por arriba y por abajo dentro de la fila desplazable. 4 px de relleno
 es exactamente lo que hace falta. Es el bug clásico de este patrón y por eso
 está escrito aquí y no descubierto en revisión.
+
+El `scroll-px-[50%]` **tampoco**: es lo que hace que el navegador arrastre a la
+vista el chip que recibe el foco, y sin él V5 no pasa (§ El asomo tenía un
+precio escondido). **Compilado y comprobado en este proyecto**: con la Tailwind 4
+de aquí, `scroll-px-[50%]` produce exactamente `scroll-padding-inline: 50%`. Si
+alguna vez dejara de hacerlo, la propiedad literal —`[scroll-padding-inline:50%]`
+— dice lo mismo y `npm run check:theme` no se queja de ninguna de las dos (su
+aviso es para un valor que sea una propiedad personalizada desnuda, no para un
+porcentaje).
 
 ---
 
@@ -484,11 +565,18 @@ con CSS: nombre de la tienda (cabecera) → enlace de `BranchBar`, si lo hay →
 categoría 1 … categoría n** → tarjeta 1 … tarjeta n. Las categorías quedan antes
 que los productos, que es el orden en que se decide.
 
-**El desplazamiento a 360 px es accesible con teclado sin nada añadido:** los
-chips son enfocables, y el navegador desplaza el contenedor al llegar a cada uno
-(`Tab` los va trayendo a la vista). No hace falta `tabindex` en el contenedor
-—WCAG 2.1.1 lo pide solo cuando el contenido desplazable no tiene nada
-enfocable dentro— y añadirlo metería una parada de tabulación vacía.
+**El desplazamiento a 360 px es accesible con teclado, pero NO «sin nada
+añadido» — el ciclo 1 se equivocó aquí.** Los chips son enfocables y no hace
+falta `tabindex` en el contenedor —WCAG 2.1.1 lo pide solo cuando el contenido
+desplazable no tiene nada enfocable dentro, y añadirlo metería una parada de
+tabulación vacía—. Lo que este documento daba por regalado y no lo era es el
+**arrastre a la vista**: el navegador no mueve la fila si el chip enfocado ya
+asomaba, que es justo el caso que este diseño provoca a propósito. Lo paga
+`scroll-padding-inline: 50%` en el contenedor, y está explicado con sus
+mediciones en § El asomo tenía un precio escondido. Sin esa línea, un usuario de
+teclado enfoca un chip que se queda cortado por el borde de la pantalla; con
+ella, el chip enfocado queda **siempre centrado**. Verificado hacia adelante con
+`Tab` y hacia atrás con `Shift+Tab`, los 19 chips, sin un solo fallo.
 
 **Anillo de foco, incluido el caso que se rompe solo.** `outline-offset-2` deja
 el anillo **fuera** de la caja del chip, sobre el fondo de la página: por eso el
@@ -666,6 +754,7 @@ para que se concilien en el `plan.md`, no para que se descubran programando.
 | **RD6** | La fila es **un solo componente** montado por las dos páginas, nunca por el `layout` (§ Flujo). Mismo argumento que F-021 escribió para `StoreSearchBox`                                                                                                                                                                                             |
 | **RD7** | Todo `href` que dibuje esta pantalla usa `canonicalSlug`, como ya hace `BranchBar`. Un alias vivo sigue respondiendo 200 y el `<link rel="canonical">` apunta a la canónica                                                                                                                                                                          |
 | **RD8** | La vista de categoría **no** lleva `robots: { index: false }` (R12), al revés que `/[slug]/buscar`. En `src/app/sitemap.ts` **no** entra: DP3 se resolvió en (b) el 2026-08-31. Indexable sí, entrada propia en el sitemap no                                                                                                                        |
+| **RD9** | **Para quien implemente, añadido tras el fallo de V5:** el contenedor desplazable de la fila lleva `scroll-px-[50%]` (`scroll-padding-inline: 50%`), sin el cual el chip enfocado se queda cortado al tabular. Es una línea, es CSS, no cambia maquetación y no toca el asomo. Motivo y mediciones en § El asomo tenía un precio escondido           |
 
 ---
 
@@ -676,19 +765,20 @@ sea de este checkout** (ver arriba: el 3000 estaba ocupado por otra copia del
 repo) y la base de desarrollo, que trae 28 productos en 4 categorías bajo
 `tienda-demo`.
 
-| #       | Qué                                                                                                                                                                                                               | Dónde                          |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| **V1**  | A 360 px, la fila mide 52 px, muestra `Todo el catálogo` activo y las cuatro categorías, y la cuarta asoma cortada en el borde derecho de la pantalla, no en el margen                                            | `/tienda-demo`                 |
-| **V2**  | A 768 y 1280 px la fila envuelve y **no** hay barra de desplazamiento horizontal en ninguna parte                                                                                                                 | `/tienda-demo`                 |
-| **V3**  | En la vista de «Bebidas»: el `<h1>` dice `Bebidas`, la línea de conteo cuadra con el número de tarjetas, y el chip `Bebidas` está relleno y con `aria-current="page"`                                             | vista de categoría             |
-| **V4**  | La rejilla de la vista de categoría es **píxel a píxel** la del catálogo a los tres anchos: mismas columnas, mismo `gap`, misma tarjeta                                                                           | los dos                        |
-| **V5**  | Con el teclado: `Tab` recorre búsqueda → `Todo el catálogo` → categorías → tarjetas, el anillo de foco se ve **entero** en cada chip (incluido el activo) y a 360 px la fila arrastra el chip enfocado a la vista | `/tienda-demo` y una categoría |
-| **V6**  | En `tienda-dos` (marca verde, `radius: "round"`), los chips salen casi cápsula y el activo sale verde. En oscuro los inactivos siguen distinguiéndose del fondo                                                   | `/tienda-dos`                  |
-| **V7**  | Con el JavaScript desactivado, tocar un chip carga la vista con sus productos en el HTML (criterio 14)                                                                                                            | `/tienda-demo`                 |
-| **V8**  | Una tienda `SUSPENDED` no dibuja fila, ni en el catálogo ni en la vista de categoría                                                                                                                              | tienda cerrada                 |
-| **V9**  | El 404 de categoría conserva la cabecera de la tienda y **su enlace lleva a `/tienda-demo`** (con o sin redirección 308). Es el punto frágil de RD4                                                               | una categoría inventada        |
-| **V10** | Con 15 categorías sembradas a mano, a 360 px la fila sigue midiendo 52 px y la primera fila de productos sigue viéndose sin bajar                                                                                 | `/tienda-demo`                 |
-| **V11** | Una tienda cuyos productos no tienen categoría no dibuja fila **ninguna**, ni con un solo chip                                                                                                                    | tienda sin categorías          |
+| #       | Qué                                                                                                                                                                                                                                                                                                                                                                                                                                                | Dónde                          |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| **V1**  | A 360 px la fila mide 52 px, y ese alto no cambia con el número de categorías. Con la fixture limpia se ven **enteros** `Todo el catálogo` (activo), `Alimentos` y `Aseo`; **`Bebidas` asoma cortada** (29 px de sus 79) **en el borde derecho de la pantalla, no en el margen**; y `Panadería` queda fuera, que es el sentido de que la fila se deslice                                                                                           | `/tienda-demo`                 |
+| **V2**  | A 768 y 1280 px la fila envuelve y **no** hay barra de desplazamiento horizontal en ninguna parte                                                                                                                                                                                                                                                                                                                                                  | `/tienda-demo`                 |
+| **V3**  | En la vista de «Bebidas»: el `<h1>` dice `Bebidas`, la línea de conteo cuadra con el número de tarjetas, y el chip `Bebidas` está relleno y con `aria-current="page"`                                                                                                                                                                                                                                                                              | vista de categoría             |
+| **V4**  | La rejilla de la vista de categoría es **píxel a píxel** la del catálogo a los tres anchos: mismas columnas, mismo `gap`, misma tarjeta                                                                                                                                                                                                                                                                                                            | los dos                        |
+| **V5a** | Con el teclado, el orden: `Tab` recorre búsqueda → `Buscar` → `Todo el catálogo` → las categorías en el orden de la fila → tarjetas, sin parada vacía, y el anillo de foco se ve **entero** en cada chip, incluido el activo (el `py-1` es lo que lo salva del recorte de `overflow-x`)                                                                                                                                                            | `/tienda-demo` y una categoría |
+| **V5b** | Con el teclado, el arrastre: a 360 px, **cada chip enfocado queda entero dentro de la ventana**, hacia adelante con `Tab` y hacia atrás con `Shift+Tab`. Es lo que compra `scroll-padding-inline: 50%`, y sin esa línea V5b falla en el chip que asoma. **Excepción aceptada por escrito:** un chip más ancho que el scrollport (≈45 caracteres a 360 px) no puede caber entero; ahí lo exigible es que se vea su inicio y su anillo, no que quepa | `/tienda-demo` y una categoría |
+| **V6**  | En `tienda-dos` (marca verde, `radius: "round"`), los chips salen casi cápsula y el activo sale verde. En oscuro los inactivos siguen distinguiéndose del fondo                                                                                                                                                                                                                                                                                    | `/tienda-dos`                  |
+| **V7**  | Con el JavaScript desactivado, tocar un chip carga la vista con sus productos en el HTML (criterio 14)                                                                                                                                                                                                                                                                                                                                             | `/tienda-demo`                 |
+| **V8**  | Una tienda `SUSPENDED` no dibuja fila, ni en el catálogo ni en la vista de categoría                                                                                                                                                                                                                                                                                                                                                               | tienda cerrada                 |
+| **V9**  | El 404 de categoría conserva la cabecera de la tienda y **su enlace lleva a `/tienda-demo`** (con o sin redirección 308). Es el punto frágil de RD4                                                                                                                                                                                                                                                                                                | una categoría inventada        |
+| **V10** | Con 15 categorías sembradas a mano, a 360 px la fila sigue midiendo 52 px y la primera fila de productos sigue viéndose sin bajar                                                                                                                                                                                                                                                                                                                  | `/tienda-demo`                 |
+| **V11** | Una tienda cuyos productos no tienen categoría no dibuja fila **ninguna**, ni con un solo chip                                                                                                                                                                                                                                                                                                                                                     | tienda sin categorías          |
 
 ---
 

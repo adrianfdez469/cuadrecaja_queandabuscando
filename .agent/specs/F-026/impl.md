@@ -253,3 +253,16 @@ tocar código ni el criterio. Comprobado: `grep -rn "use client"` sobre
 `src/app/[slug]/c`, `StoreCategoryNav.tsx`, `storeCategories.ts`,
 `storeCategories.test.ts` y `src/constants/catalog.ts` sale vacío;
 `bash .agent/verify.sh F-026` → 0 (intento 22).
+
+### Ajuste posterior — V5b, `scroll-px-[50%]` (RD9)
+
+Añadida `scroll-px-[50%]` al `<nav>` de `StoreCategoryNav.tsx` (el contenedor
+desplazable), con un comentario que explica que no es decorativa — la línea y
+el valor salen de `design.md` § «El asomo tenía un precio escondido, y se paga
+con una línea de CSS» y RD9, incluida la razón de por qué es `50%` y no un
+`rem` fijo. Comprobado antes de aplicar, con el CLI de Tailwind 4 de este
+proyecto (`@tailwindcss/postcss` vía `postcss`, no de memoria): compila a
+exactamente `scroll-padding-inline: 50%`. `bash .agent/verify.sh F-026
+--visual` → 0 (los once V*, incluidos V5a y V5b); `bash .agent/verify.sh F-026
+--full` → 0. Base de desarrollo sin cambios netos (28 `StoreProduct`, 5
+`LocalCategory`, 10 `Store`, 306 pedidos, 19 `CanonicalProduct`).

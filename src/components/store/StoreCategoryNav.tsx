@@ -26,7 +26,12 @@ export function StoreCategoryNav({
   return (
     <nav
       aria-label="Categorías"
-      className="-mx-4 mt-6 overflow-x-auto px-4 py-1 sm:mx-0 sm:overflow-visible sm:px-0"
+      // `scroll-px-[50%]` (design.md § "El asomo tenía un precio escondido",
+      // RD9) is not decorative either: Chromium only drags a focused chip
+      // into view when it is fully outside the scrollport, and the chip
+      // that peeks by design (the "this scrolls" cue) is only partially
+      // outside, so without this the keyboard focus ring gets stuck mid-chip.
+      className="-mx-4 mt-6 scroll-px-[50%] overflow-x-auto px-4 py-1 sm:mx-0 sm:overflow-visible sm:px-0"
     >
       <ul className="flex gap-2 sm:flex-wrap">
         <li className="shrink-0">
