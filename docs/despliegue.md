@@ -69,12 +69,24 @@ ningún test: solo deja la búsqueda haciendo scans secuenciales en producción.
 
 1. Crear el bucket. Por defecto se llama `store-media`
    (`SUPABASE_STORAGE_BUCKET`).
-2. `SUPABASE_SERVICE_ROLE_KEY` y `STORAGE_JWT_SECRET` en el entorno.
+2. `NEXT_PUBLIC_SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` en el entorno. Son
+   las dos —y las únicas dos— que comprueba `storageAvailability()`, en ese
+   orden.
 
-Si falta cualquiera de las dos, subir una imagen devuelve **503 con un motivo**,
-no un 500 — está diseñado así en `src/lib/supabase/storage.ts`. El resto de la
-app sigue funcionando, así que **este fallo es silencioso hasta que alguien
-intenta subir una foto**.
+**`STORAGE_JWT_SECRET` no va aquí.** Aparece en `.env.example` y en
+`docker-compose.yml`, pero **la aplicación no lo lee nunca**: es de los
+emuladores locales de Storage y Auth, y lo genera
+`node scripts/storage-dev-keys.mjs --write`. Ponerlo en producción no hace nada,
+y buscarlo cuando fallan las imágenes hace perder el tiempo — el motivo real
+será uno de los dos de arriba.
+
+Si falta cualquiera de las dos, subir una imagen devuelve **503 con un motivo**
+(`missing_supabase_url` o `missing_service_role_key`), no un 500 — está diseñado
+así en `src/lib/supabase/storage.ts`. El resto de la app sigue funcionando, así
+que **este fallo es silencioso hasta que alguien intenta subir una foto**.
+
+`NEXT_PUBLIC_SUPABASE_URL` la comparte con §3: es el mismo proyecto de Supabase
+para las imágenes y para la cuenta del comprador.
 
 Las imágenes se derivan **al subir**, no por petición
 ([ADR 0022](adr/0022-imagenes-derivadas-al-subir.md)), y se sirven desde el CDN.
@@ -261,6 +273,20 @@ Y las dos que no se ven con `curl`, que es justo la lección que dejó F-019:
 
 - **Token de un negocio**: `npm run mint:token -- <externalId>` otra vez. Efecto
   inmediato, aislado a ese negocio, y hay que entregar el valor nuevo.
+
+  **⚠ Rotar corta el sync de ese negocio hasta que cuadrecaja guarde el valor
+  nuevo.** `Business.syncTokenHash` es una columna, así que el token viejo deja
+  de resolver **en el mismo instante** en que se escribe el nuevo: no hay
+  solape posible. Durante la ventana, el outbox de ese negocio se acumula
+  —`intentos++`, se recupera solo— y sus pedidos no se recogen. Nada se pierde,
+  pero la tienda queda con precios y disponibilidad rancios mientras dure.
+
+  Por eso, salvo que el token esté comprometido y haya que cortar **ya**: avisa
+  primero al equipo de cuadrecaja, acuña con alguien al otro lado listo para
+  guardarlo, y comprueba después con el `curl` autenticado de §9. Si es un
+  incidente, rota primero y avisa mientras: la ventana es el precio de cerrar la
+  fuga.
+
 - **`SSO_JWT_SECRET`**: se cambia **a la vez** en los dos lados o el admin deja
   de poder entrar.
 - **`CRON_SECRET`**: al cambiarlo, los crons empiezan a dar 401 y **nada avisa**.
