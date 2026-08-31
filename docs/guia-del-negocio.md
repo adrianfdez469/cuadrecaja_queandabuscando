@@ -325,6 +325,23 @@ Gana lo que ves. Avísale al equipo técnico y que se corrija aquí — este
 documento se mantiene junto con el resto de la documentación, y una guía que
 miente es peor que no tenerla.
 
+### Para quien construye (la regla que mantiene esto honesto)
+
+Cuando un feature cambie **lo que una persona tiene que hacer** —un paso nuevo,
+un paso que desaparece, algo que se movía de sitio entre Cuadre de Caja y el
+panel, un ajuste que deja de necesitar al equipo técnico— **esta guía se
+actualiza en el mismo ciclo**, no cuando alguien se queje.
+
+Es la misma regla que [`despliegue.md`](despliegue.md) lleva escrita en su
+cabecera, y por el mismo motivo: los tres documentos que describen estos flujos
+—esta guía, [`flujos-cc-qab.html`](flujos-cc-qab.html) y
+[`sync-contract.md`](sync-contract.md)— cuentan lo mismo a distinta altura. Si
+solo se actualiza uno, los otros dos empiezan a mentir sin que nada falle.
+
+Los dos cambios que ya se ven venir: **fusionar F-019** (la modificación de un
+pedido deja de estar «terminada pero sin publicar») y **construir el alta
+automática de la clave de conexión**, que borraría el paso 2 de la parte 1.
+
 Documentos hermanos, más técnicos:
 [`sync-contract.md`](sync-contract.md) (lo que construye Cuadre de Caja),
 [`despliegue.md`](despliegue.md) (poner el sistema en producción) y
