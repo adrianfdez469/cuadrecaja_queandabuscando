@@ -75,6 +75,7 @@ function storeEvent(eventId: string) {
 
 beforeEach(() => {
   handleStore.mockReset();
+  handleCategory.mockReset();
   recordBatch.mockReset();
   markProcessed.mockReset().mockResolvedValue(undefined);
   markSkipped.mockReset().mockResolvedValue(undefined);
@@ -223,5 +224,75 @@ describe("processCatalogBatch() — drains purgeObjectPrefix AFTER revalidating 
     const summary = await processCatalogBatch(CALLER, events);
 
     expect(summary.results[0]).toEqual({ eventId: "evt-a", status: "processed" });
+  });
+});
+
+/**
+ * F-026 paso 3: `handleCategory` reports `touchedStoreSlugs` (plural — a
+ * category is of the BUSINESS, its products live in N branches), and it
+ * rides in the SAME `revalidateStores` call as every other handler's
+ * `touchedStoreSlug` — no new invalidation call, no second `Set`.
+ */
+function categoryEvent(eventId: string, operation: "CREATE" | "UPDATE" | "DELETE") {
+  return {
+    eventId,
+    entity: "CATEGORY" as const,
+    operation,
+    occurredAt: "2026-08-31T00:00:00.000Z",
+    payload: {
+      categoryId: `ext-${eventId}`,
+      businessId: "business-1",
+      name: "Bebidas",
+      color: null,
+      updatedAt: "2026-08-31T00:00:00.000Z",
+    },
+  };
+}
+
+describe("processCatalogBatch() — folds a CATEGORY handler's touchedStoreSlugs into revalidateStores (F-026)", () => {
+  it("a CATEGORY/DELETE that affected two branches fires ONE deduplicated invalidation", async () => {
+    const events = [categoryEvent("evt-del", "DELETE")];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+    handleCategory.mockResolvedValue({
+      status: "processed",
+      touchedStoreSlugs: ["tienda-uno", "tienda-dos"],
+    });
+
+    await processCatalogBatch(CALLER, events);
+
+    const slugArg = [...revalidateStores.mock.calls[0][0]].sort();
+    expect(slugArg).toEqual(["tienda-dos", "tienda-uno"]);
+    expect(revalidateStores).toHaveBeenCalledOnce();
+  });
+
+  it("merges touchedStoreSlugs from a CATEGORY event with another handler's touchedStoreSlug in the SAME call", async () => {
+    const events = [storeEvent("evt-store"), categoryEvent("evt-cat", "UPDATE")];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+    handleStore.mockResolvedValue({
+      status: "processed",
+      touchedStoreSlug: "bodega-dos",
+      touchedBrandSlug: "bodega-uno",
+    });
+    handleCategory.mockResolvedValue({
+      status: "processed",
+      touchedStoreSlugs: ["tienda-uno"],
+    });
+
+    await processCatalogBatch(CALLER, events);
+
+    expect(revalidateStores).toHaveBeenCalledOnce();
+    const slugArg = [...revalidateStores.mock.calls[0][0]].sort();
+    expect(slugArg).toEqual(["bodega-dos", "tienda-uno"]);
+  });
+
+  it("a CATEGORY/CREATE with no product yet triggers no invalidation at all", async () => {
+    const events = [categoryEvent("evt-create", "CREATE")];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+    handleCategory.mockResolvedValue({ status: "processed" });
+
+    await processCatalogBatch(CALLER, events);
+
+    expect([...revalidateStores.mock.calls[0][0]]).toEqual([]);
+    expect([...revalidateSlugs.mock.calls[0][0]]).toEqual([]);
   });
 });

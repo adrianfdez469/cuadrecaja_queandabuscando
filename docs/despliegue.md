@@ -63,6 +63,22 @@ declarados en `prisma/schema.prisma`, **en cualquier diff, tenga que ver o no**.
 Quítalos del `migration.sql` antes de aplicarlo. Aplicarlo sin mirar no rompe
 ningún test: solo deja la búsqueda haciendo scans secuenciales en producción.
 
+**F-026 — `20260831033437_local_category_slug_unique` lleva un backfill que
+puede fallar ruidosamente.** Aditiva (columna `sourceUpdatedAt` y
+`@@unique([businessId, slug])` en `LocalCategory`) y ya viaja en
+`prisma/migrations/`, así que `npm run db:deploy` la aplica sola como
+cualquier otra — no hace falta repetir a mano el procedimiento de
+`--create-only` que la generó. Lo que sí necesita mirarse: si el entorno tiene
+dos categorías del mismo negocio cuyo nombre slugifica igual (algo que en
+desarrollo, al cerrar F-026, no ocurría — 0 colisiones verificadas), el
+backfill de desambiguación del propio `migration.sql` las reordena solo; si
+no converge en diez pasadas, la migración aborta con
+`LocalCategory slug backfill did not converge in 10 passes` en vez de dejar la
+base sin el unique. Ese error se resuelve consultando las colisiones a mano
+(`SELECT "businessId", "slug", count(*) FROM "LocalCategory" GROUP BY 1, 2
+HAVING count(*) > 1`) y no reintentando `db:deploy` sin más — la causa es un
+dato real, no un fallo transitorio.
+
 ---
 
 ## 2. Almacenamiento de imágenes

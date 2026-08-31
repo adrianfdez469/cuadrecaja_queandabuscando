@@ -14,6 +14,17 @@ export type HandlerOutcome = {
   /** StoreProduct id whose detail page must be invalidated. */
   touchedProductId?: string;
   /**
+   * F-026 (R7, E13, E14): CANONICAL slugs of every branch whose catalog cache
+   * must be invalidated because a `CATEGORY` event changed a category that
+   * has (or, on a `DELETE`, had) at least one visible product in that
+   * branch. Plural — unlike `touchedStoreSlug` above, a category belongs to
+   * the BUSINESS and its products can live in N branches (I10). Only
+   * `handleCategory` sets this today; `processBatch.ts` folds it into the
+   * SAME `Set` that already feeds `revalidateStores`, so this never adds a
+   * new invalidation call.
+   */
+  touchedStoreSlugs?: readonly PublicSlug[];
+  /**
    * F-017 ALTA fix (tests.md § Fallos encontrados #3): additional raw slug
    * VALUES — the brand's own slug and every sibling's own slug — whose
    * cached RESOLUTION (`slugTag`) may have just changed meaning even though
