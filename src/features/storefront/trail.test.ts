@@ -10,6 +10,7 @@ import {
   catalogTrail,
   categoryTrail,
   checkoutTrail,
+  filterTrail,
   orderTrail,
   productTrail,
   searchTrail,
@@ -147,6 +148,14 @@ describe("storeTrail() — one test per row of the screen table", () => {
     expect(trail).toEqual([
       { label: "Tienda Demo", href: "/tienda-demo" },
       { label: "Buscar «jugo»", href: null },
+    ]);
+  });
+
+  it("F-027 plan.md paso 10. /[slug]/catalogo → {M} › {S} › Filtrar y ordenar", () => {
+    const trail = filterTrail(singleBranchStore);
+    expect(trail).toEqual([
+      { label: "Tienda Demo", href: "/tienda-demo" },
+      { label: "Filtrar y ordenar", href: null },
     ]);
   });
 

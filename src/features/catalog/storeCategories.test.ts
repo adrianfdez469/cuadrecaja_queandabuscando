@@ -30,6 +30,7 @@ function product(overrides: Partial<CatalogProduct> = {}): CatalogProduct {
     priceOverride: null,
     priceOverrideCurrency: null,
     promotions: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
 }

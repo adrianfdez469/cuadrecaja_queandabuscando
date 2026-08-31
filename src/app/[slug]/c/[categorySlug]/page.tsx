@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   getPublishedBranchesForParams,
@@ -9,6 +10,8 @@ import {
 } from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
 import { branchTrailStore, catalogTrail, categoryTrail } from "@/features/storefront/trail";
+import { catalogEntryHref, shouldOfferCatalogEntryLink } from "@/features/catalog/catalogFilters";
+import { CATALOG_ROUTE_SEGMENT } from "@/constants/catalog";
 import { publicEnv } from "@/lib/env";
 import { CATALOG_EAGER_IMAGE_COUNT } from "@/constants/media";
 import { Container } from "@/components/ui/Container";
@@ -139,7 +142,23 @@ export default async function StoreCategoryPage({ params }: PageProps<"/[slug]/c
       <Container className="pt-4 pb-8">
         <StoreTrail trail={trail} jsonLd />
         <StoreSearchBox storeSlug={store.canonicalSlug} storeName={store.name} />
-        <h1 className="mt-8 text-2xl font-semibold break-words">{category.name}</h1>
+        <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold break-words">{category.name}</h1>
+          {/* I-A3: pre-filtrado a ESTA categoría — no un enlace suelto al
+              catálogo entero. design.md § Decisión 4/6. */}
+          {shouldOfferCatalogEntryLink(products.length) && (
+            <Link
+              href={catalogEntryHref(
+                `/${store.canonicalSlug}/${CATALOG_ROUTE_SEGMENT}`,
+                category.slug,
+              )}
+              prefetch={false}
+              className="text-brand min-h-11 content-center font-medium"
+            >
+              Filtrar y ordenar
+            </Link>
+          )}
+        </div>
         <p className="text-fg mt-2">{countLabel}</p>
 
         <StoreCategoryNav

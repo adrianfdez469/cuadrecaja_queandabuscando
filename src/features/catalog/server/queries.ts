@@ -11,6 +11,12 @@ import {
   productsOfCategory,
   type StoreCategory,
 } from "@/features/catalog/storeCategories";
+import {
+  applyCatalogFilters,
+  type CatalogFilterContext,
+  type CatalogFilterResult,
+  type CatalogFilterState,
+} from "@/features/catalog/catalogFilters";
 
 /** Only what these reads actually need: a `BranchResolution` satisfies it,
  *  and so does a lighter object built once for `generateStaticParams`. */
@@ -79,6 +85,16 @@ export type CatalogProduct = {
   /** R28: candidates already filtered by vigency and scope, from the SAME
    *  cached read — `resolvePrice` (lib/pricing.ts) picks the winner. */
   promotions: readonly AppliedPromotion[];
+  /**
+   * F-027 (architecture.md § Modelo de datos, ADR 0025): projected in BOTH
+   * readers of this type — here and in
+   * `src/features/catalog/server/search.ts` — so a recorte that needs a new
+   * predicate breaks the compilation of the other reader instead of
+   * silently drifting. ISO string, never a `Date`: this type crosses
+   * `unstable_cache`, which serializes to JSON, and a string compares
+   * chronologically as-is regardless of what the deserializer revives.
+   */
+  createdAt: string;
 };
 
 type StoreSummaryWithoutCanonical = Omit<StoreSummary, "canonicalSlug">;
@@ -221,6 +237,7 @@ async function loadCatalog(storeId: string): Promise<CatalogProduct[]> {
         priceOverride: true,
         priceOverrideCurrency: true,
         localCategoryId: true,
+        createdAt: true,
         localCategory: { select: { name: true, slug: true } },
         canonicalProduct: { select: { description: true, imageUrl: true } },
       },
@@ -278,6 +295,7 @@ async function loadCatalog(storeId: string): Promise<CatalogProduct[]> {
     syncedPriceCurrency: product.syncedPriceCurrency,
     priceOverride: product.priceOverride?.toString() ?? null,
     priceOverrideCurrency: product.priceOverrideCurrency,
+    createdAt: product.createdAt.toISOString(),
   }));
 }
 
@@ -333,6 +351,26 @@ export const getStoreCategoryView = cache(
     if (!category) return null;
 
     return { category, products };
+  },
+);
+
+/**
+ * F-027 (architecture.md § Componentes, § Flujo de datos): the ONE entry
+ * point `/[slug]/catalogo` and the filtered path of `/[slug]/buscar` both
+ * call. Envoltorio fino sobre `getStoreCatalog` (already cached, already
+ * tagged) + `applyCatalogFilters` (pure) — zero new Prisma query and zero
+ * new cache entry, same ADR 0025 as `getStoreCategories`/`getStoreCategoryView`.
+ * Wrapped in React's `cache()` so a page body and its own `generateMetadata`
+ * never redo the same filter/sort/paginate pass within one request.
+ */
+export const getFilteredStoreCatalog = cache(
+  async (
+    branch: StoreRef,
+    state: CatalogFilterState,
+    context: CatalogFilterContext,
+  ): Promise<CatalogFilterResult> => {
+    const catalog = await getStoreCatalog(branch);
+    return applyCatalogFilters(catalog, state, context);
   },
 );
 

@@ -44,8 +44,19 @@ export type StoreSearchInput = {
   /** Already normalized by `normalizeSearchTerm` (R9). */
   term: string;
   /** 1-based. Absent or out of range is clamped to `[1, STORE_SEARCH_MAX_PAGE]`
-   *  by `clampSearchPage`, so a raw `p` never reaches SQL. */
+   *  by `clampSearchPage`, so a raw `p` never reaches SQL. Ignored when
+   *  `mode` is `"all"`. */
   page?: number;
+  /**
+   * F-027 (architecture.md § La petición de /[slug]/buscar, punto 8).
+   * `"page"` (the default): today's three-layer SQL `LIMIT`/`OFFSET`,
+   * untouched — criterio 9 re-runs F-021's own criteria 1 and 2 down this
+   * exact path. `"all"` pulls every candidate, bounded by construction to
+   * `STORE_SEARCH_LAYER_MAX * 2 + STORE_SEARCH_EXPANSION_MAX` rows, and
+   * never paginates in SQL: the caller (`applyCatalogFilters`) is the one
+   * that filters, orders end-to-end and slices the page in memory.
+   */
+  mode?: "page" | "all";
 };
 
 export type StoreSearchResult = {
@@ -92,6 +103,11 @@ type SearchRawRow = {
    *  across its two readers (AGENTS.md § Prohibiciones: no duplicar
    *  interfaces). */
   categorySlug: string | null;
+  /** F-027 (ADR 0025): the twin projection of `CatalogProduct.createdAt` in
+   *  `src/features/catalog/server/queries.ts` — the mechanism that makes a
+   *  recorte's new predicate a compile error in the OTHER reader if it is
+   *  forgotten here. */
+  createdAt: Date | null;
   canonicalDescription: string | null;
   canonicalImageUrl: string | null;
   layer: number | null;
@@ -111,6 +127,7 @@ type SearchProductRow = SearchRawRow & {
   featured: boolean;
   syncedPrice: Prisma.Decimal;
   syncedPriceCurrency: string;
+  createdAt: Date;
   layer: number;
 };
 
@@ -125,13 +142,21 @@ function isProductRow(row: SearchRawRow): row is SearchProductRow {
  * `EXPLAIN (FORMAT JSON)` instead of keeping a second, hand-copied SQL
  * string that could silently drift from what the code actually runs.
  */
+/** F-027: the bound on how many candidates "all" mode can ever pull —
+ *  `STORE_SEARCH_LAYER_MAX` twice (lexical + fuzzy) plus the category
+ *  expansion, exactly the ceiling architecture.md § Decisión point 8
+ *  measures against (424 today). Built from the SAME constants the three
+ *  CTEs below already `LIMIT` by, never a number of its own. */
+const ALL_CANDIDATES_LIMIT = STORE_SEARCH_LAYER_MAX * 2 + STORE_SEARCH_EXPANSION_MAX;
+
 export function buildStoreSearchSql(input: {
   storeId: string;
   term: string;
   page: number;
+  mode?: "page" | "all";
 }): Prisma.Sql {
-  const pageSize = STORE_SEARCH_PAGE_SIZE;
-  const offset = (input.page - 1) * pageSize;
+  const pageSize = input.mode === "all" ? ALL_CANDIDATES_LIMIT : STORE_SEARCH_PAGE_SIZE;
+  const offset = input.mode === "all" ? 0 : (input.page - 1) * pageSize;
 
   // The twin expression of `storeProductSearchVectorOf` (R2): if one
   // changes, the other has to change too. Reused in `ts_rank` and in the
@@ -211,6 +236,7 @@ export function buildStoreSearchSql(input: {
                    sp."availability", sp."featured", sp."localCategoryId",
                    sp."syncedPrice", sp."syncedPriceCurrency",
                    sp."priceOverride", sp."priceOverrideCurrency",
+                   sp."createdAt",
                    lc."name"        AS "categoryName",
                    lc."slug"        AS "categorySlug",
                    cp."description" AS "canonicalDescription",
@@ -234,12 +260,13 @@ export function buildStoreSearchSql(input: {
 }
 
 export async function searchStoreProducts(input: StoreSearchInput): Promise<StoreSearchResult> {
+  const mode = input.mode ?? "page";
   const page = clampSearchPage(input.page);
-  const pageSize = STORE_SEARCH_PAGE_SIZE;
-  const offset = (page - 1) * pageSize;
+  const pageSize = mode === "all" ? ALL_CANDIDATES_LIMIT : STORE_SEARCH_PAGE_SIZE;
+  const offset = mode === "all" ? 0 : (page - 1) * pageSize;
 
   const [rows, promotionRows] = await Promise.all([
-    prisma.$queryRaw<SearchRawRow[]>(buildStoreSearchSql({ ...input, page })),
+    prisma.$queryRaw<SearchRawRow[]>(buildStoreSearchSql({ ...input, page, mode })),
     // R28-style precedence (same as `loadCatalog`): read inside the SAME
     // parallel pass as the search, never a second, separately-cached lookup.
     prisma.promotion.findMany({
@@ -302,6 +329,7 @@ export async function searchStoreProducts(input: StoreSearchInput): Promise<Stor
       syncedPriceCurrency: row.syncedPriceCurrency,
       priceOverride: row.priceOverride?.toString() ?? null,
       priceOverrideCurrency: row.priceOverrideCurrency,
+      createdAt: row.createdAt.toISOString(),
       promotions,
       layer: row.layer as StoreSearchLayer,
     };
