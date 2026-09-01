@@ -186,21 +186,23 @@ jobs:
       - name: Mint local dev keys (STORAGE_JWT_SECRET, anon key, service key)
         run: node scripts/storage-dev-keys.mjs --write
 
-      - name: Start the Storage + Auth emulators
-        # `--wait` cannot cover the whole file. `storage-bucket-init` is a
-        # one-shot: it seeds the bucket and exits, and compose counts a service
-        # that FINISHES as a failure of the wait — even on exit 0. It bites
-        # intermittently, depending on whether the container is done before
-        # compose starts watching, which is why this passed for weeks and then
-        # failed twice in a row on a docs-only diff.
+      - name: Start the Storage + Auth + Realtime emulators
+        # `--wait` cannot cover the whole file. `storage-bucket-init` AND
+        # (F-020) `realtime-init` are one-shots: they apply their own setup
+        # and exit, and compose counts a service that FINISHES as a failure
+        # of the wait — even on exit 0. It bites intermittently, depending on
+        # whether the container is done before compose starts watching,
+        # which is why this passed for weeks and then failed twice in a row
+        # on a docs-only diff (architecture.md DA6, last paragraph).
         #
-        # So: bring everything up, then wait only on the services meant to STAY
-        # up. The list is derived from the compose file itself, not written out
-        # here, so a service added later is covered without touching this.
+        # So: bring everything up, then wait only on the services meant to
+        # STAY up. The list is derived from the compose file itself, not
+        # written out here, so a service added later is covered without
+        # touching this.
         run: |
           docker compose up -d
           docker compose up -d --wait --wait-timeout 180 \
-            $(docker compose config --services | grep -vx storage-bucket-init)
+            $(docker compose config --services | grep -vxE 'storage-bucket-init|realtime-init')
 
       - name: The storage bucket was seeded
         # Asserted on its own, which the single `--wait` never really did: it
@@ -214,6 +216,15 @@ jobs:
             exit 1
           fi
 
+      - name: The Realtime RLS policy was applied (F-020, criterio 12)
+        run: |
+          code=$(docker wait queandabuscando-realtime-init)
+          if [ "$code" != "0" ]; then
+            echo "realtime-init exited with $code"
+            docker compose logs realtime-init
+            exit 1
+          fi
+
       - name: Migrations apply cleanly to an empty database
         run: npx prisma migrate deploy
 
@@ -221,3 +232,6 @@ jobs:
 
       - name: Auth emulator smoke (criterios 1, 2, 3, 8)
         run: bash .agent/verify.sh F-028 --only smoke
+
+      - name: Realtime bell smoke (F-020 criterios 1, 2, 3, 4, 8, 9, 10, 11, 13)
+        run: bash .agent/verify.sh F-020 --only smoke
