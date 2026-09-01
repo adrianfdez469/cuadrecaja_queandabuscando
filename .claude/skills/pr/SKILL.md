@@ -204,6 +204,10 @@ explícitamente en vez de dejar que las descubra al leer el diff:
   este mismo ciclo, y dilo si no está.
 - **Un cambio en `docs/sync-contract.md`.** Hay otro equipo al otro lado: el
   contrato se coordina con ellos antes, no se publica y se avisa después.
+  Comprueba además que el diff **mueve la versión de la primera línea** —mayor
+  si cambia lo que el POS envía o recibe, menor si solo aclara— y dilo si no la
+  mueve: es lo que el otro equipo mira para saber si tiene delante lo que
+  implementó.
 - **Un paso operativo nuevo** —un secreto, un cron de `vercel.json`, un bucket,
   una regla de plataforma—. Va en `docs/despliegue.md` en el mismo ciclo que lo
   introduce, porque es justo lo que ningún sensor comprueba.
