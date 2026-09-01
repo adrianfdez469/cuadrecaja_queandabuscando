@@ -44,6 +44,14 @@ const FORBIDDEN_WRITE_COLUMNS = [
   // makes this a compile error; this is the same second, grep-based line
   // of defense `boundaries.test.ts` already keeps for every other column.
   "slug",
+  // F-032 (ADR 0028 (c), criterio 7): the five purchase-configuration
+  // columns are the sync's alone from this feature on — the panel keeps
+  // sharing NO column with it, same as every other column in this list.
+  "checkoutMode",
+  "deliveryEnabled",
+  "deliveryFee",
+  "deliveryFeeMode",
+  "orderExpiryHours",
 ];
 
 function listFiles(dir: string): string[] {
