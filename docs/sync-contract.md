@@ -33,6 +33,9 @@ lector que la implemente no tiene que tocar nada.
   del hash admitía más de una lectura del `precio` —`1990` y `1990.00` dan
   hashes distintos sobre los mismos datos—, así que se publica la consulta
   exacta, lista para copiar contra el schema de cuadrecaja.
+- **El timbre del canal `negocio:`** (§ «El timbre del canal `negocio:`»,
+  F-020): un Broadcast sin datos que adelanta el pull. Quien no lo implemente
+  se queda con su cron de 2 minutos y sigue siendo un lector correcto de la v5.
 
 ## Cambios respecto a la v4
 
@@ -786,6 +789,89 @@ este enum: responde `400 INVALID_BODY` — ese estado solo lo pone
 `POST /orders/proposal`, la única acción que fija un plazo. Sin guardas de
 transición: el POS es la autoridad y puede reportar cualquiera de los seis
 valores sobre cualquier pedido que le pertenezca.
+
+### El timbre del canal `negocio:` (aclaración aditiva, v5.1)
+
+**F-020.** Lo de arriba —el pull cada 2 minutos— sigue siendo la única forma
+en que el pedido llega: esto de aquí no cambia eso, solo lo adelanta.
+queandabuscando emite un **Broadcast sin datos** en un canal de Supabase
+Realtime cuando hay algo nuevo que leer, para que un lector que se suscriba
+dispare su pull de inmediato en vez de esperar al siguiente ciclo. Es
+aditivo para cuadrecaja: quien no lo implemente se queda exactamente como
+está hoy, con su cron de 2 minutos, y sigue siendo un lector correcto de la
+v5.
+
+**El canal, el evento y el payload.**
+
+```jsonc
+// canal: negocio:{businessId}   ·   evento: pedidos   ·   private: true
+{ "t": "pedidos" }
+```
+
+El payload es una constante: **no transporta datos y no es una vía de
+entrega.** No lleva `code`, `id`, importes, ni nada derivado del pedido —
+quien lo lee no aprende más que «hay algo que leer». El pedido en sí sigue
+viajando exclusivamente por `GET /api/internal/orders`.
+
+**Los dos disparadores, y solo esos: crear un pedido, y que el comprador
+resuelva una propuesta de renegociación** (aprobarla o rechazarla, § ③④ más
+arriba). Ningún otro cambio de estado timbra — ni el vencimiento de una
+propuesta por reloj, ni un `POST /orders/status` del propio POS (lo hizo él,
+ya lo sabe). El payload es el mismo para los dos disparadores, a propósito:
+**el timbre no dice cuál de los dos fue.**
+
+**Un timbre puede perderse, y el cron sigue siendo la garantía.** Si nadie
+está suscrito, si Realtime está caído, o si la instancia que lo programó
+muere a mitad de camino, el timbre simplemente no suena — nada se reintenta,
+nada falla. El pedido llega igual en el siguiente ciclo de pull. Es
+exactamente el comportamiento de antes de F-020, solo que sin el adelanto.
+
+**Al oír el timbre, el lector hace DOS lecturas, no una:** su pull
+incremental de siempre (`since=<cursor>`) **y** una relectura de los pedidos
+que tenga en `AWAITING_CUSTOMER`. El motivo: el pull incremental filtra
+`id > since`, y la resolución de una propuesta ocurre sobre un pedido que el
+POS **ya pulleó** (su `id` es menor que el cursor). Sin la segunda lectura,
+el timbre del segundo disparador dispara un pull que responde
+`{ orders: [], nextCursor: null }` y el encargado no ve el cambio.
+
+**Un solo pull en vuelo por negocio, aunque timbren N pestañas.** La regla ya
+existía más arriba en esta misma sección («este endpoint asume un único
+poller por negocio, secuencial») — el timbre no la cambia, pero la hace
+mucho más fácil de violar: hoy hacen falta dos crons mal configurados para
+tener dos pollers a la vez; con el timbre basta con que el encargado tenga
+tres pestañas abiertas, cada una disparando su propio pull al oírlo. Sigue
+siendo responsabilidad de cuadrecaja mantener un solo pull en vuelo por
+negocio en todo momento, sin importar cuántas pestañas lo oigan.
+
+**La credencial de suscripción.** El POS la pide presentando el mismo bearer
+por negocio que ya usa en `/api/internal/*` — no hay autenticación nueva que
+implementar:
+
+```
+POST /api/internal/realtime/credential
+Authorization: Bearer <el mismo token por negocio de /api/internal/orders>
+(sin cuerpo)
+```
+
+```jsonc
+// 200
+{
+  "url": "https://<ref>.supabase.co",
+  "apikey": "<anon key, pública>",
+  "channel": "negocio:9f3c…", // SU canal, derivado del bearer — no se puede pedir el de otro
+  "event": "pedidos",
+  "token": "<JWT de suscripción>",
+  "expiresAt": "2026-09-01T05:52:03.000Z",
+  "expiresInSeconds": 3600,
+}
+```
+
+`expiresAt` viaja explícito para que el POS pueda renovar sin adivinar:
+**renovar es volver a pedirla**, no hay otra acción. `503
+REALTIME_NOT_CONFIGURED` cuando el timbre no está disponible en este
+despliegue — nunca bloquea un pedido, el POS sigue con su cron. Los mismos
+errores del resto de `/api/internal/*` aplican por delante (`401`, `403`,
+`503 SYNC_NOT_CONFIGURED`).
 
 ---
 

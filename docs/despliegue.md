@@ -127,7 +127,47 @@ pantalla de acceso existe y no lleva a ningún sitio.
 
 ---
 
-## 4. Los secretos, y qué rompe cada uno
+## 4. El timbre de Realtime (F-020)
+
+Opcional para cuadrecaja — quien no lo implemente sigue funcionando con su
+cron de 2 minutos (ver [`sync-contract.md`](sync-contract.md) § «El timbre
+del canal `negocio:`»). Pero si se quiere, cinco pasos:
+
+1. Habilitar Realtime en el proyecto de Supabase (viene activado por defecto
+   en uno nuevo; comprobar en el panel si es uno antiguo).
+2. Pegar `docker/realtime-policies.sql` una vez en el editor SQL del
+   proyecto — el mismo archivo, palabra por palabra, que `realtime-init`
+   aplica en local (architecture.md DA4, riesgo 2: «el archivo de política
+   es el mismo en los dos sitios; lo que se verifica en local es exactamente
+   lo que se pega en el panel»).
+3. **⚠ Desactivar «Allow public access» en Realtime Settings.** Sin este
+   paso, la documentación de Supabase advierte que un canal privado no es
+   privado de verdad — es lo que hace que la política del paso 2 sea la
+   única puerta.
+4. `SUPABASE_JWT_SECRET` en el entorno (§5, tabla) — el _JWT Secret_ del
+   proyecto, copiado del panel. Sin él, el endpoint de credencial
+   (`POST /api/internal/realtime/credential`) responde
+   `503 REALTIME_NOT_CONFIGURED` y el POS sigue funcionando con su cron; no
+   bloquea ningún pedido.
+5. Vigilar el pico de conexiones concurrentes: ~$10 por cada 1.000
+   ([ADR 0014](adr/0014-timbre-de-realtime.md)). Con dos pestañas por
+   negocio, el plan Free aguanta ~100 negocios y el Pro ~250 antes de que la
+   factura empiece a crecer.
+
+**⚠ Modo de falla si el paso 2 o el 3 se saltan.** Sin la política aplicada,
+RLS deniega a todo el mundo — falla **cerrado**, no abierto: nadie oye el
+timbre, y el sistema entero degrada a solo cron, exactamente el
+comportamiento de antes de F-020. Es ruidosamente inofensivo, y por eso
+nadie se entera hasta que alguien pregunta por qué el POS tarda dos minutos
+en enterarse de un pedido en vez de segundos.
+
+**Rotar `SUPABASE_JWT_SECRET` invalida la anon key y la service key a la
+vez** (son las tres firmadas con el mismo secreto): coordínalo como una
+ventana de mantenimiento, no como un cambio de una línea.
+
+---
+
+## 5. Los secretos, y qué rompe cada uno
 
 Todos van en el entorno del despliegue. `.env.example` los lista con su formato.
 
@@ -139,6 +179,7 @@ Todos van en el entorno del despliegue. `.env.example` los lista con su formato.
 | `ADMIN_SESSION_SECRET` | Firma la sesión local del admin              | La sesión no se puede crear                                       |
 | `CRON_SECRET`          | Autoriza los crons                           | Los crons responden 401 y **nada avisa**: el reloj deja de correr |
 | `SUPABASE_*`           | Imágenes y cuenta del comprador              | Ver §2 y §3                                                       |
+| `SUPABASE_JWT_SECRET`  | Firma la credencial de suscripción al timbre | El endpoint responde `503 REALTIME_NOT_CONFIGURED`; ver §4        |
 | `NEXT_PUBLIC_SITE_URL` | **Ver abajo — es el más fácil de dejar mal** |                                                                   |
 
 **`NEXT_PUBLIC_SITE_URL` merece su propio párrafo.** No es cosmético: de él
@@ -154,7 +195,7 @@ se comparte con nadie.
 
 ---
 
-## 5. Los crons
+## 6. Los crons
 
 `vercel.json` declara dos, y ambos exigen `Authorization: Bearer $CRON_SECRET`:
 
@@ -171,7 +212,7 @@ vencida igualmente — pero el POS verá el estado rancio hasta un día.
 
 ---
 
-## 6. ⚠ Lo que ningún guion comprueba
+## 7. ⚠ Lo que ningún guion comprueba
 
 **Esta sección es la razón de ser del documento.** Todo lo de aquí vive fuera del
 repositorio: no se despliega con el código, no viaja a un entorno nuevo, y nadie
@@ -187,16 +228,19 @@ se entera si alguien lo borra de un panel.
    tiene uno. Es tráfico máquina a máquina y un límite pensado para humanos lo
    estrangula. `robots.ts` ya lo excluye de los rastreadores.
 3. **Las URL de retorno de los proveedores de acceso** (§3).
+4. **Aplicar la política RLS de Realtime en el editor SQL del proyecto** (§4,
+   paso 2). Sin ella, RLS deniega a todo el mundo — falla **cerrado**, no
+   abierto: nadie oye el timbre, y el sistema entero degrada a solo cron.
 
 ---
 
-## 7. ↔ Integrar con cuadrecaja
+## 8. ↔ Integrar con cuadrecaja
 
 El principio que ordena todo: **el POS inicia todas las llamadas**
 ([ADR 0002](adr/0002-el-pos-inicia-todas-las-llamadas.md)). queandabuscando
 nunca llama a cuadrecaja.
 
-### 7.1 Acuñar el token de cada negocio ⟳
+### 8.1 Acuñar el token de cada negocio ⟳
 
 **El token es por negocio, no un secreto de plataforma.**
 
@@ -218,7 +262,7 @@ Ese valor se entrega al equipo de cuadrecaja, que lo guarda en la configuración
 nunca 200. Un token ausente jamás significa «deja pasar todo». Si al integrar
 ves 503 en todo, es esto.
 
-### 7.2 Lo que cuadrecaja tiene que construir
+### 8.2 Lo que cuadrecaja tiene que construir
 
 No lo repito aquí porque viviría desactualizado: está en
 [`sync-contract.md`](sync-contract.md) § «Cambios requeridos en cuadrecaja» —
@@ -226,7 +270,7 @@ las columnas nuevas, las dos tablas nuevas (`OutboxEvento`, `PedidoEntrante`),
 el índice parcial de divergencia con `CREATE INDEX CONCURRENTLY`, el cron de
 sincronización **cada 2 minutos** y el de reconciliación diario.
 
-### 7.3 ⟳ Publicar una versión del contrato
+### 8.3 ⟳ Publicar una versión del contrato
 
 Cada cambio en `sync-contract.md` se coordina con el otro equipo y **mueve la
 versión de su primera línea**, aunque sea una menor (§ «Versionado de este
@@ -238,7 +282,7 @@ publicó sin periodo de convivencia porque no hay consumidor vivo todavía.
 **Cuando lo haya, esa vía se cierra**: una versión no aditiva pasará a necesitar
 bandera por negocio y ventana de migración.
 
-### 7.4 SSO del administrador
+### 8.4 SSO del administrador
 
 El administrador entra desde cuadrecaja; su contraseña nunca llega aquí. El POS
 firma una aserción corta con `SSO_JWT_SECRET` y enlaza a:
@@ -252,7 +296,7 @@ compartiéndolo. Son dos sistemas de autenticación distintos a propósito
 ([ADR 0005](adr/0005-dos-sistemas-de-auth.md)): el del admin y el del comprador
 no se mezclan.
 
-### 7.5 El techo de catálogo por tienda (F-014)
+### 8.5 El techo de catálogo por tienda (F-014)
 
 **100 000 filas `StoreProduct` vivas por tienda, con aviso a 50 000.** Por
 encima de eso, `GET /api/internal/reconciliation` deja de tener el margen de
@@ -266,9 +310,9 @@ de Postgres; no se implementa mientras el dato real siga tan lejos del techo.
 
 ---
 
-## 8. Poner una tienda en el aire ⟳
+## 9. Poner una tienda en el aire ⟳
 
-1. El negocio existe (lo creó `mint:token`, §7.1).
+1. El negocio existe (lo creó `mint:token`, §8.1).
 2. Las tiendas y el catálogo llegan **por el sync**, no se cargan a mano.
 3. La tienda tiene que estar publicada: es un opt-in del local
    (`publicarEnTienda` del lado de cuadrecaja) más el estado en este lado.
@@ -278,7 +322,7 @@ de Postgres; no se implementa mientras el dato real siga tan lejos del techo.
 
 ---
 
-## 9. Comprobar que quedó bien
+## 10. Comprobar que quedó bien
 
 En este orden, porque cada uno descarta una capa:
 
@@ -296,11 +340,11 @@ Y las dos que no se ven con `curl`, que es justo la lección que dejó F-019:
   manda cabecera `Origin` y no pinta píxeles. Un feature puede tener sus diez
   criterios en verde y devolver 403 en cualquier navegador; ya pasó.
 - **Hacer un pedido de prueba de punta a punta** y comprobar que el enlace de
-  WhatsApp que llega apunta a tu dominio (§4).
+  WhatsApp que llega apunta a tu dominio (§5).
 
 ---
 
-## 10. Rotar y mantener ⟳
+## 11. Rotar y mantener ⟳
 
 - **Token de un negocio**: `npm run mint:token -- <externalId>` otra vez. Efecto
   inmediato, aislado a ese negocio, y hay que entregar el valor nuevo.
@@ -314,7 +358,7 @@ Y las dos que no se ven con `curl`, que es justo la lección que dejó F-019:
 
   Por eso, salvo que el token esté comprometido y haya que cortar **ya**: avisa
   primero al equipo de cuadrecaja, acuña con alguien al otro lado listo para
-  guardarlo, y comprueba después con el `curl` autenticado de §9. Si es un
+  guardarlo, y comprueba después con el `curl` autenticado de §10. Si es un
   incidente, rota primero y avisa mientras: la ventana es el precio de cerrar la
   fuga.
 
