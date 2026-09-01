@@ -10,6 +10,7 @@ import {
 } from "@/constants/orders";
 import type { CreateOrderRequest } from "../schemas";
 import type { PriceChangedLine, QuoteLineReason, UnavailableLine } from "../types";
+import { deliveryFeeForNewOrder, isDeliveryOffered, type DeliveryConfig } from "../deliveryOffer";
 import { isUniqueViolation } from "./prismaErrors";
 import { getOrderByCode, orderWhatsappUrl } from "./read";
 import { loadStoreForOrder, quoteCart, type OrderableLine, type OrderStore } from "./quote";
@@ -170,18 +171,34 @@ export async function createOrder(
 
   // R3: delivery only exists where the store offers it. A client asking for
   // DELIVERY at a store that does not is treated as PICKUP rather than
-  // invented as a new error kind the contract does not define.
-  const deliveryOffered = store.deliveryEnabled && store.deliveryFee !== null;
-  const isDelivery = body.fulfillment === "DELIVERY" && deliveryOffered;
-  const deliveryFee: Money = isDelivery
-    ? money(store.deliveryFee as string, store.currencyCode)
-    : money("0", store.currencyCode);
+  // invented as a new error kind the contract does not define. F-031 DA6:
+  // both calls go through the same pure rule CheckoutForm.tsx uses, so the
+  // two can never drift apart (I3/I4).
+  const deliveryConfig: DeliveryConfig = {
+    deliveryEnabled: store.deliveryEnabled,
+    deliveryFeeMode: store.deliveryFeeMode,
+    deliveryFee: store.deliveryFee,
+  };
+  const isDelivery = body.fulfillment === "DELIVERY" && isDeliveryOffered(deliveryConfig);
+  const deliveryFeeAmount = deliveryFeeForNewOrder(
+    deliveryConfig,
+    isDelivery ? "DELIVERY" : "PICKUP",
+  );
+  // F-031 E2/R3: `null` = not quoted yet — only a QUOTED_PER_ORDER store's
+  // DELIVERY order gets here. Never confused with a genuine `0.00` (R1).
+  const deliveryFee: Money | null =
+    deliveryFeeAmount === null ? null : money(deliveryFeeAmount, store.currencyCode);
   const deliveryAddress = isDelivery ? (body.deliveryAddress ?? null) : null;
 
   // R29: total = subtotal - discountTotal + deliveryFee. discountTotal is
   // ORDER-scope only (R30) — the line-level discount is already inside each
-  // line's unitPrice/lineTotal, folded into subtotal.
-  const total = add(subtract(quote.subtotal, quote.discountTotal), deliveryFee);
+  // line's unitPrice/lineTotal, folded into subtotal. F-031 R9: while the
+  // delivery fee is not quoted, `total` stays PARTIAL — subtotal minus
+  // discount, with nothing invented for an envío nobody priced yet.
+  const total =
+    deliveryFee === null
+      ? subtract(quote.subtotal, quote.discountTotal)
+      : add(subtract(quote.subtotal, quote.discountTotal), deliveryFee);
   const expectedTotal = money(body.expectedTotal, store.currencyCode);
 
   // 5. Price check, BEFORE the abuse guard: a stale total must not spend
@@ -284,7 +301,7 @@ export async function createOrder(
           currencyCode: store.currencyCode,
           subtotal: quote.subtotal.amount,
           discountTotal: quote.discountTotal.amount,
-          deliveryFee: deliveryFee.amount,
+          deliveryFee: deliveryFee === null ? null : deliveryFee.amount,
           total: total.amount,
           rateSnapshot,
           notes: body.notes ?? null,

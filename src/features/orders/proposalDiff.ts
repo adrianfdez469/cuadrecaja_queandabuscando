@@ -26,7 +26,9 @@ export type ProposalDiffInput = {
   proposedItems: readonly DiffableItem[];
   currentSubtotal: string;
   proposedSubtotal: string;
-  currentDeliveryFee: string;
+  /** F-031 R1/R19: `null` = the order's delivery fee was never quoted
+   *  before this proposal. Never read as zero. */
+  currentDeliveryFee: string | null;
   proposedDeliveryFee: string;
 };
 
@@ -78,7 +80,16 @@ export function buildProposalDiff(input: ProposalDiffInput): string[] {
     }
   }
 
-  if (input.currentDeliveryFee !== input.proposedDeliveryFee) {
+  // F-031 I3: when the order's delivery fee was never quoted, the two
+  // amounts can even be the SAME STRING ("0.00" sin cotizar vs "0.00"
+  // gifted), so this can't be a plain string inequality — it also fires
+  // when the order "estaba sin cotizar", which the E11 gifted-delivery case
+  // needs said out loud (design.md § 5).
+  if (input.currentDeliveryFee === null) {
+    const proposedFee = money(input.proposedDeliveryFee, currencyCode);
+    const now = isZero(proposedFee) ? "sin costo" : formatMoney(proposedFee);
+    phrases.push(`Envío: estaba por confirmar, ahora ${now}.`);
+  } else if (input.currentDeliveryFee !== input.proposedDeliveryFee) {
     const currentFee = money(input.currentDeliveryFee, currencyCode);
     const before = isZero(currentFee) ? "sin costo" : formatMoney(currentFee);
     phrases.push(

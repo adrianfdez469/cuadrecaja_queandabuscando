@@ -21,6 +21,9 @@ export type QuoteStore = {
   checkoutMode: "WHATSAPP" | "ONSITE";
   deliveryEnabled: boolean;
   deliveryFee: string | null;
+  /** F-031 R20: travels EXPLICIT so the checkout island never has to deduce
+   *  a mode from `deliveryFee === null`, which today means "no delivery". */
+  deliveryFeeMode: "FLAT_RATE" | "QUOTED_PER_ORDER";
 };
 
 /**

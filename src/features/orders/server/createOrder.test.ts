@@ -322,6 +322,84 @@ describe("createOrder() — writing the order", () => {
     expect(data.deliveryAddress).toBeNull();
   });
 
+  describe("F-031 — QUOTED_PER_ORDER (E2, R3, R9, DA6)", () => {
+    it("writes deliveryFee: null and a PARTIAL total for a DELIVERY order (criterio 2)", async () => {
+      const quotedStore = {
+        ...store,
+        deliveryEnabled: true,
+        deliveryFeeMode: "QUOTED_PER_ORDER" as const,
+        deliveryFee: null as string | null,
+      };
+      loadStoreForOrder.mockResolvedValue(quotedStore);
+      quoteCart.mockResolvedValue({
+        store: quotedStore,
+        lines: [orderableLine()],
+        subtotal: money("900.00", "CUP"),
+        discountTotal: money("0", "CUP"),
+        rates: {},
+        capturedAt: "now",
+      });
+      orderCreate.mockResolvedValue({ code: "A7K3M9PQR2" });
+
+      const result = await createOrder(
+        baseBody({
+          fulfillment: "DELIVERY",
+          deliveryAddress: "Calle 23, Vedado",
+          // R9: while unquoted, the comparable total is subtotal - discountTotal only.
+          expectedTotal: "900.00",
+        }),
+      );
+
+      expect(result).toMatchObject({ kind: "created" });
+      const data = orderCreate.mock.calls[0][0].data;
+      expect(data.deliveryFee).toBeNull();
+      expect(data.total).toBe("900.00");
+      expect(data.deliveryAddress).toBe("Calle 23, Vedado");
+    });
+
+    it("ignores a residual Store.deliveryFee — the mode decides, not a stale fee (§ Casos límite)", async () => {
+      const quotedStore = {
+        ...store,
+        deliveryEnabled: true,
+        deliveryFeeMode: "QUOTED_PER_ORDER" as const,
+        deliveryFee: "999.00" as string | null,
+      };
+      loadStoreForOrder.mockResolvedValue(quotedStore);
+      quoteCart.mockResolvedValue({
+        store: quotedStore,
+        lines: [orderableLine()],
+        subtotal: money("900.00", "CUP"),
+        discountTotal: money("0", "CUP"),
+        rates: {},
+        capturedAt: "now",
+      });
+      orderCreate.mockResolvedValue({ code: "A7K3M9PQR2" });
+
+      await createOrder(
+        baseBody({ fulfillment: "DELIVERY", deliveryAddress: "x", expectedTotal: "900.00" }),
+      );
+
+      expect(orderCreate.mock.calls[0][0].data.deliveryFee).toBeNull();
+    });
+
+    it("PICKUP at a QUOTED_PER_ORDER store still quotes 0.00 — the order is not uncertain (E8)", async () => {
+      const quotedStore = {
+        ...store,
+        deliveryEnabled: true,
+        deliveryFeeMode: "QUOTED_PER_ORDER" as const,
+        deliveryFee: null as string | null,
+      };
+      loadStoreForOrder.mockResolvedValue(quotedStore);
+      orderCreate.mockResolvedValue({ code: "A7K3M9PQR2" });
+
+      const result = await createOrder(baseBody({ fulfillment: "PICKUP" }));
+
+      expect(result).toMatchObject({ kind: "created" });
+      const data = orderCreate.mock.calls[0][0].data;
+      expect(data.deliveryFee).toBe("0.00");
+    });
+  });
+
   it("merges duplicate storeProductId lines, summing quantities, before quoting", async () => {
     orderCreate.mockResolvedValue({ code: "A7K3M9PQR2" });
     await createOrder(

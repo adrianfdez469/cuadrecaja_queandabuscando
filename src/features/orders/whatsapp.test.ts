@@ -56,6 +56,44 @@ describe("buildWhatsappUrl()", () => {
     expect(delivery).toContain("Envío a Calle 23 esq. L, Vedado");
   });
 
+  it(
+    "F-031 R1/E13: un pedido a domicilio sin cotizar dice 'por confirmar' y " +
+      "'Total parcial…más el envío por confirmar', nunca el cero formateado " +
+      "(DP1: el subtotal termina en centavos distintos de 00)",
+    () => {
+      const decoded = decodeURIComponent(
+        buildWhatsappUrl({
+          ...baseInput,
+          fulfillment: "DELIVERY",
+          deliveryAddress: "Calle 23 esq. L, Vedado",
+          subtotal: money("1234.56", "CUP"),
+          deliveryFee: null,
+          total: money("1234.56", "CUP"),
+        })!.split("text=")[1],
+      );
+      expect(decoded).toContain("Envío: por confirmar");
+      expect(decoded).toContain("Total parcial: $1,234.56 más el envío por confirmar");
+      expect(decoded).not.toContain("Envío: $0.00");
+      expect(decoded).not.toContain("Total: ");
+    },
+  );
+
+  it("F-031 E11: un envío cotizado en $0.00 (regalado) se imprime como el importe que es, nunca 'por confirmar'", () => {
+    const decoded = decodeURIComponent(
+      buildWhatsappUrl({
+        ...baseInput,
+        fulfillment: "DELIVERY",
+        deliveryAddress: "Calle 23 esq. L, Vedado",
+        subtotal: money("1234.56", "CUP"),
+        deliveryFee: money("0", "CUP"),
+        total: money("1234.56", "CUP"),
+      })!.split("text=")[1],
+    );
+    expect(decoded).toContain("Envío: $0.00");
+    expect(decoded).toContain("Total: $1,234.56");
+    expect(decoded).not.toContain("por confirmar");
+  });
+
   it("summarizes past the first 10 lines instead of listing all of them", () => {
     const manyLines = Array.from({ length: 15 }, (_, i) => ({
       quantity: "1",

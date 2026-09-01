@@ -22,6 +22,7 @@ import {
   CHECKOUT_KEY_STORAGE_PREFIX,
 } from "@/constants/cart";
 import { generateUuidV4 } from "@/features/orders/idempotencyKey";
+import { isDeliveryOffered } from "@/features/orders/deliveryOffer";
 import type { CreateOrderBody, Fulfillment, QuoteResponse } from "@/features/orders/types";
 import { resolveStoreClosureHeadline } from "@/lib/storeClosure";
 import { useCart, useHydrated } from "../cartStore";
@@ -417,10 +418,21 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
     : false;
 
   const deliveryOffered = quote
-    ? quote.store.deliveryEnabled && quote.store.deliveryFee !== null
+    ? isDeliveryOffered({
+        deliveryEnabled: quote.store.deliveryEnabled,
+        deliveryFeeMode: quote.store.deliveryFeeMode,
+        deliveryFee: quote.store.deliveryFee,
+      })
     : false;
+  // F-031 R20/E1: with QUOTED_PER_ORDER there is no fee to show for a NEW
+  // order — the store sets it once it looks at the address. This is the
+  // "sin cotizar" boolean for the checkout, before any order exists.
+  const deliveryQuotePending =
+    deliveryOffered &&
+    fulfillment === "DELIVERY" &&
+    quote?.store.deliveryFeeMode === "QUOTED_PER_ORDER";
   const deliveryFeeMoney =
-    quote && deliveryOffered && fulfillment === "DELIVERY"
+    quote && deliveryOffered && fulfillment === "DELIVERY" && !deliveryQuotePending
       ? money(quote.store.deliveryFee as string, quote.store.currencyCode)
       : null;
   const subtotalLabel = quote ? formatMoney(money(quote.subtotal, quote.store.currencyCode)) : null;
@@ -740,9 +752,11 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
                   name="fulfillment"
                   label="Envío a domicilio"
                   description={
-                    quote?.store.deliveryFee
-                      ? `+ ${formatMoney(money(quote.store.deliveryFee, quote.store.currencyCode))}`
-                      : undefined
+                    quote?.store.deliveryFeeMode === "QUOTED_PER_ORDER"
+                      ? "Costo por confirmar"
+                      : quote?.store.deliveryFee
+                        ? `+ ${formatMoney(money(quote.store.deliveryFee, quote.store.currencyCode))}`
+                        : undefined
                   }
                   checked={fulfillment === "DELIVERY"}
                   onChange={() => setFulfillment("DELIVERY")}
@@ -768,6 +782,13 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
                       />
                     )}
                   </Field>
+                  {quote?.store.deliveryFeeMode === "QUOTED_PER_ORDER" && (
+                    <p className="text-fg-muted mt-3 text-sm">
+                      Cuando la tienda revise tu pedido va a poner el costo del envío y te va a
+                      contactar para que lo apruebes o lo rechaces. Hasta entonces no se prepara
+                      nada.
+                    </p>
+                  )}
                 </div>
               )}
             </fieldset>
@@ -814,12 +835,16 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
           discountLabel={discountLabel}
           deliveryFeeLabel={
             deliveryOffered
-              ? deliveryFeeMoney
-                ? formatMoney(deliveryFeeMoney)
-                : formatMoney(money("0", quote?.store.currencyCode ?? "CUP"))
+              ? deliveryQuotePending
+                ? "Por confirmar"
+                : deliveryFeeMoney
+                  ? formatMoney(deliveryFeeMoney)
+                  : formatMoney(money("0", quote?.store.currencyCode ?? "CUP"))
               : undefined
           }
           totalLabel={totalLabel}
+          totalCaption={deliveryQuotePending ? "Total parcial" : undefined}
+          partialNotice={deliveryQuotePending ? "más el envío por confirmar" : undefined}
           busy={quoteState === "loading"}
         />
 

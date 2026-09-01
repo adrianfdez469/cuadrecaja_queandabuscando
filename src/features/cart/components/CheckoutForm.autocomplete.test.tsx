@@ -27,6 +27,10 @@ function quote(): QuoteResponse {
       checkoutMode: "WHATSAPP",
       deliveryEnabled: false,
       deliveryFee: null,
+      // F-031 etapa 1 compile-only fixture update (impl.md § Desviaciones):
+      // no assertion here exercises the mode, so FLAT_RATE preserves today's
+      // behavior unchanged.
+      deliveryFeeMode: "FLAT_RATE",
     },
     lines: [],
     subtotal: "0.00",

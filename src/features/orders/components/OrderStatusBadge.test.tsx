@@ -59,6 +59,19 @@ describe("OrderStatusBadge", () => {
     expect(screen.getByText("Sin respuesta a tiempo")).toBeInTheDocument();
   });
 
+  it("F-031: AWAITING_CUSTOMER sobre un pedido sin cotizar dice 'La tienda ya puso el costo del envío'", () => {
+    render(<OrderStatusBadge status="AWAITING_CUSTOMER" hasDelivery deliveryFeePending />);
+    expect(screen.getByText("Esperando tu respuesta")).toBeInTheDocument();
+    expect(
+      screen.getByText("La tienda ya puso el costo del envío. Apruébalo o recházalo aquí abajo."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        "La tienda propuso un cambio en tu pedido. Apruébalo o recházalo aquí abajo.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
   it("CANCELLED distingue las tres atribuciones (R9) por la etiqueta", () => {
     const { rerender } = render(
       <OrderStatusBadge status="CANCELLED" hasDelivery={false} cancelledBy="CUSTOMER" />,
@@ -70,6 +83,26 @@ describe("OrderStatusBadge", () => {
 
     rerender(<OrderStatusBadge status="CANCELLED" hasDelivery={false} cancelledBy="STORE" />);
     expect(screen.getByText("Cancelado por la tienda")).toBeInTheDocument();
+  });
+
+  it("F-031 I7: CANCELLED/EXPIRY sobre un pedido sin cotizar dice 'se venció el plazo', no 'no respondiste a tiempo'", () => {
+    render(
+      <OrderStatusBadge
+        status="CANCELLED"
+        hasDelivery={false}
+        cancelledBy="EXPIRY"
+        deliveryFeePending
+      />,
+    );
+    expect(screen.getByText("Cancelado: se venció el plazo")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "La tienda no llegó a confirmar el costo del envío y el plazo del pedido se acabó. No se te cobró nada; si todavía lo quieres, escríbele.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Cancelado: no respondiste a tiempo")).not.toBeInTheDocument();
+    // Nunca le habla de una propuesta que el comprador no llegó a ver.
+    expect(screen.queryByText(/propuesta/i)).not.toBeInTheDocument();
   });
 
   it("CANCELLED sin atribución (filas anteriores a la migración): texto de F-010, intacto", () => {

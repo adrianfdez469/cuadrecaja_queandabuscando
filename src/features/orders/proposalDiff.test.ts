@@ -86,6 +86,20 @@ describe("buildProposalDiff() — design.md § 4.4", () => {
     expect(diff.some((line) => line.includes("sin costo"))).toBe(false);
   });
 
+  it("F-031: 'estaba por confirmar, ahora $y' when the order was never quoted", () => {
+    const diff = buildProposalDiff(
+      baseInput({ currentDeliveryFee: null, proposedDeliveryFee: "180.00" }),
+    );
+    expect(diff).toContain("Envío: estaba por confirmar, ahora $180.00.");
+  });
+
+  it("F-031 E11: 'estaba por confirmar, ahora sin costo' for a gifted delivery — the SAME string ('0.00') on both sides never hides the sentence", () => {
+    const diff = buildProposalDiff(
+      baseInput({ currentDeliveryFee: null, proposedDeliveryFee: "0.00" }),
+    );
+    expect(diff).toContain("Envío: estaba por confirmar, ahora sin costo.");
+  });
+
   it("subtotal changes ONLY when it changed", () => {
     const unchanged = buildProposalDiff(baseInput());
     expect(unchanged.some((line) => line.startsWith("Subtotal"))).toBe(false);

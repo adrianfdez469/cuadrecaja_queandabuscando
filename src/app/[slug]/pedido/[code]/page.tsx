@@ -97,6 +97,10 @@ export default async function OrderPage({
 
   const whatsappUrl = orderWhatsappUrl(order);
   const hasDelivery = order.fulfillment === "DELIVERY";
+  // F-031 R1/R19/E5-E6: read from the persisted row, never inferred. Stays
+  // `true` through `AWAITING_CUSTOMER` (design.md § 3's dependency) and only
+  // turns `false` once the store's quote is approved.
+  const deliveryFeePending = order.deliveryFee === null;
   const isAwaitingCustomer = order.status === "AWAITING_CUSTOMER";
   const proposalExpired =
     isAwaitingCustomer && order.proposal
@@ -158,12 +162,16 @@ export default async function OrderPage({
 
       {isAwaitingCustomer ? (
         <div className="bg-warning/15 text-fg rounded-md p-4">
-          <p className="text-lg font-semibold">La tienda propone un cambio en tu pedido</p>
+          <p className="text-lg font-semibold">
+            {deliveryFeePending
+              ? "La tienda ya calculó el envío de tu pedido"
+              : "La tienda propone un cambio en tu pedido"}
+          </p>
           <p className="text-fg-muted mt-1 text-sm">
             Revísalo y responde. Si no respondes a tiempo, el pedido se cancela.
           </p>
           <a href="#propuesta" className="text-brand mt-2 inline-block text-sm underline">
-            Ver el cambio y responder
+            {deliveryFeePending ? "Ver el envío y responder" : "Ver el cambio y responder"}
           </a>
         </div>
       ) : (
@@ -190,6 +198,7 @@ export default async function OrderPage({
             hasDelivery={hasDelivery}
             cancelledBy={order.cancelledBy}
             proposalExpired={proposalExpired}
+            deliveryFeePending={deliveryFeePending}
           />
         </div>
       </div>
@@ -211,6 +220,7 @@ export default async function OrderPage({
           expiresAt={new Date(order.proposal.expiresAt)}
           previousTotal={order.proposal.previousTotal}
           proposedTotal={order.proposal.total}
+          previousTotalPartial={deliveryFeePending}
           diff={diff}
           storeContactUrl={storeContactUrl}
         />
@@ -267,13 +277,20 @@ export default async function OrderPage({
                 currencyCode={order.currencyCode}
                 subtotal={order.proposal.subtotal}
                 deliveryFee={order.proposal.deliveryFee}
+                hasDelivery={hasDelivery}
                 total={order.proposal.total}
-                title="Tu pedido si aceptas el cambio"
+                title={
+                  deliveryFeePending
+                    ? "Tu pedido con el envío incluido"
+                    : "Tu pedido si aceptas el cambio"
+                }
                 badge={<Badge tone="warning">Propuesta</Badge>}
               />
               <details className="mt-4">
                 <summary className="cursor-pointer text-sm underline">
-                  Ver tu pedido tal como está ahora
+                  {deliveryFeePending
+                    ? "Ver tu pedido sin el envío"
+                    : "Ver tu pedido tal como está ahora"}
                 </summary>
                 <div className="mt-3">
                   <OrderLinesTable
@@ -281,6 +298,7 @@ export default async function OrderPage({
                     currencyCode={order.currencyCode}
                     subtotal={order.subtotal}
                     deliveryFee={order.deliveryFee}
+                    hasDelivery={hasDelivery}
                     total={order.total}
                   />
                 </div>
@@ -292,6 +310,7 @@ export default async function OrderPage({
               currencyCode={order.currencyCode}
               subtotal={order.subtotal}
               deliveryFee={order.deliveryFee}
+              hasDelivery={hasDelivery}
               total={order.total}
             />
           )}
