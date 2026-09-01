@@ -139,8 +139,26 @@ model Business {
   exchangeRates ExchangeRate[]
   adminUsers    AdminUser[]
   orders        Order[]
+  bellWindow    OrderBellWindow?
 
   @@index([active])
+}
+
+/// F-020 — the bell's coalescence window (architecture.md DA3). One row per
+/// business, shared between ALL instances: that is what makes R10 a property
+/// of the SYSTEM, not of a single process (I5). Written by ONE round-trip
+/// statement each (src/features/orders/server/bell.ts), never inside a
+/// `$transaction` — the pooler runs in transaction mode.
+model OrderBellWindow {
+  businessId String @id
+  /// Start of the currently live window. The entry bell opens it; the close
+  /// bell renews it, opening the NEXT window at the same instant (E8).
+  windowStartedAt DateTime @default(now())
+  /// Non-null while there is at least one event inside the window that has
+  /// not rung yet. Null once the close bell has fired for it.
+  pendingSince DateTime?
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
 /// F-017 — the brand a shopper's QR points at. Owns the public slug, the
