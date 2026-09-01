@@ -104,7 +104,12 @@ export type FixtureSession = {
    *  to break. F-021: reindexes the offer's own search columns through the
    *  SAME writer the panel/sync use (`reindexStoreProduct` — never a raw
    *  `data: { searchDocument }`), so a freshly-created fixture is
-   *  immediately findable by `searchStoreProducts`. */
+   *  immediately findable by `searchStoreProducts`.
+   *
+   *  F-014: `syncedPrice`/`syncedPriceCurrency` let a reconciliation test fix
+   *  the exact price forms R4 depends on. `syncedPrice` is a **decimal text
+   *  string** (`"1990.00"`), never a `number` — a `number` would reintroduce
+   *  the IEEE-754 rounding R7 exists to avoid. */
   createOffer(
     storeId: string,
     canonicalProductId: string,
@@ -115,6 +120,8 @@ export type FixtureSession = {
       localName?: string;
       description?: string | null;
       localCategoryId?: string | null;
+      syncedPrice?: string;
+      syncedPriceCurrency?: string;
     },
   ): Promise<{ id: string }>;
   /** Registers a `CanonicalProduct` id this session did not create directly
@@ -274,6 +281,8 @@ export async function createFixtureSession(): Promise<FixtureSession> {
       localName?: string;
       description?: string | null;
       localCategoryId?: string | null;
+      syncedPrice?: string;
+      syncedPriceCurrency?: string;
     } = {},
   ): Promise<{ id: string }> {
     const suffix = `${storeId}-${canonicalProductId}`;
@@ -286,8 +295,8 @@ export async function createFixtureSession(): Promise<FixtureSession> {
         localName: overrides.localName ?? `F-015 fixture offer ${token}`,
         description: overrides.description ?? null,
         localCategoryId: overrides.localCategoryId ?? null,
-        syncedPrice: "1.00",
-        syncedPriceCurrency: "CUP",
+        syncedPrice: overrides.syncedPrice ?? "1.00",
+        syncedPriceCurrency: overrides.syncedPriceCurrency ?? "CUP",
         availability: overrides.availability ?? Availability.AVAILABLE,
         visible: overrides.visible ?? true,
         deletedAt: overrides.deletedAt ?? null,
