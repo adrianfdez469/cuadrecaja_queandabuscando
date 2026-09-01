@@ -275,12 +275,24 @@ sincronización **cada 2 minutos** y el de reconciliación diario.
 Cada cambio en `sync-contract.md` se coordina con el otro equipo y **mueve la
 versión de su primera línea**, aunque sea una menor (§ «Versionado de este
 documento» del contrato): mayor si cambia lo que el POS envía o recibe, menor si
-solo aclara lo ya acordado. La versión vigente es la **v5.1**, y la primera
-frase de la v5 dice que **no es aditiva** en el enum de estados de pedido: pasa
-de 6 a 9 valores y rompe a cualquier lector con un `switch` exhaustivo. Se
-publicó sin periodo de convivencia porque no hay consumidor vivo todavía.
-**Cuando lo haya, esa vía se cierra**: una versión no aditiva pasará a necesitar
-bandera por negocio y ventana de migración.
+solo aclara lo ya acordado. La versión vigente es la **v6** (F-031), y **no es
+aditiva en dos cosas**: `POST /orders/status` responde `409` al despachar un
+pedido con el envío sin cotizar —la primera guarda de transición del contrato, y
+retracta la línea de la v5 que decía que no había ninguna—, y todos los importes
+del payload del pull pasan a traer dos decimales, que es un arreglo de un formato
+que el documento llevaba mal desde la v2. La v5 tampoco fue aditiva, en el enum
+de estados de pedido: pasó de 6 a 9 valores.
+
+Las tres se publicaron sin periodo de convivencia porque no hay consumidor vivo
+todavía. **Cuando lo haya, esa vía se cierra**: una versión no aditiva pasará a
+necesitar bandera por negocio y ventana de migración.
+
+La v6 se publicó además **antes** de estar implementada aquí, a propósito, para
+que cuadrecaja empezara en paralelo; su tercera línea lo dice y enumera qué no
+responde todavía. Si publicas otra así, mantén ese aviso al día: es lo único que
+impide que el otro equipo depure contra un endpoint que no existe. La lista corta
+de lo que les toca implementar está en
+[`traspaso-cuadrecaja-envio-cotizado.md`](traspaso-cuadrecaja-envio-cotizado.md).
 
 ### 8.4 SSO del administrador
 
@@ -319,6 +331,23 @@ de Postgres; no se implementa mientras el dato real siga tan lejos del techo.
 4. El slug se resuelve por el registro de slugs
    ([ADR 0018](adr/0018-registro-de-slugs-y-slug-canonico.md)). Para comprobar
    uno antes de fijarlo: `GET /api/internal/slug-availability`.
+5. **La configuración de compra se escribe a mano, con SQL** ⚠. Las cinco
+   columnas que deciden cómo se compra —`checkoutMode`, `deliveryEnabled`,
+   `deliveryFee`, `orderExpiryHours` y `deliveryFeeMode`— **no viajan por el
+   sync todavía** y no hay pantalla que las exponga: solo las escribe el seed.
+   Para poner una tienda en envío cotizado (F-031), donde el importe del envío
+   lo pone una persona al gestionar el pedido:
+
+   ```sql
+   UPDATE "Store"
+      SET "deliveryEnabled" = true,
+          "deliveryFeeMode" = 'QUOTED_PER_ORDER'
+    WHERE slug = '<slug>';
+   ```
+
+   Con `deliveryFeeMode = 'QUOTED_PER_ORDER'` manda el modo: una `deliveryFee`
+   que quede en la fila se **ignora**. Esto deja de hacer falta cuando **F-032**
+   traiga las cinco columnas desde cuadrecaja por el sync (la v7 del contrato).
 
 ---
 
