@@ -264,9 +264,13 @@ model Store {
   /// it for a DELIVERY order (§ Casos límite "manda el modo") and leaves the
   /// order's own `deliveryFee` NULL until someone quotes it.
   deliveryFeeMode  DeliveryFeeMode @default(FLAT_RATE)
-  /// F-019 R5/R20. Hours a proposal stays open before the clock cancels it.
-  /// A queandabuscando-owned field: the sync never sends it and a STORE event
-  /// never overwrites it (the sync handler writes an explicit column list).
+  /// F-019 R5/R20 first assigned `orderExpiryHours` to queandabuscando.
+  /// F-032 REVERSES that: owned by cuadrecaja from the v7 contract on. It
+  /// arrives OPTIONAL in the STORE payload's purchase configuration, and a
+  /// STORE event that omits it leaves the column exactly as it was ("omitir
+  /// no es apagar" — docs/adr/0028-configuracion-de-compra-del-pos.md). What
+  /// the number MEANS is unchanged: how long a proposal stays open before the
+  /// clock cancels it (expiry.ts, proposal.ts) — only who writes it changed.
   orderExpiryHours Int             @default(24)
 
   publishedAt DateTime?

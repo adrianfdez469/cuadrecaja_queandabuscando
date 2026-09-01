@@ -331,23 +331,20 @@ de Postgres; no se implementa mientras el dato real siga tan lejos del techo.
 4. El slug se resuelve por el registro de slugs
    ([ADR 0018](adr/0018-registro-de-slugs-y-slug-canonico.md)). Para comprobar
    uno antes de fijarlo: `GET /api/internal/slug-availability`.
-5. **La configuración de compra se escribe a mano, con SQL** ⚠. Las cinco
-   columnas que deciden cómo se compra —`checkoutMode`, `deliveryEnabled`,
-   `deliveryFee`, `orderExpiryHours` y `deliveryFeeMode`— **no viajan por el
-   sync todavía** y no hay pantalla que las exponga: solo las escribe el seed.
-   Para poner una tienda en envío cotizado (F-031), donde el importe del envío
-   lo pone una persona al gestionar el pedido:
-
-   ```sql
-   UPDATE "Store"
-      SET "deliveryEnabled" = true,
-          "deliveryFeeMode" = 'QUOTED_PER_ORDER'
-    WHERE slug = '<slug>';
-   ```
-
-   Con `deliveryFeeMode = 'QUOTED_PER_ORDER'` manda el modo: una `deliveryFee`
-   que quede en la fila se **ignora**. Esto deja de hacer falta cuando **F-032**
-   traiga las cinco columnas desde cuadrecaja por el sync (la v7 del contrato).
+5. **La configuración de compra llega por el sync, la escribe cuadrecaja.**
+   Las cinco columnas que deciden cómo se compra —`checkoutMode`,
+   `deliveryEnabled`, `deliveryFee`, `deliveryFeeMode` y `orderExpiryHours`—
+   viajan planas y opcionales en el `payload` de `STORE` desde la v7 del
+   contrato (F-032, [ADR 0028](adr/0028-configuracion-de-compra-del-pos.md)).
+   No hay pantalla que las exponga: el panel sigue sin tocarlas, a propósito
+   (ADR 0017 (a)). Un evento que omite una de las cinco deja esa columna
+   **exactamente como estaba** — "omitir no es apagar" —, y la guarda
+   anti-rancio (`Store.sourceUpdatedAt`) es el único árbitro cuando llegan
+   dos versiones: sin marca de "configurada a mano" ni forma de liberarla, el
+   primer envío del POS que traiga un campo pisa lo que hubiera antes, por
+   ese motivo escribirla a mano por SQL ya no es el camino — mientras
+   cuadrecaja no la emita para un negocio, esa tienda simplemente se comporta
+   con los valores por defecto de la columna hasta que el POS la alcance.
 
 ---
 
