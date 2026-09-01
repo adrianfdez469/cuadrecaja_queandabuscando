@@ -38,6 +38,14 @@ enum CheckoutMode {
   ONSITE
 }
 
+/// F-031. How this store's delivery fee gets decided. Read when an order is
+/// CREATED (E14) and never re-read afterwards. Written by cuadrecaja through
+/// the sync starting F-032; F-031 only reads it.
+enum DeliveryFeeMode {
+  FLAT_RATE
+  QUOTED_PER_ORDER
+}
+
 enum OrderStatus {
   PENDING
   PULLED
@@ -150,13 +158,13 @@ model Business {
 /// statement each (src/features/orders/server/bell.ts), never inside a
 /// `$transaction` — the pooler runs in transaction mode.
 model OrderBellWindow {
-  businessId String @id
+  businessId      String    @id
   /// Start of the currently live window. The entry bell opens it; the close
   /// bell renews it, opening the NEXT window at the same instant (E8).
-  windowStartedAt DateTime @default(now())
+  windowStartedAt DateTime  @default(now())
   /// Non-null while there is at least one event inside the window that has
   /// not rung yet. Null once the close bell has fired for it.
-  pendingSince DateTime?
+  pendingSince    DateTime?
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
@@ -249,13 +257,17 @@ model Store {
 
   openingHours Json?
 
-  checkoutMode     CheckoutMode @default(WHATSAPP)
-  deliveryEnabled  Boolean      @default(false)
-  deliveryFee      Decimal?     @db.Decimal(14, 2)
+  checkoutMode     CheckoutMode    @default(WHATSAPP)
+  deliveryEnabled  Boolean         @default(false)
+  deliveryFee      Decimal?        @db.Decimal(14, 2)
+  /// F-031 DA2. FLAT_RATE reads `deliveryFee` above; QUOTED_PER_ORDER ignores
+  /// it for a DELIVERY order (§ Casos límite "manda el modo") and leaves the
+  /// order's own `deliveryFee` NULL until someone quotes it.
+  deliveryFeeMode  DeliveryFeeMode @default(FLAT_RATE)
   /// F-019 R5/R20. Hours a proposal stays open before the clock cancels it.
   /// A queandabuscando-owned field: the sync never sends it and a STORE event
   /// never overwrites it (the sync handler writes an explicit column list).
-  orderExpiryHours Int          @default(24)
+  orderExpiryHours Int             @default(24)
 
   publishedAt DateTime?
 
@@ -319,7 +331,7 @@ model GlobalCategory {
 
 /// Mirror of cuadrecaja's `Categoria`, scoped to a business.
 model LocalCategory {
-  id               String  @id @default(uuid())
+  id               String    @id @default(uuid())
   businessId       String
   externalId       String
   name             String
@@ -601,10 +613,17 @@ model Order {
   cancelledBy  OrderCancelledBy?
 
   currencyCode  String
-  subtotal      Decimal @db.Decimal(14, 2)
-  discountTotal Decimal @default(0) @db.Decimal(14, 2)
-  deliveryFee   Decimal @default(0) @db.Decimal(14, 2)
-  total         Decimal @db.Decimal(14, 2)
+  subtotal      Decimal  @db.Decimal(14, 2)
+  discountTotal Decimal  @default(0) @db.Decimal(14, 2)
+  /// F-031 DA1. NULL = the delivery fee has not been quoted yet — never
+  /// confused with a genuine `0.00` (R1). `@default(0)` keeps a writer that
+  /// omits this column on today's behaviour: quoted, envío gratis. Only
+  /// `createOrder.ts` writes NULL, for a QUOTED_PER_ORDER store's DELIVERY
+  /// order (E2); approving a proposal (`respond.ts`) already overwrites it
+  /// with `proposedDeliveryFee`, which closes the pending state with no new
+  /// code (architecture.md DA1).
+  deliveryFee   Decimal? @default(0) @db.Decimal(14, 2)
+  total         Decimal  @db.Decimal(14, 2)
   /// Exchange rates frozen at order time. Historical prices are never recomputed.
   rateSnapshot  Json
 

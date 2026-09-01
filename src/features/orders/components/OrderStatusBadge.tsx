@@ -24,6 +24,7 @@ function describe(
   hasDelivery: boolean,
   cancelledBy: OrderCancelledBy | null,
   proposalExpired: boolean,
+  deliveryFeePending: boolean,
 ): Described {
   switch (status) {
     case "PENDING":
@@ -39,19 +40,21 @@ function describe(
         explanation: "La tienda ya lo tiene en su sistema.",
       };
     case "AWAITING_CUSTOMER":
-      return proposalExpired
-        ? {
-            label: "Sin respuesta a tiempo",
-            tone: "danger",
-            explanation:
-              "El plazo para responder se acabó. La tienda va a cancelar el pedido; si todavía lo quieres, escríbele.",
-          }
-        : {
-            label: "Esperando tu respuesta",
-            tone: "warning",
-            explanation:
-              "La tienda propuso un cambio en tu pedido. Apruébalo o recházalo aquí abajo.",
-          };
+      if (proposalExpired) {
+        return {
+          label: "Sin respuesta a tiempo",
+          tone: "danger",
+          explanation:
+            "El plazo para responder se acabó. La tienda va a cancelar el pedido; si todavía lo quieres, escríbele.",
+        };
+      }
+      return {
+        label: "Esperando tu respuesta",
+        tone: "warning",
+        explanation: deliveryFeePending
+          ? "La tienda ya puso el costo del envío. Apruébalo o recházalo aquí abajo."
+          : "La tienda propuso un cambio en tu pedido. Apruébalo o recházalo aquí abajo.",
+      };
     case "CONFIRMED":
       return {
         label: "Confirmado",
@@ -98,12 +101,22 @@ function describe(
               "Rechazaste el cambio que propuso la tienda, así que el pedido se canceló. Puedes hacer otro cuando quieras.",
           };
         case "EXPIRY":
-          return {
-            label: "Cancelado: no respondiste a tiempo",
-            tone: "danger",
-            explanation:
-              "La propuesta de la tienda venció sin respuesta y el pedido se canceló. Si todavía lo quieres, escríbele a la tienda.",
-          };
+          // F-031 I7: a customer whose order expired with the delivery fee
+          // still unquoted never saw a proposal to answer — telling them one
+          // "vencía sin respuesta" would describe an event they never had.
+          return deliveryFeePending
+            ? {
+                label: "Cancelado: se venció el plazo",
+                tone: "danger",
+                explanation:
+                  "La tienda no llegó a confirmar el costo del envío y el plazo del pedido se acabó. No se te cobró nada; si todavía lo quieres, escríbele.",
+              }
+            : {
+                label: "Cancelado: no respondiste a tiempo",
+                tone: "danger",
+                explanation:
+                  "La propuesta de la tienda venció sin respuesta y el pedido se canceló. Si todavía lo quieres, escríbele a la tienda.",
+              };
         case "STORE":
           return {
             label: "Cancelado por la tienda",
@@ -134,6 +147,7 @@ export function OrderStatusBadge({
   hasDelivery,
   cancelledBy = null,
   proposalExpired = false,
+  deliveryFeePending = false,
 }: {
   status: OrderStatus;
   hasDelivery: boolean;
@@ -141,8 +155,18 @@ export function OrderStatusBadge({
   cancelledBy?: OrderCancelledBy | null;
   /** Only meaningful for `AWAITING_CUSTOMER` (E12). */
   proposalExpired?: boolean;
+  /** F-031 I7: the order's own "sin cotizar" boolean — bifurcates
+   *  `AWAITING_CUSTOMER`'s explanation and `CANCELLED`/`EXPIRY`'s label so
+   *  neither ever tells a customer about a proposal they never saw. */
+  deliveryFeePending?: boolean;
 }) {
-  const { label, tone, explanation } = describe(status, hasDelivery, cancelledBy, proposalExpired);
+  const { label, tone, explanation } = describe(
+    status,
+    hasDelivery,
+    cancelledBy,
+    proposalExpired,
+    deliveryFeePending,
+  );
   return (
     <div>
       <Badge tone={tone}>{label}</Badge>

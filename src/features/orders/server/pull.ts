@@ -4,7 +4,7 @@ import { publicEnv } from "@/lib/env";
 import { canonicalSlug } from "@/lib/publicSlug";
 import { routingWhatsappNumber } from "@/lib/storeContact";
 import { buildProposalWhatsappUrl } from "../whatsapp";
-import { expireProposalsQuery } from "./expiry";
+import { expireProposalsQuery, expireUnquotedDeliveryOrdersQuery } from "./expiry";
 
 /**
  * Order pull.
@@ -38,6 +38,29 @@ import { expireProposalsQuery } from "./expiry";
  * misuse there, ficha `pooler-transaccion-deadlock`). Going first is what
  * lets the `findMany` right after it see its own write: the POS never
  * receives an `AWAITING_CUSTOMER` this same call just expired.
+ *
+ * F-031 (v6, DA4): a SECOND barrido, `expireUnquotedDeliveryOrdersQuery`,
+ * joins the same array — the pedido whose delivery fee nobody quoted, which
+ * this clock counts from `createdAt` and NEVER touches `AWAITING_CUSTOMER`
+ * (R15, disjoint `WHERE`s). Same round-trip, same reasons: the POS sees the
+ * cancellation on the very pull that would otherwise hand it a live order.
+ *
+
+ * F-031 (v6, AP1): every money amount below now goes through `money(...)`
+ * before it leaves this function, always two fraction digits — `subtotal`,
+ * `discountTotal`, `deliveryFee`, `total`, the four `proposal.*` amounts and
+ * each line's `unitPrice`/`lineTotal`/`originalUnitPrice`/`originalLineTotal`.
+ * `Decimal.toString()` used to suppress trailing zeros (`880.00` → `"880"`),
+ * which the v5.1 contract's own published example never actually matched.
+ * `quantity` is NOT money and stays untouched. This normalization is scoped
+ * to THIS payload only — never extend it to the marketplace catalogue or to
+ * the reconciliation hash of § ⑤, which strips trailing zeros on purpose.
+ *
+ * `deliveryFee` also carries F-031 DA1/DA3: `Order.deliveryFee` is nullable
+ * now (`NULL` = not quoted yet). This function never sends `null` on the
+ * wire (R18) — a `NULL` column emits `"0.00"` — and instead adds
+ * `deliveryFeePending: true` so a v5 consumer that does
+ * `parseFloat(order.deliveryFee)` keeps working unchanged.
  */
 
 /** The exact shape frozen into `Order.rateSnapshot` at checkout time (R9). */
@@ -63,7 +86,13 @@ export type PulledOrder = {
   currencyCode: string;
   subtotal: string;
   discountTotal: string;
+  /** Always present (R18), two decimals. `"0.00"` when NULL — see
+   *  `deliveryFeePending` for whether that is an ACTUAL zero. */
   deliveryFee: string;
+  /** New in v6 (F-031 DA3): `true` while `Order.deliveryFee` is `NULL` — the
+   *  ONLY way to tell "not quoted yet" from "quoted at 0.00" (R1, R19). Never
+   *  inferred from `contact.address` or from comparing `total`/`subtotal`. */
+  deliveryFeePending: boolean;
   total: string;
   notes: string | null;
   createdAt: string;
@@ -102,8 +131,9 @@ export async function pullOrders(
   since: bigint,
   limit: number,
 ): Promise<{ orders: PulledOrder[]; nextCursor: string | null }> {
-  const [, rows] = await prisma.$transaction([
+  const [, , rows] = await prisma.$transaction([
     expireProposalsQuery(businessId),
+    expireUnquotedDeliveryOrdersQuery(businessId),
     prisma.order.findMany({
       where: { businessId, id: { gt: since } },
       orderBy: { id: "asc" },
@@ -190,11 +220,11 @@ export async function pullOrders(
         ? {
             proposedAt: order.proposedAt.toISOString(),
             expiresAt: order.expiresAt.toISOString(),
-            previousTotal: order.previousTotal.toString(),
-            subtotal: order.proposedSubtotal.toString(),
-            discountTotal: order.proposedDiscountTotal.toString(),
-            deliveryFee: order.proposedDeliveryFee.toString(),
-            total: order.proposedTotal.toString(),
+            previousTotal: money(order.previousTotal, order.currencyCode).amount,
+            subtotal: money(order.proposedSubtotal, order.currencyCode).amount,
+            discountTotal: money(order.proposedDiscountTotal, order.currencyCode).amount,
+            deliveryFee: money(order.proposedDeliveryFee, order.currencyCode).amount,
+            total: money(order.proposedTotal, order.currencyCode).amount,
             message: order.proposalMessage,
           }
         : null;
@@ -211,10 +241,13 @@ export async function pullOrders(
         address: order.deliveryAddress,
       },
       currencyCode: order.currencyCode,
-      subtotal: order.subtotal.toString(),
-      discountTotal: order.discountTotal.toString(),
-      deliveryFee: order.deliveryFee.toString(),
-      total: order.total.toString(),
+      subtotal: money(order.subtotal, order.currencyCode).amount,
+      discountTotal: money(order.discountTotal, order.currencyCode).amount,
+      // F-031 DA1/R18: NULL (not quoted yet) is never sent as `null` — it is
+      // `"0.00"` plus `deliveryFeePending: true` below.
+      deliveryFee: money(order.deliveryFee ?? 0, order.currencyCode).amount,
+      deliveryFeePending: order.deliveryFee === null,
+      total: money(order.total, order.currencyCode).amount,
       notes: order.notes,
       createdAt: order.createdAt.toISOString(),
       rateSnapshot: order.rateSnapshot as RateSnapshot,
@@ -222,13 +255,16 @@ export async function pullOrders(
       customerWhatsappUrl,
       proposal,
       items: order.items.map((item) => {
-        const unitPrice = item.unitPrice.toString();
         const currencyCode = item.currencyCode;
-        const lineTotal = item.lineTotal.toString();
+        const unitPrice = money(item.unitPrice, currencyCode).amount;
+        const lineTotal = money(item.lineTotal, currencyCode).amount;
 
         const hasOriginal = item.originalUnitPrice !== null && item.originalCurrencyCode !== null;
-        const originalUnitPrice = hasOriginal ? item.originalUnitPrice!.toString() : unitPrice;
         const originalCurrencyCode = hasOriginal ? item.originalCurrencyCode! : currencyCode;
+        const originalUnitPrice = hasOriginal
+          ? money(item.originalUnitPrice!, originalCurrencyCode).amount
+          : unitPrice;
+        // quantity is NOT money (AP1): left as-is, whatever precision Decimal gives it.
         const originalLineTotal = hasOriginal
           ? multiply(money(originalUnitPrice, originalCurrencyCode), item.quantity.toString())
               .amount

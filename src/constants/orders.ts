@@ -80,3 +80,28 @@ export const ORDER_EXPIRED_PROPOSAL_REASON = "La propuesta venció sin respuesta
 
 /** ADR 0024 defensa 7: hard cap on the response route's body. */
 export const ORDER_RESPONSE_MAX_BODY_BYTES = 1024;
+
+// ---------------------------------------------------------------------------
+// F-031 — envío cotizado al gestionar
+// ---------------------------------------------------------------------------
+
+/**
+ * R15/I7: motivo propio del vencimiento del pedido cuyo envío nadie cotizó,
+ * distinto de `ORDER_EXPIRED_PROPOSAL_REASON` (esa es la propuesta vencida;
+ * esta es el pedido que nunca llegó a tener propuesta). Literal, fijado en
+ * la v6 de `docs/sync-contract.md`: no se reformula ni se le cambia una
+ * tilde (decisión AP2 del humano).
+ */
+export const ORDER_UNQUOTED_DELIVERY_EXPIRED_REASON =
+  "El pedido venció sin que la tienda cotizara el envío";
+
+/**
+ * E10/DA5: los tres destinos de `POST /api/internal/orders/status` que
+ * exigen el envío ya cotizado. `CONFIRMED`, `CANCELLED` y
+ * `REJECTED_BY_STORE` se siguen aceptando con el envío pendiente.
+ */
+export const ORDER_STATUSES_REQUIRING_QUOTED_DELIVERY = [
+  "READY",
+  "IN_TRANSIT",
+  "DELIVERED",
+] as const;

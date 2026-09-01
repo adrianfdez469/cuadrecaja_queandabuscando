@@ -12,6 +12,10 @@ function baseProps(overrides: Partial<Parameters<typeof OrderProposalCard>[0]> =
     expiresAt: new Date(NOW.getTime() + 24 * 60 * 60_000),
     previousTotal: "880.00",
     proposedTotal: "1180.00",
+    // F-031 etapa 3 fixture update: none of these existing tests exercise
+    // the "sin cotizar" copy, so `false` preserves the FLAT_RATE behavior
+    // (`previousTotalPartial` has no default — it is required on purpose).
+    previousTotalPartial: false,
     diff: ["Envío: antes sin costo, ahora $180.00."],
     storeContactUrl: "https://wa.me/5350000001?text=hola",
     now: NOW,
@@ -77,6 +81,63 @@ describe("OrderProposalCard — propuesta viva", () => {
 
     rerender(<OrderProposalCard {...baseProps({ storeContactUrl: null })} />);
     expect(screen.queryByRole("link", { name: "Escribirle a la tienda" })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * F-031 design.md § 6 — "La tienda ya calculó el envío": el pedido estaba
+ * sin cotizar antes de esta propuesta, así que el `previousTotal` es
+ * PARCIAL. Las tres etiquetas del `dl` cambian de nombre y el párrafo de
+ * aprobar deja de decir "en vez de".
+ */
+describe("OrderProposalCard — propuesta sobre un pedido sin cotizar (F-031)", () => {
+  function pendingProps(overrides: Partial<Parameters<typeof OrderProposalCard>[0]> = {}) {
+    return baseProps({
+      previousTotal: "1234.56",
+      proposedTotal: "1414.56",
+      previousTotalPartial: true,
+      diff: ["Envío: estaba por confirmar, ahora $180.00."],
+      ...overrides,
+    });
+  }
+
+  it("titular: 'La tienda ya calculó el envío', no 'La tienda propone un cambio'", () => {
+    render(<OrderProposalCard {...pendingProps()} />);
+    expect(screen.getByText("La tienda ya calculó el envío")).toBeInTheDocument();
+    expect(screen.queryByText("La tienda propone un cambio")).not.toBeInTheDocument();
+  });
+
+  it("el dl usa 'Total sin el envío' / 'Total con el envío' / 'El envío', nunca 'Total actual'", () => {
+    render(<OrderProposalCard {...pendingProps()} />);
+    expect(screen.getByText("Total sin el envío")).toBeInTheDocument();
+    expect(screen.getByText("Total con el envío")).toBeInTheDocument();
+    expect(screen.getByText("El envío")).toBeInTheDocument();
+    expect(screen.getByText("$180.00")).toBeInTheDocument();
+    expect(screen.queryByText("Total actual")).not.toBeInTheDocument();
+    expect(screen.queryByText("Diferencia")).not.toBeInTheDocument();
+  });
+
+  it("el párrafo de aprobar nombra el pedido y el envío por separado, sin 'en vez de'", () => {
+    render(<OrderProposalCard {...pendingProps()} />);
+    expect(
+      screen.getByText(
+        "Vas a aceptar el envío que puso la tienda: pagarías $1,414.56, que es tu pedido ($1,234.56) más el envío ($180.00). La tienda prepara tu pedido con estos importes y te contacta por teléfono.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("envío regalado (totales iguales): 'Ya está el total completo…', no 'El total no cambia'", () => {
+    render(
+      <OrderProposalCard
+        {...pendingProps({ previousTotal: "1234.56", proposedTotal: "1234.56" })}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "Ya está el total completo: la tienda no te cobra el envío, así que sigue siendo $1,234.56.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^El total no cambia/)).not.toBeInTheDocument();
   });
 });
 

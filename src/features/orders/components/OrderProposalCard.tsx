@@ -26,6 +26,7 @@ export function OrderProposalCard({
   expiresAt,
   previousTotal,
   proposedTotal,
+  previousTotalPartial,
   diff,
   storeContactUrl,
   now = new Date(),
@@ -37,6 +38,12 @@ export function OrderProposalCard({
   expiresAt: Date;
   previousTotal: string;
   proposedTotal: string;
+  /** F-031 I3: `previousTotal` was PARTIAL — the order's delivery fee was
+   *  not quoted yet before this proposal. Required, not defaulted: it is
+   *  what forces every caller to say which total this is, so nothing can
+   *  keep calling a partial total "Total actual" by accident
+   *  (architecture.md § Contratos internos). */
+  previousTotalPartial: boolean;
   /** Lines from `buildProposalDiff` — already plain sentences. */
   diff: string[];
   /** "Escribirle a la tienda" (wa.me), `null` with no usable number. */
@@ -84,7 +91,7 @@ export function OrderProposalCard({
       className="border-warning/30 bg-surface mt-6 rounded-lg border p-4 sm:p-6"
     >
       <h2 id="propuesta-titulo" className="text-lg font-semibold">
-        La tienda propone un cambio
+        {previousTotalPartial ? "La tienda ya calculó el envío" : "La tienda propone un cambio"}
       </h2>
 
       <p className={`mt-2 text-sm font-medium ${TONE_CLASS[remaining.tone]}`}>
@@ -114,17 +121,25 @@ export function OrderProposalCard({
         <h3 className="text-fg-muted text-sm font-medium">Lo que pagarías</h3>
         {totalUnchanged ? (
           <p className="text-fg mt-2 text-sm">
-            El total no cambia: sigue siendo {formatMoney(proposed)}.
+            {previousTotalPartial
+              ? `Ya está el total completo: la tienda no te cobra el envío, así que sigue siendo ${formatMoney(proposed)}.`
+              : `El total no cambia: sigue siendo ${formatMoney(proposed)}.`}
           </p>
         ) : (
           <dl className="mt-2 space-y-1 text-sm sm:grid sm:grid-cols-[1fr_auto] sm:space-y-2 sm:gap-x-4">
-            <dt className="text-fg-muted">Total actual</dt>
+            <dt className="text-fg-muted">
+              {previousTotalPartial ? "Total sin el envío" : "Total actual"}
+            </dt>
             <dd>{formatMoney(previous)}</dd>
-            <dt className="text-fg-muted">Total propuesto</dt>
+            <dt className="text-fg-muted">
+              {previousTotalPartial ? "Total con el envío" : "Total propuesto"}
+            </dt>
             <dd className="text-fg text-2xl font-semibold">{formatMoney(proposed)}</dd>
-            <dt className="text-fg-muted">Diferencia</dt>
+            <dt className="text-fg-muted">{previousTotalPartial ? "El envío" : "Diferencia"}</dt>
             <dd>
-              {formatMoney(difference)} {comparison > 0 ? "más" : "menos"}
+              {previousTotalPartial
+                ? formatMoney(difference)
+                : `${formatMoney(difference)} ${comparison > 0 ? "más" : "menos"}`}
             </dd>
           </dl>
         )}
@@ -137,9 +152,19 @@ export function OrderProposalCard({
           </summary>
           <div className="mt-3 space-y-3">
             <p className="text-fg-muted text-sm">
-              Vas a aceptar el cambio: pagarías {formatMoney(proposed)} en vez de{" "}
-              {formatMoney(previous)}. La tienda prepara tu pedido con estos importes y te contacta
-              por teléfono.
+              {previousTotalPartial ? (
+                <>
+                  Vas a aceptar el envío que puso la tienda: pagarías {formatMoney(proposed)}, que
+                  es tu pedido ({formatMoney(previous)}) más el envío ({formatMoney(difference)}).
+                  La tienda prepara tu pedido con estos importes y te contacta por teléfono.
+                </>
+              ) : (
+                <>
+                  Vas a aceptar el cambio: pagarías {formatMoney(proposed)} en vez de{" "}
+                  {formatMoney(previous)}. La tienda prepara tu pedido con estos importes y te
+                  contacta por teléfono.
+                </>
+              )}
             </p>
             <form method="post" action={responsePath}>
               <input type="hidden" name="decision" value={ORDER_PROPOSAL_DECISION.APPROVE} />

@@ -1,9 +1,16 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 5.1** · 1 de septiembre de 2026
+**Versión 6** · 1 de septiembre de 2026
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
-existe y está verificado contra los casos de abajo.
+existe y está verificado contra los casos de abajo, **con una excepción marcada
+a propósito**: lo que la v6 introduce (§ «Cambios respecto a la v5.1») está
+acordado y publicado **antes** de estar implementado en queandabuscando, para
+que cuadrecaja pueda empezar en paralelo. Mientras eso dure, un pedido nunca
+llega con `deliveryFeePending`, `POST /orders/status` no devuelve todavía el
+`409` y los importes siguen saliendo sin los ceros de relleno. Se avisa cuando
+el lado receptor esté en pie; si algo de la v6 os hace falta antes para
+probar, pedidlo y se prioriza.
 
 ## Versionado de este documento
 
@@ -23,6 +30,48 @@ delante es lo que implementó.
 
 Una corrección de tipografía o de un enlace roto es una menor: cuesta un dígito
 y evita la pregunta «¿es este el documento que leí?».
+
+## Cambios respecto a la v5.1
+
+**Esta versión NO es aditiva en dos cosas** (F-031), y las dos piden trabajo del
+lado de cuadrecaja antes de recibir tráfico real:
+
+- **`POST /orders/status` gana la primera guarda de transición del contrato.**
+  Responde `409 ORDER_DELIVERY_NOT_QUOTED` al llevar a `READY`, `IN_TRANSIT` o
+  `DELIVERED` un pedido cuyo envío todavía no está cotizado. La línea de la v5
+  —«Sin guardas de transición: el POS es la autoridad y puede reportar
+  cualquiera de los seis valores sobre cualquier pedido que le pertenezca»—
+  **deja de ser cierta**.
+- **Todos los importes del payload del pull traen ahora dos decimales.** Hasta
+  la v5.1 se emitían con supresión de ceros de relleno —`880,00` salía como
+  `"880"` y cero como `"0"`—, así que **el ejemplo completo publicado en este
+  documento nunca fue cierto**. Se corrige el código, no solo el ejemplo. Un
+  lector que parsee a número no nota nada; uno que compare cadenas, sí.
+
+Lo demás es aditivo:
+
+- **El envío sin cotizar existe** (§ «El envío sin cotizar»): un pedido puede
+  llegar con el importe del envío todavía por decidir. Lo dice un campo nuevo,
+  `deliveryFeePending`, y `deliveryFee` sigue presente valiendo `"0.00"` — que
+  **no** significa envío gratis.
+- **`total` es parcial mientras el envío no esté cotizado**, y vale
+  `subtotal - discountTotal`. La igualdad de siempre vuelve a cerrarse en cuanto
+  hay cotización.
+- **Cotizar es proponer**: no hay endpoint nuevo. Se usa
+  `POST /orders/proposal`, y como su `items` es obligatorio, para cotizar
+  **solo** el envío se reenvían las mismas líneas que el pull acaba de entregar.
+- **`Store.orderExpiryHours` gana un segundo significado**: además de cuánto
+  dura una propuesta, ahora es cuánto vive un pedido cuyo envío nadie cotizó,
+  contado desde su creación. Sigue siendo de queandabuscando en esta versión.
+- **Un `cancelReason` nuevo y literal** para el pedido que vence sin cotizar.
+
+**Aviso de la v7, para que no sean dos sorpresas.** La versión siguiente
+(F-032) lleva al `payload` de `STORE` las cinco columnas de configuración de
+compra —`checkoutMode`, `deliveryEnabled`, `deliveryFee`, `orderExpiryHours` y
+el modo de envío que introduce esta v6—, y con ellas `orderExpiryHours`
+**cambia de dueño**: pasa a escribirla cuadrecaja. Hoy ninguna viaja. Se
+anuncia aquí porque el trabajo de cuadrecaja para esta v6 (pedidos) y para la
+v7 (configuración de la tienda) es separable, y la v6 no espera a la v7.
 
 ## Cambios respecto a la v5
 
@@ -178,12 +227,14 @@ toca ninguna ruta.
 | `GET`  | `/api/internal/reconciliation?storeId=`                | —                                  | 200 `{ products, hash }`                                                         |
 | `GET`  | `/api/internal/slug-availability?slug=&name=&storeId=` | —                                  | 200 `{ candidate, available, reason, resolvedSlug, url, storeKnown, reserving }` |
 
-### Vocabulario de errores (v5)
+### Vocabulario de errores (v6)
 
 Válido para las siete rutas de arriba. Los tres primeros de `503`/`401` ya
 existían con otro nombre de variable; los siguientes son de la v3; la fila de
-`400 INVALID_BATCH` es de la v4 (F-024); las dos últimas son de la v5 (F-019),
-propias de `POST /api/internal/orders/proposal`.
+`400 INVALID_BATCH` es de la v4 (F-024); `409 ORDER_NOT_PROPOSABLE` y
+`400 CURRENCY_MISMATCH` son de la v5 (F-019), propias de
+`POST /api/internal/orders/proposal`; y `409 ORDER_DELIVERY_NOT_QUOTED` es de la
+v6 (F-031), propia de `POST /api/internal/orders/status`.
 
 | Código | Cuerpo                                      | Cuándo                                                                                                                                                                                                                                                            |
 | ------ | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -196,6 +247,7 @@ propias de `POST /api/internal/orders/proposal`.
 | `404`  | `{"error":"UNKNOWN_STORE"}`                 | El `storeId` de ⑤ no existe **o pertenece a otro negocio**                                                                                                                                                                                                        |
 | `409`  | `{"error":"ORDER_NOT_PROPOSABLE","status"}` | **Nuevo (v5).** `POST /orders/proposal` sobre un pedido que no está en `PULLED`, `CONFIRMED` ni `AWAITING_CUSTOMER`. Nada se escribe; `status` trae el estado actual                                                                                              |
 | `400`  | `{"error":"CURRENCY_MISMATCH"}`             | **Nuevo (v5).** La propuesta llega en una moneda distinta de `Order.currencyCode`                                                                                                                                                                                 |
+| `409`  | `{"error":"ORDER_DELIVERY_NOT_QUOTED"}`     | **Nuevo (v6).** `POST /orders/status` llevando a `READY`, `IN_TRANSIT` o `DELIVERED` un pedido con `deliveryFeePending: true`. Nada se escribe. Cotiza primero por `POST /orders/proposal` y espera que el comprador apruebe                                      |
 | `400`  | `{"error":"MISSING_STORE_ID"}`              | **Aclaración, no cambio (F-014).** Falta el parámetro `storeId` en ⑤, o llega vacío. Ya lo devuelve el endpoint hoy; esta fila lo documenta                                                                                                                       |
 
 Un recurso de otro negocio nunca responde distinto de uno inexistente: ni
@@ -617,7 +669,7 @@ la v2, con un pedido de una línea priceada originalmente en USD:
       "contact": { "name": "Ana Pérez", "phone": "+5355555555", "email": null, "address": null },
       "currencyCode": "CUP",
       "subtotal": "880.00",
-      "discountTotal": "0",
+      "discountTotal": "0.00", // v6: dos decimales SIEMPRE, también el cero
       "deliveryFee": "0.00",
       "total": "880.00",
       "notes": null,
@@ -664,6 +716,131 @@ originales. Un pedido creado antes de esta versión no tiene los originales
 guardados; en ese caso **se emiten los valores ya convertidos como respaldo**,
 así que un lector que espera un número ahí nunca se encuentra con `null`.
 
+### El formato de los importes (v6)
+
+**Todos los importes del payload de este endpoint traen dos decimales**, cero
+incluido: `"880.00"`, `"0.00"`, `"180.50"`. Aplica a `subtotal`,
+`discountTotal`, `deliveryFee`, `total`, a los cuatro importes de `proposal` y a
+los de cada línea (`unitPrice`, `lineTotal`, `originalUnitPrice`,
+`originalLineTotal`). **`quantity` no es dinero y no cambia**: sigue con sus tres
+decimales (`"2.000"`).
+
+Hasta la v5.1 no era así. Los importes se emitían suprimiendo los ceros de
+relleno, así que `880,00` salía como `"880"`, `180,50` como `"180.5"` y cero como
+`"0"`, mientras el ejemplo publicado aquí mostraba dos decimales. **El ejemplo
+estaba mal, no el código**, y en la v6 se arreglan los dos: el ejemplo de arriba
+es, por fin, exactamente lo que sale por el cable.
+
+Dos avisos, porque esta regla **no** se extiende sola al resto del documento:
+
+- **§ ⑤ Reconciliación no cambia.** Su hash quita los ceros de relleno **a
+  propósito** (`trim(trailing '0' …)` en el SQL espejo) y las dos partes tienen
+  que hacer exactamente lo mismo o el hash difiere siempre. No lo toques.
+- **§ ① sigue con su propia regla**: `price` viaja con dos decimales **como
+  máximo**, que es la precondición de la convergencia del hash.
+
+Y la regla operativa que sobrevive a cualquier versión: **compara importes como
+números, nunca como cadenas.**
+
+### El envío sin cotizar (v6, F-031)
+
+Hay negocios que solo saben cuánto cuesta el envío **cuando alguien mira el
+pedido**: depende de la dirección, del mensajero libre y de la hora. Hasta la
+v5.1, la tienda de ese negocio tenía que inventarse una tarifa fija o no ofrecer
+domicilio. En la v6 el comprador puede pedir a domicilio **sin que el importe
+del envío exista todavía**, y el pedido llega al POS diciéndolo.
+
+**El campo nuevo es `deliveryFeePending`, y es la única forma de saberlo.**
+
+```jsonc
+// Pedido SIN COTIZAR — el importe del envío no existe todavía
+{
+  "id": "43",
+  "status": "PULLED",
+  "contact": {
+    "name": "Ana Pérez",
+    "phone": "+5355555555",
+    "email": null,
+    "address": "Calle 23 esq. L, Vedado",
+  },
+  "currencyCode": "CUP",
+  "subtotal": "880.00",
+  "discountTotal": "0.00",
+  "deliveryFee": "0.00", // presente SIEMPRE. Aquí es relleno: NO significa "envío gratis"
+  "deliveryFeePending": true, // NUEVO en v6
+  "total": "880.00", // PARCIAL: subtotal - discountTotal, sin envío
+  "cancelledBy": null,
+  "proposal": null,
+  // … el resto de los campos, igual que siempre
+}
+```
+
+```jsonc
+// Pedido con envío COTIZADO EN CERO — la tienda lo regaló
+{
+  "id": "44",
+  "status": "CONFIRMED",
+  "contact": {
+    "name": "Luis Mena",
+    "phone": "+5355555556",
+    "email": null,
+    "address": "Ave. 31 e/ 42 y 44, Playa",
+  },
+  "currencyCode": "CUP",
+  "subtotal": "880.00",
+  "discountTotal": "0.00",
+  "deliveryFee": "0.00", // el MISMO string que el pedido de arriba, a propósito
+  "deliveryFeePending": false, // NUEVO en v6: aquí el cero es un importe acordado
+  "total": "880.00", // COMPLETO: subtotal - discountTotal + deliveryFee
+  "cancelledBy": null,
+  "proposal": null,
+  // … el resto de los campos, igual que siempre
+}
+```
+
+**Los dos pedidos caben en la misma respuesta y su `deliveryFee` es idéntico.**
+Eso es deliberado: `deliveryFeePending` es lo único que los distingue.
+Cualquier atajo —tratar el `0.00` como gratis, mirar si hay `contact.address`,
+comparar `total` con `subtotal`— acierta hoy y falla con el primer envío
+regalado. **Esta es la trampa central de esta versión.**
+
+Qué significa `total`, en una frase por caso:
+
+| `deliveryFeePending` | `total`                                  | Qué es                                                 |
+| -------------------- | ---------------------------------------- | ------------------------------------------------------ |
+| `true`               | `subtotal - discountTotal`               | **Parcial.** Va a crecer cuando se cotice y se apruebe |
+| `false`              | `subtotal - discountTotal + deliveryFee` | Completo, lo de siempre                                |
+
+Con `deliveryFeePending: true` la igualdad
+`total = subtotal - discountTotal + deliveryFee` **no se sostiene**, porque ese
+`deliveryFee` es un relleno y no un importe. No hay un campo `totalIsPartial`:
+`deliveryFeePending` **es** esa afirmación, y dos banderas para un mismo hecho
+es como nacen las contradicciones.
+
+**Cómo se cotiza: con el endpoint que ya existe.** Cotizar **es** proponer, así
+que se usa `POST /api/internal/orders/proposal` (§ La renegociación) con el
+`deliveryFee` concreto, y el pedido pasa a `AWAITING_CUSTOMER` para que el
+comprador apruebe o rechace. No hay ruta nueva ni un segundo camino para «poner
+el envío».
+
+Un detalle práctico que conviene saber **antes** de recibir un `400`: el `items`
+de esa llamada es **obligatorio y con al menos una línea**, también cuando lo
+único que cambia es el envío. Para cotizar solo el envío se reenvían **las
+mismas líneas que el pull acaba de entregar**, con los mismos importes;
+aprobar las reescribe idénticas y nada se pierde.
+
+**Qué le pasa al pedido que nadie cotiza.** Vive `Store.orderExpiryHours`
+contadas **desde su creación** y después el reloj lo cierra solo: `CANCELLED`
+con `cancelledBy: "EXPIRY"` y un `cancelReason` propio, literal: «El pedido
+venció sin que la tienda cotizara el envío» — distinto del de la propuesta
+vencida, porque el comprador no vio ninguna propuesta. El `409` de más abajo
+garantiza que ningún pedido se despachó antes con el total sin cerrar.
+
+Los dos plazos son **independientes y se suman**: un pedido puede vivir sin
+cotizar hasta `orderExpiryHours` y, si la tienda cotiza justo antes del límite,
+otras `orderExpiryHours` más esperando la respuesta del comprador. Es la
+consecuencia de que el campo signifique dos cosas, y es correcto.
+
 ### La renegociación (v5, F-019)
 
 **El enum de `status` pasa de 6 a 9 valores.** `PENDING`, `PULLED`,
@@ -695,7 +872,7 @@ lo mismo. Los tres nuevos:
     "expiresAt": "2026-08-31T14:19:43.000Z",
     "previousTotal": "880.00", // el total vigente antes de esta propuesta
     "subtotal": "1000.00", // los cuatro importes PROPUESTOS
-    "discountTotal": "0",
+    "discountTotal": "0.00",
     "deliveryFee": "180.00",
     "total": "1180.00",
     "message": "El envío a Playa cuesta 180.", // o null, la tienda no está obligada a escribir uno
@@ -705,8 +882,11 @@ lo mismo. Los tres nuevos:
 
 `cancelledBy` distingue los tres desenlaces terminales que antes eran
 indistinguibles: `"CUSTOMER"` (el comprador rechazó la propuesta),
-`"EXPIRY"` (venció sin respuesta — `cancelReason` trae, literal, «La
-propuesta venció sin respuesta»), `"STORE"` (lo cerró la tienda, por
+`"EXPIRY"` (venció sin respuesta — `cancelReason` trae uno de **dos**
+literales desde la v6: «La propuesta venció sin respuesta» cuando lo que venció
+fue una propuesta, y «El pedido venció sin que la tienda cotizara el envío»
+cuando el pedido murió sin que nadie cotizara el envío, § «El envío sin
+cotizar»), `"STORE"` (lo cerró la tienda, por
 `CANCELLED` o por `REJECTED_BY_STORE`). `proposal.items` **no** viaja: las
 líneas las compuso el propio POS al proponer y no hay ningún camino en el que
 necesite leerlas de vuelta.
@@ -763,9 +943,15 @@ que tenía al crearse); y **queandabuscando no envía el mensaje de WhatsApp**
 en un estado proponible; `400 CURRENCY_MISMATCH` cuando la moneda no
 coincide; ninguno de los dos escribe nada.
 
-**`Store.orderExpiryHours` es de queandabuscando** (cuántas horas dura una
-propuesta antes de que el reloj la cancele sola, 24 por defecto): el POS
-**no** lo envía y un evento `STORE` **no** lo pisa.
+**`Store.orderExpiryHours` es de queandabuscando** (24 por defecto): el POS
+**no** lo envía y un evento `STORE` **no** lo pisa. **Sigue siendo así en la
+v6 — cambia en la v7** (F-032), donde pasa a escribirla cuadrecaja junto con el
+resto de la configuración de compra.
+
+**Desde la v6 significa dos cosas**, y las dos usan el mismo número: cuántas
+horas dura una propuesta antes de que el reloj la cancele sola, **y** cuántas
+horas vive un pedido cuyo envío nadie cotizó, contadas desde su creación
+(§ «El envío sin cotizar»). Los dos plazos son independientes y pueden sumarse.
 
 ### Formato de `Order.code`
 
@@ -786,9 +972,30 @@ POST /api/internal/orders/status
 `REJECTED_BY_STORE` (v5 — **la línea de arriba, vigente hasta la v4, decía
 solo cuatro valores y ya no es cierta**). `AWAITING_CUSTOMER` **no** entra en
 este enum: responde `400 INVALID_BODY` — ese estado solo lo pone
-`POST /orders/proposal`, la única acción que fija un plazo. Sin guardas de
-transición: el POS es la autoridad y puede reportar cualquiera de los seis
-valores sobre cualquier pedido que le pertenezca.
+`POST /orders/proposal`, la única acción que fija un plazo.
+
+**Una guarda de transición, la primera del contrato (v6 — la línea que estaba
+aquí, «Sin guardas de transición: el POS es la autoridad y puede reportar
+cualquiera de los seis valores sobre cualquier pedido que le pertenezca», ya no
+es cierta).** Sobre un pedido con el envío **sin cotizar**
+(`deliveryFeePending: true`):
+
+| Destino                                         | Respuesta                       |
+| ----------------------------------------------- | ------------------------------- |
+| `READY` · `IN_TRANSIT` · `DELIVERED`            | `409 ORDER_DELIVERY_NOT_QUOTED` |
+| `CONFIRMED` · `CANCELLED` · `REJECTED_BY_STORE` | `200`, como siempre             |
+
+El motivo es que entregar un pedido cuyo total nunca se cerró es una
+reclamación garantizada: primero se cotiza y el comprador aprueba, después se
+despacha. Aceptar el pedido (`CONFIRMED`) sin haber cotizado **sí** está
+permitido —es lo normal: se acepta y se cotiza después—, y cancelarlo también,
+porque cancelar no cobra nada. El `409` **no escribe nada**, y un `orderId` de
+otro negocio sigue respondiendo `404 UNKNOWN_ORDER`: el aislamiento por negocio
+se comprueba **antes** que la cotización, así que este error nuevo no sirve para
+averiguar si un pedido existe en otro negocio.
+
+En el resto de los casos el POS sigue siendo la autoridad y puede reportar
+cualquiera de los seis valores sobre cualquier pedido que le pertenezca.
 
 ### El timbre del canal `negocio:` (aclaración aditiva, v5.1)
 
@@ -1007,6 +1214,30 @@ en ningún lado registre un error.
 
 ## Cambios requeridos en cuadrecaja
 
+### De la v6 (F-031) — no hay migración, es código
+
+Nada de esto es una columna: la v6 no pide ni un campo nuevo en el schema de
+cuadrecaja. Son tres cosas de código y una de parseo, y están desarrolladas con
+su porqué en
+[`traspaso-cuadrecaja-envio-cotizado.md`](traspaso-cuadrecaja-envio-cotizado.md),
+que es el documento corto para leer primero:
+
+1. **Leer `deliveryFeePending` antes de usar `deliveryFee`.** Un pedido sin
+   cotizar y uno con el envío regalado traen el **mismo** `"0.00"`; tratar ese
+   cero como «gratis» cobra de menos, en silencio.
+2. **Cotizar por `POST /orders/proposal`**, reenviando las mismas líneas que el
+   pull entregó (su `items` es obligatorio).
+3. **Manejar `409 ORDER_DELIVERY_NOT_QUOTED`** como «falta cotizar», no como un
+   fallo transitorio: reintentar no lo arregla.
+4. **Revisar el parseo de importes**: ahora todos los del pull traen dos
+   decimales. Sin efecto si se parsean a número.
+
+La única columna que la v6 **no** pide y conviene saber que falta:
+`Tienda.modoEnvio` y sus cuatro vecinas de configuración de compra. Eso es la
+v7, § «Cambios respecto a la v5.1».
+
+### De las versiones anteriores
+
 Todos aditivos y nullable, así que la migración no reescribe tablas — importante
 en `ProductoTienda`, la más caliente del sistema.
 
@@ -1041,16 +1272,18 @@ Más: el índice parcial de divergencia con `CREATE INDEX CONCURRENTLY`, el cron
 
 ## Modos de falla
 
-| Falla                                                                                     | Qué le pasa al usuario                                                                                                                                                                        | Recuperación                                                                                                                                                            |
-| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| La tienda está caída                                                                      | Nada: el POS sigue vendiendo                                                                                                                                                                  | La outbox no se drena, `intentos++`. Se recupera solo                                                                                                                   |
-| El POS está caído                                                                         | La tienda sirve el último snapshot y **acepta pedidos igual**                                                                                                                                 | Los pedidos esperan a que el POS vuelva a hacer pull                                                                                                                    |
-| El cron no corre                                                                          | Precios y disponibilidad se atrasan                                                                                                                                                           | La reconciliación lo detecta. Alerta a los 30 min                                                                                                                       |
-| Evento con payload inválido                                                               | Ese producto queda viejo; el resto fluye                                                                                                                                                      | `intentos > 5` → DLQ + alerta                                                                                                                                           |
-| Se perdió `dispPublicada`                                                                 | Resincroniza todo el stock una vez                                                                                                                                                            | Idempotente, sin intervención                                                                                                                                           |
-| El token de un negocio se filtró                                                          | Alguien podría escribir catálogo falso a nombre de ESE negocio, ninguno más                                                                                                                   | Re-acuñar el token de ese negocio (invalida el viejo al instante, no toca a los demás). Motivo para pasar a HMAC                                                        |
-| **Un POS todavía en v3 envía `barcode` (singular)**                                       | **No sincroniza catálogo en absoluto**: el lote entero responde `400 INVALID_BATCH` y ni siquiera queda una `SyncEvent` para reintentar — no es un producto el que falla, es el lote completo | Migrar el payload de `PRODUCT` a `barcodes: string[]` (v4). No hay periodo de gracia ni modo de compatibilidad: es el mismo corte que hizo la v3 en autenticación (HD5) |
-| **Un POS todavía en v4 no reconoce `AWAITING_CUSTOMER`/`IN_TRANSIT`/`REJECTED_BY_STORE`** | Un `switch` exhaustivo sobre `status` se rompe al primer pedido en uno de los tres estados nuevos — no hay error HTTP que avise, es un fallo del lado del POS                                 | Migrar el lector del enum antes de recibir tráfico real. No hay periodo de convivencia: mismo corte que la v3/v4 (F-019)                                                |
+| Falla                                                                                              | Qué le pasa al usuario                                                                                                                                                                                                                           | Recuperación                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| La tienda está caída                                                                               | Nada: el POS sigue vendiendo                                                                                                                                                                                                                     | La outbox no se drena, `intentos++`. Se recupera solo                                                                                                                   |
+| El POS está caído                                                                                  | La tienda sirve el último snapshot y **acepta pedidos igual**                                                                                                                                                                                    | Los pedidos esperan a que el POS vuelva a hacer pull                                                                                                                    |
+| El cron no corre                                                                                   | Precios y disponibilidad se atrasan                                                                                                                                                                                                              | La reconciliación lo detecta. Alerta a los 30 min                                                                                                                       |
+| Evento con payload inválido                                                                        | Ese producto queda viejo; el resto fluye                                                                                                                                                                                                         | `intentos > 5` → DLQ + alerta                                                                                                                                           |
+| Se perdió `dispPublicada`                                                                          | Resincroniza todo el stock una vez                                                                                                                                                                                                               | Idempotente, sin intervención                                                                                                                                           |
+| El token de un negocio se filtró                                                                   | Alguien podría escribir catálogo falso a nombre de ESE negocio, ninguno más                                                                                                                                                                      | Re-acuñar el token de ese negocio (invalida el viejo al instante, no toca a los demás). Motivo para pasar a HMAC                                                        |
+| **Un POS todavía en v3 envía `barcode` (singular)**                                                | **No sincroniza catálogo en absoluto**: el lote entero responde `400 INVALID_BATCH` y ni siquiera queda una `SyncEvent` para reintentar — no es un producto el que falla, es el lote completo                                                    | Migrar el payload de `PRODUCT` a `barcodes: string[]` (v4). No hay periodo de gracia ni modo de compatibilidad: es el mismo corte que hizo la v3 en autenticación (HD5) |
+| **Un POS todavía en v5 ignora el `409 ORDER_DELIVERY_NOT_QUOTED`**                                 | Sus pedidos con el envío sin cotizar **no avanzan**: cada intento de `READY`/`IN_TRANSIT`/`DELIVERED` se rechaza y, si el POS no mira el código de respuesta, el pedido se queda quieto sin ningún error visible en su lado hasta que vence solo | Cotizar por `POST /orders/proposal` antes de despachar, y tratar el `409` como «falta cotizar», no como un fallo transitorio que se reintenta                           |
+| **Un POS todavía en v5 lee el `deliveryFee: "0.00"` de un pedido sin cotizar como «envío gratis»** | **Cobra de menos**, en silencio y en todos los pedidos de las tiendas con envío cotizado: el importe del envío nunca llega a la venta                                                                                                            | Leer `deliveryFeePending` antes de usar `deliveryFee`. No hay error HTTP que avise: es un fallo del lado del POS y solo se ve en la caja                                |
+| **Un POS todavía en v4 no reconoce `AWAITING_CUSTOMER`/`IN_TRANSIT`/`REJECTED_BY_STORE`**          | Un `switch` exhaustivo sobre `status` se rompe al primer pedido en uno de los tres estados nuevos — no hay error HTTP que avise, es un fallo del lado del POS                                                                                    | Migrar el lector del enum antes de recibir tráfico real. No hay periodo de convivencia: mismo corte que la v3/v4 (F-019)                                                |
 
 ---
 
@@ -1082,6 +1315,18 @@ node scripts/renegotiate-order.mjs --expire          # el reloj cancela solo, ca
 node scripts/renegotiate-order.mjs --outcomes        # REJECTED_BY_STORE y los dos CANCELLED, distinguibles
 node scripts/renegotiate-order.mjs --transit         # IN_TRANSIT sobre READY, envío y retiro
 node scripts/renegotiate-order.mjs --link-on-create  # customerWhatsappUrl en el pull, también para ONSITE
+```
+
+El envío cotizado (v6, F-031) se verifica con scripts/quote-delivery-order.mjs
+(por crear), que activa el modo por SQL sobre la tienda del seed, siembra sus
+pedidos por el checkout público y los recorre entero:
+
+```bash
+node scripts/quote-delivery-order.mjs --create    # 201 sin importe de envío, y la fila con el envío sin cotizar
+node scripts/quote-delivery-order.mjs --pull      # el pedido sin cotizar y el de 0.00 en la MISMA respuesta
+node scripts/quote-delivery-order.mjs --quote     # cotizar reenviando las líneas → AWAITING_CUSTOMER → CONFIRMED
+node scripts/quote-delivery-order.mjs --dispatch  # 409 ORDER_DELIVERY_NOT_QUOTED en READY, IN_TRANSIT y DELIVERED
+node scripts/quote-delivery-order.mjs --expire    # vence contado desde la creación, con su cancelReason propio
 ```
 
 El criterio 6 de F-024 —cuántos productos canónicos comparten códigos entre

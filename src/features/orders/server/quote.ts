@@ -9,6 +9,7 @@ import {
 } from "@/lib/promotions";
 import type { CheckoutMode } from "@/generated/prisma/enums";
 import type { QuoteLineReason, QuoteResponse } from "../types";
+import type { DeliveryFeeModeName } from "../deliveryOffer";
 import { resolvePublicSlug } from "@/features/storefront/server/resolve";
 import { routingWhatsappNumber } from "@/lib/storeContact";
 import type { PublicSlug } from "@/lib/publicSlug";
@@ -38,6 +39,10 @@ export type OrderStore = {
   checkoutMode: CheckoutMode;
   deliveryEnabled: boolean;
   deliveryFee: string | null;
+  /** F-031 DA2/DA6. Read at checkout AND at creation — never at read time
+   *  (E14). `QUOTED_PER_ORDER` ignores `deliveryFee` above for a DELIVERY
+   *  order. */
+  deliveryFeeMode: DeliveryFeeModeName;
   /** R15: always the branch's own number, never the brand's. `null`
    *  disables the wa.me link (E18). */
   whatsappNumber: string | null;
@@ -112,6 +117,7 @@ export async function loadStoreForOrder(requestedSlug: string): Promise<OrderSto
       checkoutMode: true,
       deliveryEnabled: true,
       deliveryFee: true,
+      deliveryFeeMode: true,
       whatsapp: true,
       phone: true,
       status: true,
@@ -132,6 +138,7 @@ export async function loadStoreForOrder(requestedSlug: string): Promise<OrderSto
     checkoutMode: store.checkoutMode,
     deliveryEnabled: store.deliveryEnabled,
     deliveryFee: store.deliveryFee?.toString() ?? null,
+    deliveryFeeMode: store.deliveryFeeMode,
     whatsappNumber: routingWhatsappNumber(store),
     status: store.status,
     disabledReasonCode: store.disabledReasonCode,
@@ -362,6 +369,7 @@ export function toQuoteResponse(quote: CartQuote): QuoteResponse {
       checkoutMode: quote.store.checkoutMode,
       deliveryEnabled: quote.store.deliveryEnabled,
       deliveryFee: quote.store.deliveryFee,
+      deliveryFeeMode: quote.store.deliveryFeeMode,
     },
     lines: quote.lines.map((line) =>
       line.orderable

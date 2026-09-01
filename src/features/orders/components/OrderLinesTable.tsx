@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { formatMoney, isZero, money } from "@/lib/money";
+import { formatMoney, money } from "@/lib/money";
 import type { OrderSnapshotItem } from "../server/read";
 
 /**
@@ -11,12 +11,19 @@ import type { OrderSnapshotItem } from "../server/read";
  * SAME component can render "Tu pedido si aceptas el cambio" + `Badge
  * Propuesta` for the proposed lines (E3), with no change for the two
  * existing call sites that pass neither.
+ *
+ * F-031 design.md § 3: the delivery row's visibility is decided by the
+ * MODALITY (`hasDelivery`), never by the amount — a gifted $0.00 delivery
+ * still gets its row, and pickup never shows one even if `deliveryFee`
+ * happened to carry a value. `deliveryFee: null` means "not quoted yet"
+ * (R1/R19): it is never read as zero.
  */
 export function OrderLinesTable({
   items,
   currencyCode,
   subtotal,
   deliveryFee,
+  hasDelivery,
   total,
   title = "Tu pedido",
   badge,
@@ -24,13 +31,15 @@ export function OrderLinesTable({
   items: OrderSnapshotItem[];
   currencyCode: string;
   subtotal: string;
-  deliveryFee: string;
+  deliveryFee: string | null;
+  hasDelivery: boolean;
   total: string;
   title?: string;
   badge?: ReactNode;
 }) {
-  const deliveryFeeMoney = money(deliveryFee, currencyCode);
-  const hasDeliveryFee = !isZero(deliveryFeeMoney);
+  const deliveryPending = hasDelivery && deliveryFee === null;
+  const deliveryFeeMoney =
+    hasDelivery && deliveryFee !== null ? money(deliveryFee, currencyCode) : null;
 
   return (
     <div>
@@ -56,15 +65,20 @@ export function OrderLinesTable({
           <span className="text-fg-muted">Subtotal</span>
           <span>{formatMoney(money(subtotal, currencyCode))}</span>
         </div>
-        {hasDeliveryFee && (
+        {hasDelivery && (
           <div className="flex justify-between">
             <span className="text-fg-muted">Envío</span>
-            <span>{formatMoney(deliveryFeeMoney)}</span>
+            <span>{deliveryFeeMoney ? formatMoney(deliveryFeeMoney) : "Por confirmar"}</span>
           </div>
         )}
-        <div className="border-border flex justify-between border-t pt-2 font-semibold">
-          <span>Total</span>
-          <span>{formatMoney(money(total, currencyCode))}</span>
+        <div>
+          <div className="border-border flex justify-between border-t pt-2 font-semibold">
+            <span>{deliveryPending ? "Total parcial" : "Total"}</span>
+            <span>{formatMoney(money(total, currencyCode))}</span>
+          </div>
+          {deliveryPending && (
+            <p className="text-fg mt-0.5 text-right text-sm">más el envío por confirmar</p>
+          )}
         </div>
       </div>
     </div>

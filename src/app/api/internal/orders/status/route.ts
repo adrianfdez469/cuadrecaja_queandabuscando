@@ -53,7 +53,14 @@ export const POST = withInternalAuth(async (request, caller) => {
     reason: parsed.data.reason ?? null,
   });
 
-  if (!result.ok) {
+  // F-031 DA5/R17: business isolation is `setOrderStatus`'s job (checked
+  // BEFORE the quote guard in `classifyZeroRows`) — this route only
+  // translates the outcome, never re-derives it.
+  if (result.kind === "delivery_not_quoted") {
+    return NextResponse.json({ error: "ORDER_DELIVERY_NOT_QUOTED" }, { status: 409 });
+  }
+
+  if (result.kind === "unknown_order") {
     return NextResponse.json({ error: "UNKNOWN_ORDER" }, { status: 404 });
   }
 

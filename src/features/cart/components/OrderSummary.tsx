@@ -12,6 +12,8 @@ export function OrderSummary({
   discountLabel,
   deliveryFeeLabel,
   totalLabel,
+  totalCaption = "Total",
+  partialNotice,
   busy = false,
   announcement,
   note,
@@ -22,6 +24,14 @@ export function OrderSummary({
   discountLabel?: string;
   deliveryFeeLabel?: string | null;
   totalLabel: string | null;
+  /** F-031 design.md § 1: "Total" while the total is firm, "Total parcial"
+   *  while the delivery fee for a DELIVERY order is not quoted yet. */
+  totalCaption?: string;
+  /** F-031 SP4's mandatory addendum next to a partial total ("más el envío
+   *  por confirmar"). Rendered INSIDE the total block, deliberately not
+   *  `note`: `note` is `text-fg-muted text-xs` — the small, easy-to-miss
+   *  letter design.md rejected for exactly this sentence. */
+  partialNotice?: string;
   busy?: boolean;
   /** Announced once via aria-live when the amounts settle. */
   announcement?: string;
@@ -52,11 +62,14 @@ export function OrderSummary({
         </div>
       )}
 
-      <div className="border-border flex justify-between border-t pt-2 font-semibold">
-        <span>Total</span>
-        <span className={totalLabel ? "text-fg" : "text-fg-muted"}>
-          {totalLabel ?? "Calculando…"}
-        </span>
+      <div>
+        <div className="border-border flex justify-between border-t pt-2 font-semibold">
+          <span>{totalCaption}</span>
+          <span className={totalLabel ? "text-fg" : "text-fg-muted"}>
+            {totalLabel ?? "Calculando…"}
+          </span>
+        </div>
+        {partialNotice && <p className="text-fg mt-0.5 text-right text-sm">{partialNotice}</p>}
       </div>
 
       {note && <p className="text-fg-muted text-xs">{note}</p>}

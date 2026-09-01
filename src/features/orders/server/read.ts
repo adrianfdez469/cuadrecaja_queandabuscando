@@ -66,7 +66,9 @@ export type OrderSnapshot = {
   deliveryAddress: string | null;
   currencyCode: string;
   subtotal: string;
-  deliveryFee: string;
+  /** F-031 DA1: `null` = not quoted yet. Never substituted with `"0.00"`
+   *  here — the ausencia reaches the view model itself (R1, R19). */
+  deliveryFee: string | null;
   total: string;
   notes: string | null;
   createdAt: string;
@@ -174,7 +176,7 @@ export async function getOrderByCode(
     cancelledBy: order.cancelledBy,
     proposal,
     subtotal: order.subtotal.toString(),
-    deliveryFee: order.deliveryFee.toString(),
+    deliveryFee: order.deliveryFee === null ? null : order.deliveryFee.toString(),
     total: order.total.toString(),
     notes: order.notes,
     createdAt: order.createdAt.toISOString(),
@@ -213,7 +215,12 @@ export function orderWhatsappUrl(snapshot: OrderSnapshot): string | null {
       lineTotal: money(item.lineTotal, item.currencyCode),
     })),
     subtotal: money(snapshot.subtotal, snapshot.currencyCode),
-    deliveryFee: money(snapshot.deliveryFee, snapshot.currencyCode),
+    // F-031 R1/E13: `null` propagates as `null`, never `money(0, …)` — the
+    // deviation this line used to carry (impl.md § Desviaciones, etapas 1-2)
+    // is closed now that `whatsapp.ts` accepts `Money | null` and prints
+    // "por confirmar" itself.
+    deliveryFee:
+      snapshot.deliveryFee === null ? null : money(snapshot.deliveryFee, snapshot.currencyCode),
     total: money(snapshot.total, snapshot.currencyCode),
     fulfillment: snapshot.fulfillment,
     deliveryAddress: snapshot.deliveryAddress,

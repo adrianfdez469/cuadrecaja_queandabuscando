@@ -24,7 +24,9 @@ export type WhatsappOrderInput = {
   code: string;
   lines: WhatsappOrderLine[];
   subtotal: Money;
-  deliveryFee: Money;
+  /** F-031 R1/R19: `null` = the delivery fee is not quoted yet. Never a
+   *  plain `"$0.00"` standing in for "sin cotizar" (E13, R1). */
+  deliveryFee: Money | null;
   total: Money;
   fulfillment: "PICKUP" | "DELIVERY";
   deliveryAddress: string | null;
@@ -50,8 +52,17 @@ function buildMessage(input: WhatsappOrderInput): string {
     lineTexts.push(`… y ${hiddenCount} productos más (están en el enlace).`);
   }
 
+  // F-031 R1/E13: "por confirmar" here is lowercase — mid-sentence after a
+  // colon, unlike the capitalized "Por confirmar" of the on-screen cells
+  // (design.md § 4).
+  const deliveryFeePending = input.deliveryFee === null;
   const deliveryLine =
-    input.fulfillment === "DELIVERY" ? [`Envío: ${formatMoney(input.deliveryFee)}`] : [];
+    input.fulfillment === "DELIVERY"
+      ? [`Envío: ${input.deliveryFee === null ? "por confirmar" : formatMoney(input.deliveryFee)}`]
+      : [];
+  const totalLine = deliveryFeePending
+    ? `Total parcial: ${formatMoney(input.total)} más el envío por confirmar`
+    : `Total: ${formatMoney(input.total)}`;
 
   const entrega =
     input.fulfillment === "DELIVERY"
@@ -67,7 +78,7 @@ function buildMessage(input: WhatsappOrderInput): string {
     "",
     `Subtotal: ${formatMoney(input.subtotal)}`,
     ...deliveryLine,
-    `Total: ${formatMoney(input.total)}`,
+    totalLine,
     "",
     `Entrega: ${entrega}`,
     `A nombre de: ${input.contactName} (${input.contactPhone})`,

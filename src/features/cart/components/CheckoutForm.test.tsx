@@ -27,6 +27,10 @@ function quote(): QuoteResponse {
       checkoutMode: "WHATSAPP",
       deliveryEnabled: false,
       deliveryFee: null,
+      // F-031 etapa 1 compile-only fixture update (impl.md § Desviaciones):
+      // no assertion here exercises the mode, so FLAT_RATE preserves today's
+      // behavior unchanged.
+      deliveryFeeMode: "FLAT_RATE",
     },
     lines: [
       {
@@ -130,5 +134,112 @@ describe("CheckoutForm — foco en el resumen de errores", () => {
     expect(enviar).toHaveFocus();
     fireEvent.click(enviar);
     await waitFor(() => expect(screen.getByRole("alert")).toHaveFocus());
+  });
+});
+
+/**
+ * F-031 design.md § 2 y § 1 ("El fieldset de modalidad" / "Resumen del
+ * checkout"), verificación del plan (paso 3): un `quote` en modo cotizado.
+ * DP1 (`.agent/progress/F-031.md`): el subtotal termina en centavos
+ * distintos de `00` (`$1,234.56`) para que un aserto de "no imprime el cero"
+ * no dé un falso positivo con `"1,000.00"`.
+ */
+describe("CheckoutForm — envío cotizado (F-031)", () => {
+  const STORE_ID_QUOTED = "store-checkout-quoted-test";
+
+  function quotedQuote(): QuoteResponse {
+    return {
+      store: {
+        slug: "tienda-demo",
+        name: "La Rampa · Vedado",
+        currencyCode: "CUP",
+        checkoutMode: "WHATSAPP",
+        deliveryEnabled: true,
+        deliveryFee: null,
+        deliveryFeeMode: "QUOTED_PER_ORDER",
+      },
+      lines: [
+        {
+          storeProductId: "sp-1",
+          slug: "cafe-cubita",
+          name: "Café Cubita 500 g",
+          qty: 2,
+          unitPrice: "617.28",
+          currencyCode: "CUP",
+          lineTotal: "1234.56",
+          originalUnitPrice: "617.28",
+          originalCurrencyCode: "CUP",
+          listUnitPrice: null,
+          orderable: true,
+        },
+      ],
+      subtotal: "1234.56",
+      discountTotal: "0.00",
+      capturedAt: new Date("2026-09-01T10:00:00Z").toISOString(),
+    };
+  }
+
+  beforeEach(() => {
+    writeCart({
+      storeId: STORE_ID_QUOTED,
+      items: [
+        {
+          storeProductId: "sp-1",
+          slug: "cafe-cubita",
+          qty: 2,
+          display: { name: "Café Cubita 500 g", unitPrice: "617.28", currency: "CUP" },
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    });
+    // Overrides the file-level stub: this describe needs the QUOTED_PER_ORDER
+    // response, not the FLAT_RATE one above.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return new Response(JSON.stringify(quotedQuote()), { status: 200 });
+      }),
+    );
+  });
+
+  it("el radio de domicilio existe, su descripción no lleva dígitos, el envío no es una cifra y el total es parcial (criterio 1)", async () => {
+    render(<CheckoutForm storeId={STORE_ID_QUOTED} storeSlug="tienda-demo" />);
+    await enviarActivado();
+
+    const radio = screen.getByRole("radio", { name: /envío a domicilio/i });
+    // El nombre accesible completo del radio (label + description, design.md
+    // § 2) no contiene ningún dígito: "Costo por confirmar", no "+ $500.00".
+    expect(radio.closest("label")?.textContent ?? "").not.toMatch(/\d/);
+    expect(screen.getByText("Costo por confirmar")).toBeInTheDocument();
+
+    fireEvent.click(radio);
+
+    // La fila de envío del resumen dice "Por confirmar", nunca una cifra.
+    const envioValue = await screen.findByText("Por confirmar");
+    expect(envioValue.textContent).not.toMatch(/\$|\d/);
+
+    // El total se nombra parcial, con su coletilla, y sigue siendo solo el
+    // subtotal — sin un envío inventado.
+    expect(screen.getByText("Total parcial")).toBeInTheDocument();
+    expect(screen.getByText("más el envío por confirmar")).toBeInTheDocument();
+    // El total parcial es el mismo importe que el subtotal mientras el envío
+    // no está cotizado — sin un envío inventado sumado encima.
+    expect(screen.getAllByText("$1,234.56").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("volver a retiro devuelve el resumen a 'Total' y 'Envío $0.00', sin residuos", async () => {
+    render(<CheckoutForm storeId={STORE_ID_QUOTED} storeSlug="tienda-demo" />);
+    await enviarActivado();
+
+    fireEvent.click(screen.getByRole("radio", { name: /envío a domicilio/i }));
+    await screen.findByText("Total parcial");
+
+    fireEvent.click(screen.getByRole("radio", { name: /recoger en la tienda/i }));
+
+    await waitFor(() => expect(screen.queryByText("Total parcial")).not.toBeInTheDocument());
+    expect(screen.queryByText("Por confirmar")).not.toBeInTheDocument();
+    expect(screen.queryByText("más el envío por confirmar")).not.toBeInTheDocument();
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
   });
 });

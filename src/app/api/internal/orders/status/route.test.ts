@@ -44,7 +44,7 @@ function post(body: unknown, { token = TOKEN }: { token?: string | null } = {}) 
 }
 
 beforeEach(() => {
-  setOrderStatus.mockReset().mockResolvedValue({ ok: true });
+  setOrderStatus.mockReset().mockResolvedValue({ kind: "ok" });
   resolveCaller.mockReset().mockResolvedValue({ status: "ok", caller: CALLER });
   syncConfigured.mockReset().mockResolvedValue(true);
 });
@@ -101,8 +101,44 @@ describe("POST /api/internal/orders/status — camino correcto", () => {
 
 describe("POST /api/internal/orders/status — pedido inexistente o ajeno (E12)", () => {
   it("responde 404 cuando setOrderStatus no tocó ninguna fila", async () => {
-    setOrderStatus.mockResolvedValue({ ok: false });
+    setOrderStatus.mockResolvedValue({ kind: "unknown_order" });
     const response = await post({ orderId: "999999999", status: "CONFIRMED" });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "UNKNOWN_ORDER" });
+  });
+});
+
+/**
+ * F-031 E10/R17: el `409` nuevo, en los tres estados que lo exigen, y el
+ * `404` de un pedido de otro negocio comprobado ANTES que la cotización —
+ * es `setOrderStatus` quien decide el orden (status.test.ts); esta suite
+ * solo comprueba que la ruta traduce cada `kind` al código correcto.
+ */
+describe("POST /api/internal/orders/status — envío sin cotizar (F-031 E10, R17)", () => {
+  it("responde 409 ORDER_DELIVERY_NOT_QUOTED, sin llamar dos veces ni escribir, en los tres destinos que lo exigen", async () => {
+    setOrderStatus.mockResolvedValue({ kind: "delivery_not_quoted" });
+
+    for (const status of ["READY", "IN_TRANSIT", "DELIVERED"]) {
+      const response = await post({ orderId: "43", status });
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({ error: "ORDER_DELIVERY_NOT_QUOTED" });
+    }
+  });
+
+  it("responde 200 sobre el mismo pedido una vez cotizado y aprobado (kind: ok)", async () => {
+    setOrderStatus.mockResolvedValue({ kind: "ok" });
+
+    const response = await post({ orderId: "43", status: "READY" });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  it("R17: un pedido de otro negocio sigue respondiendo 404 UNKNOWN_ORDER, no 409, aunque el destino sea uno de los tres que exigen cotización", async () => {
+    setOrderStatus.mockResolvedValue({ kind: "unknown_order" });
+
+    const response = await post({ orderId: "999999999", status: "READY" });
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: "UNKNOWN_ORDER" });

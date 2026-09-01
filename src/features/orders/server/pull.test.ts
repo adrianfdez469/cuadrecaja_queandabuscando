@@ -33,10 +33,16 @@ function dbOrder(
     contactEmail: null,
     deliveryAddress: null,
     currencyCode: "CUP",
-    subtotal: { toString: () => "900.00" },
+    // F-031: these mimic Prisma's REAL `Decimal.toString()` — trailing zeros
+    // suppressed ("900.00" comes back as "900") — instead of a pre-formatted
+    // string. That is the exact fixture that hid the missing normalization
+    // for four contract versions (architecture.md § Riesgos): a mock that
+    // already returns "900.00" would pass even if pull.ts stopped
+    // normalizing entirely.
+    subtotal: { toString: () => "900" },
     discountTotal: { toString: () => "0" },
-    deliveryFee: { toString: () => "0.00" },
-    total: { toString: () => "900.00" },
+    deliveryFee: { toString: () => "0" },
+    total: { toString: () => "900" },
     notes: null,
     createdAt: new Date("2026-08-26T02:00:00.000Z"),
     rateSnapshot: {
@@ -65,10 +71,10 @@ function dbOrder(
       {
         storeProduct: { externalId: "seed-tienda-1-p6" },
         name: "Café Cubita",
-        unitPrice: { toString: () => "450.00" },
+        unitPrice: { toString: () => "450" },
         currencyCode: "CUP",
         quantity: { toString: () => "2.000" },
-        lineTotal: { toString: () => "900.00" },
+        lineTotal: { toString: () => "900" },
         originalUnitPrice: { toString: () => "1.02" },
         originalCurrencyCode: "USD",
         ...itemOverrides,
@@ -97,9 +103,12 @@ describe("pullOrders() — v2 compatibility (criterio 19)", () => {
       status: "PENDING",
       contact: { name: "Ana Pérez", phone: "+5355555555", email: null, address: null },
       currencyCode: "CUP",
+      // F-031/AP1: every money amount now carries two fraction digits, even
+      // though the underlying Decimal-like mock above returns none.
       subtotal: "900.00",
-      discountTotal: "0",
+      discountTotal: "0.00",
       deliveryFee: "0.00",
+      deliveryFeePending: false,
       total: "900.00",
       notes: null,
     });
@@ -108,6 +117,7 @@ describe("pullOrders() — v2 compatibility (criterio 19)", () => {
       name: "Café Cubita",
       unitPrice: "450.00",
       currencyCode: "CUP",
+      // quantity is NOT money (AP1): untouched, whatever precision Decimal gives it.
       quantity: "2.000",
       lineTotal: "900.00",
     });
@@ -224,11 +234,13 @@ describe("pullOrders() — el cursor (criterio 1)", () => {
 });
 
 describe("pullOrders() — F-019 v5: cancelledBy, customerWhatsappUrl, proposal", () => {
-  it("runs the barrido and the read in the SAME $transaction (DA5), barrido first", async () => {
+  it("runs BOTH barridos and the read in the SAME $transaction (DA5, F-031 DA4), barridos first", async () => {
     orderFindMany.mockResolvedValue([]);
     await pullOrders("business-a", 0n, 10);
 
-    expect(executeRaw).toHaveBeenCalledOnce();
+    // F-019's barrido (AWAITING_CUSTOMER) and F-031's (envío sin cotizar,
+    // DA4) each fire ONE `$executeRaw`, both before the read.
+    expect(executeRaw).toHaveBeenCalledTimes(2);
     expect(orderFindMany).toHaveBeenCalledOnce();
   });
 
@@ -272,7 +284,8 @@ describe("pullOrders() — F-019 v5: cancelledBy, customerWhatsappUrl, proposal"
       expiresAt: "2026-08-31T14:19:43.000Z",
       previousTotal: "880.00",
       subtotal: "1000.00",
-      discountTotal: "0",
+      // F-031/AP1: proposal.* amounts are normalized too.
+      discountTotal: "0.00",
       deliveryFee: "180.00",
       total: "1180.00",
       message: "El envío a Playa cuesta 180.",
@@ -283,5 +296,32 @@ describe("pullOrders() — F-019 v5: cancelledBy, customerWhatsappUrl, proposal"
     orderFindMany.mockResolvedValue([dbOrder({ status: "CONFIRMED" })]);
     const { orders } = await pullOrders("business-a", 0n, 10);
     expect(orders[0].proposal).toBeNull();
+  });
+});
+
+describe("pullOrders() — F-031 v6: deliveryFee normalized, deliveryFeePending (R1, R18)", () => {
+  it("emits deliveryFeePending: true and deliveryFee: 0.00 — never null — for an unquoted order", async () => {
+    orderFindMany.mockResolvedValue([dbOrder({ deliveryFee: null })]);
+    const { orders } = await pullOrders("business-a", 0n, 10);
+    expect(orders[0].deliveryFee).toBe("0.00");
+    expect(orders[0].deliveryFeePending).toBe(true);
+  });
+
+  it("a delivery fee QUOTED at 0.00 is indistinguishable in `deliveryFee` from an unquoted one (criterio 4)", async () => {
+    orderFindMany.mockResolvedValue([
+      dbOrder({ id: 1n, deliveryFee: { toString: () => "0" } }),
+      dbOrder({ id: 2n, deliveryFee: null }),
+    ]);
+    const { orders } = await pullOrders("business-a", 0n, 10);
+    expect(orders[0].deliveryFee).toBe(orders[1].deliveryFee);
+    expect(orders[0].deliveryFeePending).toBe(false);
+    expect(orders[1].deliveryFeePending).toBe(true);
+  });
+
+  it("normalizes a genuinely quoted delivery fee to two decimals same as any other amount", async () => {
+    orderFindMany.mockResolvedValue([dbOrder({ deliveryFee: { toString: () => "180" } })]);
+    const { orders } = await pullOrders("business-a", 0n, 10);
+    expect(orders[0].deliveryFee).toBe("180.00");
+    expect(orders[0].deliveryFeePending).toBe(false);
   });
 });

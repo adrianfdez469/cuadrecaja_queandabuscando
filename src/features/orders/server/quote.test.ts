@@ -53,6 +53,7 @@ const store = {
   checkoutMode: "WHATSAPP" as const,
   deliveryEnabled: false,
   deliveryFee: null,
+  deliveryFeeMode: "FLAT_RATE" as const,
   whatsappNumber: "+5350000001",
   status: "PUBLISHED" as const,
   disabledReasonCode: null,
@@ -96,6 +97,7 @@ describe("loadStoreForOrder()", () => {
       checkoutMode: "ONSITE",
       deliveryEnabled: true,
       deliveryFee: { toString: () => "500.00" },
+      deliveryFeeMode: "FLAT_RATE",
       whatsapp: null,
       phone: "+5350000009",
       status: "PUBLISHED",
@@ -112,6 +114,26 @@ describe("loadStoreForOrder()", () => {
     // The response slug is always the CANONICAL one, not the requested URL.
     expect(result?.slug).toBe("tienda-demo");
     expect(result?.deliveryFee).toBe("500.00");
+  });
+
+  it("F-031 DA2: carries deliveryFeeMode through, explicit (R20)", async () => {
+    storeFindUnique.mockResolvedValue({
+      id: "store-1",
+      name: "La Rampa",
+      checkoutMode: "WHATSAPP",
+      deliveryEnabled: true,
+      deliveryFee: null,
+      deliveryFeeMode: "QUOTED_PER_ORDER",
+      whatsapp: "+5350000001",
+      phone: null,
+      status: "PUBLISHED",
+      disabledReasonCode: null,
+      disabledMessage: null,
+      disabledAt: null,
+      business: { id: "biz-1", baseCurrencyCode: "CUP" },
+    });
+    const result = await loadStoreForOrder("tienda-demo");
+    expect(result?.deliveryFeeMode).toBe("QUOTED_PER_ORDER");
   });
 
   it("returns null when the resolved store does not exist or is DRAFT", async () => {
@@ -259,7 +281,11 @@ describe("toQuoteResponse()", () => {
       currencyCode: "CUP",
       orderable: true,
     });
-    expect(response.store).toMatchObject({ slug: "tienda-demo", currencyCode: "CUP" });
+    expect(response.store).toMatchObject({
+      slug: "tienda-demo",
+      currencyCode: "CUP",
+      deliveryFeeMode: "FLAT_RATE",
+    });
   });
 
   it("shapes an unorderable line with null amounts and a reason", async () => {
