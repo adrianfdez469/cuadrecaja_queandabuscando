@@ -58,6 +58,22 @@ else
   fi
 fi
 
+echo "== Secretos de desarrollo =="
+if [ -f .env ]; then
+  # Las tres NO se asignan en .env.example (un valor vacío rompe serverEnv()
+  # y .optional() de Zod permite ausente, nunca ""), así que el bucle de
+  # arriba no puede verlas: este chequeo es su sustituto, no un duplicado.
+  SECRETS_OUT="$(node scripts/dev-secrets.mjs --check 2>/dev/null)"
+  SECRETS_CODE=$?
+  if [ "$SECRETS_CODE" -eq 0 ]; then
+    ok "secretos de desarrollo con valor válido (SSO, sesión de admin, cron)"
+  elif [ "$SECRETS_CODE" -eq 1 ] && [ -n "$SECRETS_OUT" ]; then
+    warn "sin generar o por debajo del mínimo: $(echo "$SECRETS_OUT" | tr '\n' ' ')— ejecuta: node scripts/dev-secrets.mjs --write"
+  else
+    warn "no se pudo comprobar los secretos de desarrollo — ejecuta: node scripts/dev-secrets.mjs --check"
+  fi
+fi
+
 echo "== Base de datos =="
 DB_CHECK="$(node -e '
 require("dotenv/config");

@@ -6,7 +6,7 @@ etapa: smoke
 visto_en: F-012
 creado: 2026-08-29T16:16:29Z
 promovido_a_agents: no
-arreglo: pon un valor real (≥ el mínimo declarado) en SSO_JWT_SECRET, ADMIN_SESSION_SECRET y CRON_SECRET en .env, o deja la clave AUSENTE del todo — nunca `="")`
+arreglo: node scripts/dev-secrets.mjs --write
 ---
 
 ## Qué pasa de verdad
@@ -32,12 +32,20 @@ descarta nada por sí solo.
 
 ## Cómo se arregla
 
-Para poder verificar cualquier cosa que dependa de `serverEnv()` (sesión de
-admin, SSO, cron) en un entorno de desarrollo: pon en `.env` un valor real de
-al menos el mínimo declarado para las tres claves —
-`SSO_JWT_SECRET`, `ADMIN_SESSION_SECRET`, `CRON_SECRET` — en vez de `""`. No
-hace falta que sean secretos de verdad para probar localmente, solo que
-cumplan el `.min(...)` de `src/lib/env.ts:9-12`.
+Genera las tres claves con el comando dedicado (F-029), que escribe en `.env`
+valores aleatorios que cumplen el mínimo de cada una y conserva por omisión
+cualquiera que ya lo cumpla (nunca pisa un `SSO_JWT_SECRET` acordado con
+cuadrecaja salvo que se pida `--force`):
+
+```
+node scripts/dev-secrets.mjs --write
+```
+
+Sin banderas imprime los tres valores sin escribir nada; `--check` responde
+si las tres son utilizables sin escribir nada tampoco (lo usa
+`bash .agent/init.sh` en su bloque `== Secretos de desarrollo ==`, y los dos
+guiones de humo de F-029 y F-012 como guardián). Ya no hace falta rellenar
+`.env` a mano.
 
 Para confirmar la causa exacta antes de tocar nada: monta una ruta temporal
 que llame a `serverEnv()` y lea el mensaje del error (o revisa el log del

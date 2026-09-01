@@ -25,6 +25,36 @@ SMOKE_PORT="${SMOKE_PORT:-3100}"
 VISUAL_PORT="${VISUAL_PORT:-3101}"
 
 # Orden deliberado: lo que falla más rápido y señala más de cerca, primero.
+# Lo que cuenta como «el servidor petó» en el log de next dev, para las etapas
+# que levantan la app. ERE POSIX puro a propósito: verify.sh corre con el grep
+# real del sistema (BSD en macOS), que no entiende \b ni \w — ficha
+# playbook-firma-grep-bsd-no-gnu.
+#
+# El patrón anterior, '(⨯|Unhandled|Error:)', fallaba por los DOS lados sobre un
+# error real de Supabase Auth: la línea que importa, «Error [AuthApiError]: …»,
+# NO contiene la subcadena «Error:» y se escapaba; y la que sí disparaba era el
+# relleno del volcado, «  __isAuthError: true,». Ahora se exige que la línea
+# EMPIECE por algo acabado en Error (TypeError, AuthApiError, Error a secas),
+# que es como los imprime Node. El prefijo exige mayúscula inicial para que una
+# línea de aplicación como «onError: ...» no dispare el guardián.
+SERVIDOR_ERROR_RE='(⨯|Unhandled|^[[:space:]]*([A-Z][A-Za-z]*)?Error([^A-Za-z0-9_]|$))'
+
+# La única excepción del guardián, y se justifica o se quita — cada excepción en
+# un sensor lo erosiona un poco. La imprime @supabase/auth-js, NO código de este
+# repo, cuando se le presenta un token de refresco ya revocado (una pestaña que
+# sobrevive al logout de otra, o un smoke que sigue usando el frasco de cookies
+# viejo a propósito para afirmar que /cuenta vuelve a exigir entrar).
+#
+# auth-js YA clasifica esta situación como warn en vez de error, pero solo para
+# los códigos refresh_token_not_found, refresh_token_already_used y
+# session_expired (GoTrueClient.js:3663-3676). El emulador local
+# (supabase/auth:v2.196.0) responde error_code: validation_failed, que no está
+# en esa lista, así que sale por console.error. Comprobado con una petición
+# directa al emulador, no deducido.
+#
+# Si algún día el emulador devuelve el código correcto, esta línea sobra.
+SERVIDOR_ERROR_IGNORAR_RE='Error \[AuthApiError\]: Refresh token is not valid'
+
 STAGES_RAPIDO="typecheck lint format test"
 STAGES_COMPLETO="harness typecheck lint format test prisma build theme bundle"
 
@@ -290,10 +320,33 @@ correr_smoke() { # <log>
     echo "--- salida del servidor (runtime feedback) ---"
     tail -80 "$srvlog"
   } >>"$1"
-  rm -f "$srvlog"
   # Un error en el servidor cuenta como fallo aunque las peticiones respondan.
-  grep -aqE '(⨯|Unhandled|Error:)' "$srvlog" 2>/dev/null && code=1
+  # El grep va ANTES del rm: al revés miraba un archivo recién borrado, salía 2
+  # con el «No such file» tragado por 2>/dev/null, y el guardián no disparó
+  # NUNCA — ni aquí ni en correr_visual — desde que se escribió (87d8ce2).
+  guardian_servidor "$srvlog" "SMOKE FAIL" "$1" || code=1
+  rm -f "$srvlog"
   return $code
+}
+
+# El guardián de errores del servidor: una etapa que levanta la app no puede
+# darse por buena solo porque las peticiones respondieran. Imprime SIEMPRE una
+# línea con el prefijo de fallo de su etapa, y no solo devuelve el código: sin
+# esa línea, `extract_signature` no encuentra prefijo, cae en la primera línea
+# de error que pille y la firma cambia entre corridas — con lo que el corte a
+# los tres intentos (ESTANCADO) deja de cortar.
+guardian_servidor() {
+  local srvlog="$1" prefijo="$2" destino="$3" linea=""
+  linea="$(grep -aE "$SERVIDOR_ERROR_RE" "$srvlog" 2>/dev/null |
+    grep -avE "$SERVIDOR_ERROR_IGNORAR_RE" | head -1)"
+  [ -z "$linea" ] && return 0
+  {
+    echo
+    echo "$prefijo el servidor registró un error, aunque las peticiones respondieran:"
+    echo "  $linea"
+    echo "  (guardián de $SERVIDOR_ERROR_RE sobre la salida de next dev)"
+  } >>"$destino"
+  return 1
 }
 
 # Lo que `curl` no puede ver: si la lista salta, si el foco va donde debe, si el
@@ -374,10 +427,25 @@ correr_visual() { # <log>
     ls -1 "$traces" 2>/dev/null | sed 's/^/  /'
     echo
     echo "--- salida del servidor (runtime feedback) ---"
-    tail -80 "$srvlog"
+    if [ -z "$pid" ]; then
+      # Servidor reutilizado: lo lanzó el humano en su terminal y su salida va
+      # allí, no a este archivo. Decirlo importa — un «--- salida del servidor
+      # ---» vacío se lee como «el servidor no dijo nada», que es justo la
+      # conclusión contraria a la verdadera: aquí NO se miró.
+      echo "  (no capturada: se reutilizó el next dev del puerto $puerto,"
+      echo "   que escribe en la terminal donde se lanzó. El guardián de"
+      echo "   errores de servidor NO se aplica en esta corrida.)"
+    else
+      tail -80 "$srvlog"
+    fi
   } >>"$1"
+  # Mismo guardián que en correr_smoke, y por el mismo motivo: antes del rm.
+  # Solo cuando el log es nuestro: sobre el del servidor reutilizado no hay nada
+  # que mirar, y un archivo vacío daría un verde que nadie ha comprobado.
+  if [ -n "$pid" ]; then
+    guardian_servidor "$srvlog" "VISUAL FAIL" "$1" || code=1
+  fi
   rm -f "$srvlog"
-  grep -aqE '(⨯|Unhandled|Error:)' "$srvlog" 2>/dev/null && code=1
   return $code
 }
 
