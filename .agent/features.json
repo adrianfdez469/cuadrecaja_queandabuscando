@@ -249,8 +249,8 @@
         "Una tienda inexistente responde 404.",
         "El algoritmo del hash está documentado en docs/sync-contract.md con el SQL equivalente para cuadrecaja."
       ],
-      "passes": false,
-      "notes": "El endpoint existe. Falta verificarlo ejecutando y documentar el SQL espejo del lado del POS."
+      "passes": true,
+      "notes": "Hecho. El endpoint ya existia y cumplia tres de los cinco criterios; lo que faltaba era ejecutarlo y publicar el espejo. Verificado con scripts/check-reconciliation.mjs en sus siete modos contra la app real, mas cuatro archivos de prueba. docs/sync-contract.md lleva ahora el SQL espejo de cuadrecaja, su vector de autoverificacion (md5 62e399684e3a8eafadaae58391537955), la fila del 400 MISSING_STORE_ID y la precondicion de los dos decimales; todo aditivo sobre la v5, sin bump. El hallazgo del ciclo: el orden de la cadena canonica dependia de la colacion de la base, y como la base local es musl y colaciona como C, ningun test local podia detectarlo; ahora se fija en el codigo. Tres criterios resultaron vacuos al medirlos (C8 comparaba el SQL consigo mismo, C12 usaba ids que no discriminan, y el comparador probado era codigo muerto), los tres corregidos. Pendiente y aprobado aparte: la ADR 0027, y comunicar el cambio del contrato al equipo de cuadrecaja."
     },
     {
       "id": "F-015",
