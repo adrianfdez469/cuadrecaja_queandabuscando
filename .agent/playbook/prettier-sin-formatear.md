@@ -3,7 +3,7 @@ slug: prettier-sin-formatear
 sintoma: "format:check falla con: Code style issues found in the above file(s)"
 firma: Code style issues found
 etapa: format
-visto_en: F-010, F-007, F-011, F-017, PR #7, F-015, F-018, F-021, F-023, F-012, F-028, F-019, F-026, F-025, F-014, F-020
+visto_en: F-010, F-007, F-011, F-017, PR #7, F-015, F-018, F-021, F-023, F-012, F-028, F-019, F-026, F-025, F-014, F-020, F-031
 creado: 2026-08-25T19:11:02Z
 promovido_a_agents: sí
 arreglo: npm run format
