@@ -25,9 +25,25 @@
 #
 # Da por hecho que `npm run seed` ya corrió: tienda-demo tiene al menos un
 # producto disponible.
+#
+# GUARDIÁN (F-029, decisión del humano 2026-08-31 — PP2 de
+# .agent/specs/F-029/plan.md): `node scripts/dev-secrets.mjs --check` corre
+# aquí, junto al `cd`, antes de cualquier aserción. Si sale distinto de 0, este
+# guion ABORTA LA CORRIDA ENTERA con `SMOKE FAIL` nombrando el generador — no
+# es un fallo aislado del criterio 5, es un entorno mal montado. Comparte
+# contrato con .agent/specs/F-029/smoke.sh: un nombre por línea de cada clave
+# ausente o corta.
 set -uo pipefail
 
 cd "$(dirname "$0")/../../.." || exit 1
+
+GUARDIAN_OUT="$(node scripts/dev-secrets.mjs --check 2>&1)"
+GUARDIAN_CODE=$?
+if [ "$GUARDIAN_CODE" -ne 0 ]; then
+  printf 'SMOKE FAIL node scripts/dev-secrets.mjs --check salió %s (faltan o son cortas: %s) — genera los secretos con: node scripts/dev-secrets.mjs --write\n' \
+    "$GUARDIAN_CODE" "$(echo "$GUARDIAN_OUT" | tr '\n' ' ')"
+  exit 1
+fi
 
 BASE="${SMOKE_BASE_URL:-http://localhost:3100}"
 FAILS=0
@@ -372,38 +388,35 @@ else
     # -------------------------------- criterio 5 con sesiones REALES -------
     # R21 y la mitad de cookies fabricadas ya se probaron arriba; esto añade
     # la mitad que de verdad necesitaba una sesión de cliente REAL. La de
-    # admin sigue necesitando un JWT minted a mano (F-029, sin arreglar) —
-    # solo se ejercita si ADMIN_SESSION_SECRET está relleno en .env.
-    ADMIN_SECRET_LEN=$(grep -E '^ADMIN_SESSION_SECRET=' .env 2>/dev/null |
-      sed -E 's/^ADMIN_SESSION_SECRET="?([^"]*)"?$/\1/' | wc -c)
-    if [ "${ADMIN_SECRET_LEN:-0}" -gt 32 ]; then
-      ADMIN_JWT=$(node -e '
-        import("dotenv/config").then(async () => {
-          const { SignJWT } = await import("jose");
-          const secret = new TextEncoder().encode(process.env.ADMIN_SESSION_SECRET);
-          const token = await new SignJWT({
-            adminUserId: "smoke-admin", externalId: "smoke", name: "Smoke Admin",
-            businessId: "smoke-business", storeIds: [],
-          }).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime("10m").sign(secret);
-          console.log(token);
-        });
-      ' 2>/dev/null)
-      COMBINED_COOKIE="qab-admin-session=$ADMIN_JWT; $COOKIE_1A"
+    # admin necesita un JWT minted a mano — ahora incondicional (F-029): el
+    # guardián de la cabecera ya garantizó que ADMIN_SESSION_SECRET es
+    # utilizable, así que las cuatro aserciones de abajo se ejecutan siempre,
+    # sin la rama SALTADO que existía antes de que las tres claves fueran
+    # generables por un comando.
+    ADMIN_JWT=$(node -e '
+      import("dotenv/config").then(async () => {
+        const { SignJWT } = await import("jose");
+        const secret = new TextEncoder().encode(process.env.ADMIN_SESSION_SECRET);
+        const token = await new SignJWT({
+          adminUserId: "smoke-admin", externalId: "smoke", name: "Smoke Admin",
+          businessId: "smoke-business", storeIds: [],
+        }).setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime("10m").sign(secret);
+        console.log(token);
+      });
+    ' 2>/dev/null)
+    COMBINED_COOKIE="qab-admin-session=$ADMIN_JWT; $COOKIE_1A"
 
-      check 'criterio 5 — /admin en 200 con sesión de CLIENTE real presente a la vez' 200 \
-        "$(code "$BASE/admin" -H "Cookie: $COMBINED_COOKIE")"
-      check 'criterio 5 — /cuenta en 200 con sesión de ADMIN real presente a la vez' 200 \
-        "$(code "$BASE/cuenta" -H "Cookie: $COMBINED_COOKIE")"
+    check 'criterio 5 — /admin en 200 con sesión de CLIENTE real presente a la vez' 200 \
+      "$(code "$BASE/admin" -H "Cookie: $COMBINED_COOKIE")"
+    check 'criterio 5 — /cuenta en 200 con sesión de ADMIN real presente a la vez' 200 \
+      "$(code "$BASE/cuenta" -H "Cookie: $COMBINED_COOKIE")"
 
-      curl -s -o /dev/null -X POST "$BASE/api/account/logout" -H "Cookie: $COMBINED_COOKIE"
+    curl -s -o /dev/null -X POST "$BASE/api/account/logout" -H "Cookie: $COMBINED_COOKIE"
 
-      check 'criterio 5 — /admin sigue en 200 tras cerrar la sesión de cliente' 200 \
-        "$(code "$BASE/admin" -H "Cookie: qab-admin-session=$ADMIN_JWT")"
-      check 'criterio 5 — /cuenta ahora exige entrar (307): la sesión de cliente SÍ se cerró' 307 \
-        "$(code "$BASE/cuenta" -H "Cookie: $COOKIE_1A")"
-    else
-      printf '  ..  criterio 5 (sesiones reales) SALTADO — ADMIN_SESSION_SECRET/SSO_JWT_SECRET/CRON_SECRET no están rellenos en .env (ficha env-optional-secreto-vacio-rompe-serverenv). No cuenta como fallo de F-012.\n'
-    fi
+    check 'criterio 5 — /admin sigue en 200 tras cerrar la sesión de cliente' 200 \
+      "$(code "$BASE/admin" -H "Cookie: qab-admin-session=$ADMIN_JWT")"
+    check 'criterio 5 — /cuenta ahora exige entrar (307): la sesión de cliente SÍ se cerró' 307 \
+      "$(code "$BASE/cuenta" -H "Cookie: $COOKIE_1A")"
 
     # ------------------------------------------------------ limpieza -------
     # R12 — borra SOLO la fila que ESTA corrida creó, para que el aserto de
