@@ -2,8 +2,8 @@
 slug: next-dev-uno-por-directorio
 sintoma: "una etapa que levanta la app (smoke, visual) falla porque el servidor no llegó a levantar, y el log del servidor dice que ya hay otro next dev corriendo"
 firma: Another next dev server is already running
-etapa: visual
-visto_en: F-010, F-018, F-012
+etapa: smoke | visual
+visto_en: F-010, F-018, F-012, F-020
 creado: 2026-08-26T10:36:00Z
 promovido_a_agents: sí
 arreglo: no lances otro; reutiliza el que ya corre en este directorio — verify.sh lo hace solo con servidor_propio(), y si el fallo persiste es que el puerto lo ocupa OTRO checkout
@@ -26,6 +26,17 @@ al final del feedback. Si no se lee hasta abajo, parece que Next está roto.
    `servidor_propio()` busca un `next-server` cuyo **cwd sea este directorio** y
    devuelve su puerto. Es lo correcto además de lo que funciona — es el servidor
    que el humano está mirando en su navegador.
+
+   Hasta F-020 esto solo lo hacía `correr_visual`; `correr_smoke` lanzaba
+   siempre el suyo. La asimetría no se notó mientras hubo **una** etapa smoke
+   por trabajo de CI, y se pagó al haber dos (F-028 y F-020 en el trabajo
+   `auth`): la segunda no podía levantar nada. Ahora las dos reutilizan.
+
+   **Cambiar el puerto no arregla esto** — es el error que se cometió primero.
+   Next lo decide por el **directorio**, así que `SMOKE_PORT=3102` muere igual,
+   y solo cambia el mensaje: en vez de `EADDRINUSE` sale «Another next dev
+   server is already running» con el PID y el `Dir:` del primero.
+
 2. Si aun así falla, el puerto lo ocupa **otro** proceso. Eso es distinto y peor:
    ver § «Cuándo NO es esto».
 
