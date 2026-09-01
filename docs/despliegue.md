@@ -249,6 +249,18 @@ compartiéndolo. Son dos sistemas de autenticación distintos a propósito
 ([ADR 0005](adr/0005-dos-sistemas-de-auth.md)): el del admin y el del comprador
 no se mezclan.
 
+### 7.5 El techo de catálogo por tienda (F-014)
+
+**100 000 filas `StoreProduct` vivas por tienda, con aviso a 50 000.** Por
+encima de eso, `GET /api/internal/reconciliation` deja de tener el margen de
+memoria medido para esa petición (`.agent/specs/F-014/architecture.md`
+§ Escalabilidad y límites): a ~1,3 KB de heap por fila, 100 000 filas son
+~130 MB de pico dentro de una función que en Vercel tiene un techo de memoria
+fijo. Hoy la tienda más grande de la base local tiene 30 productos vivos, tres
+órdenes de magnitud por debajo. Si algún negocio se acerca al aviso, el plan B
+—sin cambiar el contrato— es mover el cómputo del hash a un `$queryRaw` dentro
+de Postgres; no se implementa mientras el dato real siga tan lejos del techo.
+
 ---
 
 ## 8. Poner una tienda en el aire ⟳

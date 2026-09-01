@@ -164,6 +164,7 @@ propias de `POST /api/internal/orders/proposal`.
 | `404`  | `{"error":"UNKNOWN_STORE"}`                 | El `storeId` de ⑤ no existe **o pertenece a otro negocio**                                                                                                                                                                                                        |
 | `409`  | `{"error":"ORDER_NOT_PROPOSABLE","status"}` | **Nuevo (v5).** `POST /orders/proposal` sobre un pedido que no está en `PULLED`, `CONFIRMED` ni `AWAITING_CUSTOMER`. Nada se escribe; `status` trae el estado actual                                                                                              |
 | `400`  | `{"error":"CURRENCY_MISMATCH"}`             | **Nuevo (v5).** La propuesta llega en una moneda distinta de `Order.currencyCode`                                                                                                                                                                                 |
+| `400`  | `{"error":"MISSING_STORE_ID"}`              | **Aclaración, no cambio (F-014).** Falta el parámetro `storeId` en ⑤, o llega vacío. Ya lo devuelve el endpoint hoy; esta fila lo documenta                                                                                                                       |
 
 Un recurso de otro negocio nunca responde distinto de uno inexistente: ni
 `/orders/status`, ni `/reconciliation`, ni `/slug-availability` (que además
@@ -257,7 +258,7 @@ el lote entero se rechaza con `403 BUSINESS_MISMATCH` y no se escribe nada.
   "localName": "Refresco de cola 1.5 L",
   "barcodes": ["7501031311309", "7501031311316"], // v4: lista, obligatoria, [] si no tiene ninguno
   "localCategoryId": "uuid", // null
-  "price": 450,
+  "price": 450, // ≤ 2 decimales — ver la fila de abajo y § ⑤ Reconciliación
   "currency": "CUP",
   "canonicalProductId": null,
   "imageUrl": null,
@@ -266,10 +267,11 @@ el lote entero se rechaza con `403 BUSINESS_MISMATCH` y no se escribe nada.
 }
 ```
 
-| Campo      | Tipo       | Obligatorio   | Notas                                                                                                                                                                                         |
-| ---------- | ---------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `barcodes` | `string[]` | **sí**        | `[]` es válido. Cada elemento es texto — un GTIN con cero inicial no sobrevive a un número. Los que no son un GTIN válido (8/12/13/14 dígitos) se descartan en silencio, sin fallar el evento |
-| `barcode`  | —          | **prohibido** | Su sola presencia en el `payload` — con cualquier valor, incluido `null` — responde `400 INVALID_BATCH` del lote entero (v3 → v4, ver § Cambios respecto a la v3)                             |
+| Campo      | Tipo       | Obligatorio   | Notas                                                                                                                                                                                                                                                                                                                                               |
+| ---------- | ---------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `barcodes` | `string[]` | **sí**        | `[]` es válido. Cada elemento es texto — un GTIN con cero inicial no sobrevive a un número. Los que no son un GTIN válido (8/12/13/14 dígitos) se descartan en silencio, sin fallar el evento                                                                                                                                                       |
+| `barcode`  | —          | **prohibido** | Su sola presencia en el `payload` — con cualquier valor, incluido `null` — responde `400 INVALID_BATCH` del lote entero (v3 → v4, ver § Cambios respecto a la v3)                                                                                                                                                                                   |
+| `price`    | `number`   | **sí**        | **Aclaración aditiva (F-014): como máximo 2 decimales.** Con más, los dos lados redondean distinto de forma permanente: `2.675` se serializa aquí `"2.67"` (`toFixed(2)` de JavaScript sobre el doble IEEE-754 más cercano, `2.67499…`) y `round(2.675, 2)` en Postgres da `2.68` — comprobado ejecutando. Es la precondición de § ⑤ Reconciliación |
 
 **La fusión sigue usando un solo código: el menor de los válidos**, en orden
 lexicográfico de cadenas — nunca por orden numérico ni por cuál llegó
@@ -780,6 +782,94 @@ Si los hashes difieren: poner `dispPublicada = NULL` en las filas de ese local
 (lo que hace que la query convergente las levante todas) y alertar.
 
 **Alertar también si no hubo una corrida exitosa en 30 minutos.**
+
+### El SQL espejo (aclaración aditiva, sin bump de versión)
+
+Lo de arriba es pseudocódigo y admite más de una lectura del `precio` — la
+diferencia entre `1990` y `1990.00` da hashes distintos sobre los mismos
+datos. Esto de aquí es la lectura exacta, lista para copiar contra el schema
+de cuadrecaja:
+
+```sql
+SELECT count(*) AS products,
+       md5(coalesce(string_agg(
+              pt."id" || ':' ||
+              trim(trailing '.' from
+                   trim(trailing '0' from round(pt."precio"::numeric, 2)::text)) || ':' ||
+              pt."monedaPrecioCode" || ':' ||
+              coalesce(pt."dispPublicada", 'AVAILABLE') || '|',
+              '' ORDER BY pt."id" COLLATE "C"
+            ), '')) AS hash
+FROM "ProductoTienda" pt
+JOIN "Producto" p ON p.id = pt."productoId"
+WHERE pt."tiendaId" = $1
+  AND p."publicarEnTienda" = true
+  AND pt."precio" IS NOT NULL
+  AND pt."monedaPrecioCode" IS NOT NULL;
+```
+
+Cuatro decisiones que este SQL lleva y que no se deducen del pseudocódigo:
+
+1. **`dispPublicada`, no el enum calculado desde `existencia`/`umbralBajo`.**
+   El hash compara lo que ambos lados creen haber _publicado_, no el estado
+   de inventario en vuelo — eso ya lo resuelve la query convergente de § ②.
+   Si el hash contara el enum calculado, cualquier venta normal haría
+   diferir los hashes hasta la corrida siguiente y la alerta dejaría de
+   significar nada.
+2. **`coalesce(pt."dispPublicada", 'AVAILABLE')`.** `dispPublicada` es
+   `String?`: es `NULL` mientras § ② no haya confirmado nada, y la acción de
+   recuperación de arriba lo vuelve a poner a `NULL`. Sin el `coalesce`,
+   `NULL || ':'` es `NULL`, `string_agg` se salta esa fila entera y el
+   `hash` cambia mientras `count(*)` no — dos cifras que dejarían de
+   describir el mismo conjunto.
+3. **El `coalesce(..., '')` de fuera.** `string_agg` sobre cero filas da
+   `NULL`, y `md5(NULL)` es `NULL`, no un hash. Con este `coalesce`, una
+   tienda publicada y vacía da `d41d8cd98f00b204e9800998ecf8427e` — el md5
+   de la cadena vacía, y exactamente lo que responde este lado para el mismo
+   caso.
+4. **`precio`/`monedaPrecioCode` no nulos.** Un producto sin moneda no
+   produce nunca un `payload` de `PRODUCT` válido en ①, así que nunca llegó
+   a existir aquí; contarlo del lado de cuadrecaja sería una diferencia
+   permanente. El `IS NOT NULL` es además lo que evita el mismo `NULL || ':'`
+   del punto 2.
+
+**El orden es de bytes, no el de una colación.** `ORDER BY pt."id" COLLATE
+"C"` — no el `ORDER BY` que cada base use por defecto: dos colaciones
+distintas sobre los mismos datos dan hashes distintos, y las dos bases son de
+dos organizaciones diferentes.
+
+**Precondición: `price` viaja con dos decimales como máximo (ver § ①).** Con
+más de dos, los dos lados divergen en el redondeo de forma permanente:
+`2.675` se serializa aquí como `"2.67"` (`toFixed(2)` de JavaScript sobre el
+doble IEEE-754 más cercano, que es `2.67499…`) y `round(2.675, 2)` en
+Postgres da `2.68` — comprobado ejecutando. Ese producto no converge nunca, y
+el arreglo no está de este lado.
+
+**Qué SÍ prueba la implementación de aquí, y qué NO.** Esta traducción se
+verifica contra una fila `StoreProduct`, no contra `ProductoTienda`: valida
+el orden, los separadores y la serialización del precio, que es donde están
+los errores. **No valida** los nombres de las columnas de cuadrecaja, ni el
+`JOIN` con `Producto`, ni el `coalesce` de `dispPublicada` — eso solo lo
+puede verificar el equipo de cuadrecaja ejecutando el SQL de arriba contra su
+propia base.
+
+#### Vector de prueba, para autoverificarse sin nuestra base
+
+Cuatro filas de una misma tienda, con `monedaPrecioCode = 'CUP'` y
+`dispPublicada = 'AVAILABLE'` en las cuatro, y sus `precio` respectivos
+`1990.00`, `1990.50`, `1990.10` y `0.00`. Con `id` ∈ `{a, b, c, d}` en ese
+mismo orden, el SQL de arriba tiene que dar:
+
+```
+products = 4
+hash     = 62e399684e3a8eafadaae58391537955
+```
+
+Calculado ejecutando la traducción de este SQL (sin el `JOIN` con
+`Producto`, que no cambia el hash) sobre esas cuatro filas literales — no a
+mano. Si el SQL implementado del lado de cuadrecaja no reproduce este hash
+sobre estos mismos cuatro valores, la diferencia está en la serialización del
+precio o en el orden, no en los datos reales.
 
 ---
 
