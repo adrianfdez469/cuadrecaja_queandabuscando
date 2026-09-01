@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { resolvePublicSlug } from "@/features/storefront/server/resolve";
 import { respondToProposal } from "@/features/orders/server/respond";
+import { ringOrderBell } from "@/features/orders/server/bell";
 import type { ProposalDecision } from "@/features/orders/types";
 import { isOrderCode, normalizeOrderCode } from "@/lib/orderCode";
 import {
@@ -137,6 +138,11 @@ export async function POST(
   }
 
   const result = await respondToProposal({ storeId: resolution.storeId, code, decision });
+  // F-020: the SECOND trigger (architecture.md DA2). ONLY on "applied" —
+  // R8/E14: an idempotent 200 (the same decision repeated) writes nothing
+  // new, so it never rings. Same payload as the first trigger (R14): the
+  // channel does not say which of the two fired.
+  if (result.kind === "applied") after(() => ringOrderBell(result.businessId));
   const appliedOutcome =
     decision === ORDER_PROPOSAL_DECISION.APPROVE
       ? ORDER_RESPONSE_OUTCOME.APPROVED

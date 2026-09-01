@@ -296,35 +296,64 @@ correr_smoke() { # <log>
     echo "  no existe $script — cópialo de .agent/templates/smoke.sh" >>"$1"
     return 1
   fi
-  puerto_libre "$SMOKE_PORT" "SMOKE FAIL" "$1" || return 1
-  srvlog="$(mktemp)"
-  PORT="$SMOKE_PORT" npx next dev -p "$SMOKE_PORT" >"$srvlog" 2>&1 &
-  pid=$!
-  for i in $(seq 1 60); do
-    curl -sf -o /dev/null "http://localhost:$SMOKE_PORT/" && break
-    kill -0 "$pid" 2>/dev/null || break
-    sleep 1
-  done
-  if kill -0 "$pid" 2>/dev/null; then
-    SMOKE_BASE_URL="http://localhost:$SMOKE_PORT" bash "$script" >>"$1" 2>&1
+  # Mismo motivo que en correr_visual, que ya lo hacía: Next 16 admite UN solo
+  # `next dev` por directorio, y no lo decide por el puerto. Lanzar otro muere
+  # con «Another next dev server is already running» aunque le des un puerto
+  # libre. Faltaba aquí, y se pagó en el CI: dos etapas smoke en el mismo
+  # trabajo (F-028 y F-020), la segunda sin poder levantar el suyo.
+  local puerto=""
+  puerto="$(servidor_propio)"
+  if [ -n "$puerto" ]; then
+    printf '  (reutilizo el next dev de este worktree en el puerto %s)\n' "$puerto" >>"$1"
+    srvlog="$(mktemp)"
+    pid=""
+  else
+    puerto="$SMOKE_PORT"
+    puerto_libre "$puerto" "SMOKE FAIL" "$1" || return 1
+    srvlog="$(mktemp)"
+    PORT="$puerto" npx next dev -p "$puerto" >"$srvlog" 2>&1 &
+    pid=$!
+    for i in $(seq 1 60); do
+      curl -sf -o /dev/null "http://localhost:$puerto/" && break
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 1
+    done
+  fi
+  if [ -z "$pid" ] || kill -0 "$pid" 2>/dev/null; then
+    SMOKE_BASE_URL="http://localhost:$puerto" bash "$script" >>"$1" 2>&1
     code=$?
   else
     echo "SMOKE FAIL el servidor de desarrollo no llegó a levantar" >>"$1"
     code=1
   fi
-  pkill -P "$pid" 2>/dev/null
-  kill "$pid" 2>/dev/null
-  wait "$pid" 2>/dev/null
+  if [ -n "$pid" ]; then
+    pkill -P "$pid" 2>/dev/null
+    kill "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+  fi
   {
     echo
     echo "--- salida del servidor (runtime feedback) ---"
-    tail -80 "$srvlog"
+    if [ -z "$pid" ]; then
+      # Igual que en correr_visual: un «--- salida del servidor ---» vacío se
+      # lee como «el servidor no dijo nada», que es la conclusión contraria a
+      # la verdadera. Aquí NO se miró.
+      echo "  (no capturada: se reutilizó el next dev del puerto $puerto,"
+      echo "   que escribe en la terminal donde se lanzó. El guardián de"
+      echo "   errores de servidor NO se aplica en esta corrida.)"
+    else
+      tail -80 "$srvlog"
+    fi
   } >>"$1"
   # Un error en el servidor cuenta como fallo aunque las peticiones respondan.
   # El grep va ANTES del rm: al revés miraba un archivo recién borrado, salía 2
   # con el «No such file» tragado por 2>/dev/null, y el guardián no disparó
   # NUNCA — ni aquí ni en correr_visual — desde que se escribió (87d8ce2).
-  guardian_servidor "$srvlog" "SMOKE FAIL" "$1" || code=1
+  # Solo cuando el log es nuestro: sobre el del servidor reutilizado no hay nada
+  # que mirar, y un archivo vacío daría un verde que nadie ha comprobado.
+  if [ -n "$pid" ]; then
+    guardian_servidor "$srvlog" "SMOKE FAIL" "$1" || code=1
+  fi
   rm -f "$srvlog"
   return $code
 }

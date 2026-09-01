@@ -14,5 +14,19 @@
       "Bash(npm run check:bundle)",
       "Bash(npx prisma validate)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/sync-contract-version.sh\"",
+            "statusMessage": "Comprobando la versión del contrato"
+          }
+        ]
+      }
+    ]
   }
 }

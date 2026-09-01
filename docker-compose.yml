@@ -99,6 +99,12 @@ services:
         condition: service_healthy
       auth:
         condition: service_healthy
+      # F-020: the `/realtime/v1/` location below has a hardcoded upstream
+      # hostname (`realtime-dev.queandabuscando-realtime`) that nginx
+      # resolves at config-load time — same reason `storage`/`auth` above are
+      # gated the same way.
+      realtime:
+        condition: service_healthy
     ports:
       - "54321:80"
     volumes:
@@ -259,6 +265,113 @@ services:
       timeout: 5s
       retries: 10
 
+  # --- Supabase Realtime emulator (F-020) --------------------------------
+  # Three services, same pattern as Storage/Auth above: own database, own
+  # volume, `${VAR:?mensaje}` for anything read from `.env`. Optional: a
+  # session that never creates an order works fine with these stopped
+  # (`.agent/init.sh` only warns, R17). See architecture.md DA4/DA6.
+
+  realtime-db:
+    image: postgres:16-alpine
+    container_name: queandabuscando-realtime-db
+    restart: unless-stopped
+    environment:
+      # NOT supabase_admin here (found running it): POSTGRES_USER makes the
+      # postgres image create that role itself at initdb time, and
+      # `realtime-roles.sql` below creates it too — the second CREATE ROLE
+      # then aborts the whole script before it reaches its own `create
+      # schema`. Same pattern storage-roles.sql already uses with
+      # `supabase_storage_admin`: bootstrap as `postgres`, create the
+      # Supabase-named role from SQL.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: realtime
+    # wal_level=logical: the SEED_SELF_HOST tenant brings the postgres_cdc_rls
+    # extension even though this feature only uses Broadcast. Free here,
+    # against an OWN empty database — on the app's own Postgres it would have
+    # been a configuration change against a database that already has data.
+    command: postgres -c wal_level=logical -c max_replication_slots=5 -c max_wal_senders=5
+    volumes:
+      - queandabuscando-realtime-pgdata:/var/lib/postgresql/data
+      # Only runs against an EMPTY volume — never the app's own Postgres.
+      - ./docker/realtime-roles.sql:/docker-entrypoint-initdb.d/realtime-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U supabase_admin -d realtime"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  realtime:
+    image: supabase/realtime:v2.102.3
+    # The name is NOT cosmetic: Realtime deduces the tenant from the FIRST
+    # segment of the Host. `realtime-dev.<anything>` -> tenant `realtime-dev`,
+    # which is what SEED_SELF_HOST seeds. Same reason the official Supabase
+    # compose names its own container `realtime-dev.supabase-realtime`.
+    container_name: realtime-dev.queandabuscando-realtime
+    restart: unless-stopped
+    depends_on:
+      realtime-db:
+        condition: service_healthy
+    environment:
+      APP_NAME: realtime # required at boot (found running it) — inert, only used to name the release
+      PORT: 4000
+      DB_HOST: realtime-db
+      DB_PORT: "5432"
+      DB_USER: supabase_admin
+      DB_PASSWORD: postgres
+      DB_NAME: realtime
+      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
+      DB_ENC_KEY: supabaserealtime # 16 bytes exactly, inert literal from the official compose
+      API_JWT_SECRET: "${SUPABASE_JWT_SECRET:?missing, run node scripts/storage-dev-keys.mjs --write}"
+      SECRET_KEY_BASE: "${SUPABASE_JWT_SECRET:?missing, run node scripts/storage-dev-keys.mjs --write}" # Phoenix requires >=64 chars; the secret has them
+      # v2.102.3 requires this at boot even though this feature never queries
+      # /metrics — found running it, not documented in architecture.md's
+      # environment list. Reuses the same secret: it only gates that one
+      # endpoint, so it is not a credential anything else in this repo checks.
+      METRICS_JWT_SECRET: "${SUPABASE_JWT_SECRET:?missing, run node scripts/storage-dev-keys.mjs --write}"
+      SEED_SELF_HOST: "true"
+      RUN_JANITOR: "true"
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+    healthcheck: # with the anon key, like the official compose
+      test:
+        [
+          "CMD",
+          "curl",
+          "-sSfL",
+          "--head",
+          "-o",
+          "/dev/null",
+          "-H",
+          "Authorization: Bearer ${NEXT_PUBLIC_SUPABASE_ANON_KEY}",
+          "http://127.0.0.1:4000/api/tenants/realtime-dev/health",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One shot, idempotent — calcado de `storage-bucket-init`. Waits for
+  # `to_regclass('realtime.messages')` to stop being NULL (that table is
+  # created by Realtime's OWN migrations, not by us) and then applies
+  # docker/realtime-policies.sql, whose own `drop policy if exists` makes a
+  # SECOND `docker compose up -d` in a row exit 0 too (criterio 12).
+  realtime-init:
+    image: postgres:16-alpine
+    container_name: queandabuscando-realtime-init
+    depends_on:
+      realtime:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      PGPASSWORD: postgres
+    volumes:
+      - ./docker/realtime-policies.sql:/realtime-policies.sql:ro
+    entrypoint:
+      - sh
+      - -c
+      - >
+        for i in $$(seq 1 30); do reg=$$(psql -h realtime-db -U supabase_admin -d realtime -tAc "select to_regclass('realtime.messages')" 2>/tmp/wait.log); if [ -n "$$reg" ]; then break; fi; sleep 1; done; cat /tmp/wait.log 2>/dev/null; psql -h realtime-db -U supabase_admin -d realtime -v ON_ERROR_STOP=1 -f /realtime-policies.sql
+
   # One shot, idempotent, two jobs — `postgres:16-alpine` (already pulled for
   # the app's own db) has both `psql` and `wget`, so one container covers both:
   #
@@ -304,3 +417,4 @@ volumes:
   queandabuscando-storage-pgdata:
   queandabuscando-storage-objects:
   queandabuscando-auth-pgdata:
+  queandabuscando-realtime-pgdata:

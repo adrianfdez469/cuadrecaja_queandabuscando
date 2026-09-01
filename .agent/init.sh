@@ -50,7 +50,7 @@ else
   # Las tres claves locales de Storage no viven en el repo: las genera cada
   # máquina con `node scripts/storage-dev-keys.mjs --write`, así que se avisan
   # aparte y con su comando, no como «falta una variable» sin más.
-  done < <(grep -oE '^[A-Z_]+=' .env.example | tr -d '=' | grep -vE '^(SUPABASE_SERVICE_ROLE_KEY|NEXT_PUBLIC_SUPABASE_ANON_KEY|STORAGE_JWT_SECRET)$')
+  done < <(grep -oE '^[A-Z_]+=' .env.example | tr -d '=' | grep -vE '^(SUPABASE_SERVICE_ROLE_KEY|NEXT_PUBLIC_SUPABASE_ANON_KEY|STORAGE_JWT_SECRET|SUPABASE_JWT_SECRET)$')
   if [ -n "$MISSING" ]; then
     warn "sin valor en .env:$MISSING"
   else
@@ -131,6 +131,19 @@ if curl -fsS -m 3 "http://localhost:54324/readyz" >/dev/null 2>&1; then
   ok "capturador de correo arriba (Mailpit, http://localhost:54324)"
 else
   warn "Mailpit no responde en http://localhost:54324 — comprueba el puerto y ejecuta: docker compose up -d"
+fi
+
+echo "== Realtime =="
+# Nunca con `bad`: una sesión que no crea pedidos tiene que seguir leyendo
+# ENTORNO LISTO con el emulador parado (F-020, R17, criterio 12).
+ANON_KEY="$(grep -E '^NEXT_PUBLIC_SUPABASE_ANON_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'"'"' ')"
+if [ -z "$SUPABASE_URL" ] || [ -z "$ANON_KEY" ]; then
+  warn "claves locales de Realtime sin generar — ejecuta: node scripts/storage-dev-keys.mjs --write"
+elif curl -fsS -m 3 "$SUPABASE_URL/realtime/v1/api/tenants/realtime-dev/health" \
+  -H "Authorization: Bearer $ANON_KEY" >/dev/null 2>&1; then
+  ok "emulador de Realtime arriba (inquilino realtime-dev)"
+else
+  warn "emulador de Realtime no responde — ejecuta: docker compose up -d"
 fi
 
 echo

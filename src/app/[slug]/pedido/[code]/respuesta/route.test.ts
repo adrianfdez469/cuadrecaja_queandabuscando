@@ -2,12 +2,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * F-019 architecture.md DA4, ADR 0024. `resolvePublicSlug` and
- * `respondToProposal` are the only mocks — this route imports no Prisma of
- * its own (ESLint's own boundary rule would fail the build otherwise).
+ * `respondToProposal` are the only DOMAIN mocks — this route imports no
+ * Prisma of its own (ESLint's own boundary rule would fail the build
+ * otherwise).
+ *
+ * F-020: `next/server`'s `after` is ALSO mocked, invoking its callback
+ * synchronously — the real `after()` throws "called outside a request
+ * scope" when a route handler is invoked directly like this test does, with
+ * no actual Next request pipeline underneath. Invoking synchronously (rather
+ * than swallowing it) is what lets the assertions below observe whether the
+ * bell rang, same as production observes it after the real response left.
+ * `ringOrderBell` is mocked too, so that synchronous call never reaches
+ * Postgres.
  */
 
 const respondToProposal = vi.fn();
 const resolvePublicSlug = vi.fn();
+const ringOrderBell = vi.fn();
 
 vi.mock("@/features/orders/server/respond", () => ({
   respondToProposal: (...args: unknown[]) => respondToProposal(...args),
@@ -16,6 +27,15 @@ vi.mock("@/features/orders/server/respond", () => ({
 vi.mock("@/features/storefront/server/resolve", () => ({
   resolvePublicSlug: (...args: unknown[]) => resolvePublicSlug(...args),
 }));
+
+vi.mock("@/features/orders/server/bell", () => ({
+  ringOrderBell: (...args: unknown[]) => ringOrderBell(...args),
+}));
+
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  return { ...actual, after: (callback: () => unknown) => callback() };
+});
 
 const { POST } = await import("./route");
 
@@ -55,11 +75,16 @@ function postForm(
 beforeEach(() => {
   respondToProposal.mockReset();
   resolvePublicSlug.mockReset().mockResolvedValue({ kind: "branch", storeId: "store-1" });
+  ringOrderBell.mockReset();
 });
 
 describe("POST /[slug]/pedido/[code]/respuesta — aplicado (E5, E6)", () => {
   it("aprobar: JSON {status, applied:true} para una máquina (sin Accept: text/html)", async () => {
-    respondToProposal.mockResolvedValue({ kind: "applied", status: "CONFIRMED" });
+    respondToProposal.mockResolvedValue({
+      kind: "applied",
+      status: "CONFIRMED",
+      businessId: "business-1",
+    });
     const response = await postForm("aprobar");
 
     expect(response.status).toBe(200);
@@ -72,7 +97,11 @@ describe("POST /[slug]/pedido/[code]/respuesta — aplicado (E5, E6)", () => {
   });
 
   it("aprobar: 303 hacia ?r=aprobada para un navegador (Accept: text/html)", async () => {
-    respondToProposal.mockResolvedValue({ kind: "applied", status: "CONFIRMED" });
+    respondToProposal.mockResolvedValue({
+      kind: "applied",
+      status: "CONFIRMED",
+      businessId: "business-1",
+    });
     const response = await postForm("aprobar", { accept: "text/html" });
 
     expect(response.status).toBe(303);
@@ -82,7 +111,11 @@ describe("POST /[slug]/pedido/[code]/respuesta — aplicado (E5, E6)", () => {
   });
 
   it("rechazar: JSON {status, applied:true}", async () => {
-    respondToProposal.mockResolvedValue({ kind: "applied", status: "CANCELLED" });
+    respondToProposal.mockResolvedValue({
+      kind: "applied",
+      status: "CANCELLED",
+      businessId: "business-1",
+    });
     const response = await postForm("rechazar");
 
     await expect(response.json()).resolves.toEqual({ status: "CANCELLED", applied: true });
@@ -210,7 +243,11 @@ describe("POST — Origin cruzado (ADR 0024 defensa 8)", () => {
   });
 
   it("procede normalmente sin cabecera Origin (curl, la mayoría de los POST de formulario)", async () => {
-    respondToProposal.mockResolvedValue({ kind: "applied", status: "CONFIRMED" });
+    respondToProposal.mockResolvedValue({
+      kind: "applied",
+      status: "CONFIRMED",
+      businessId: "business-1",
+    });
     const response = await postForm("aprobar");
     expect(response.status).toBe(200);
   });
@@ -222,7 +259,11 @@ describe("POST — Origin cruzado (ADR 0024 defensa 8)", () => {
   // recibía 403 FORBIDDEN_ORIGIN en un envío perfectamente same-origin.
   // `.agent/playbook/origin-header-contra-env-estatico-no-el-real.md`.
   it("no rechaza un Origin con host:puerto distinto de NEXT_PUBLIC_SITE_URL cuando coincide con el Host real (regresión)", async () => {
-    respondToProposal.mockResolvedValue({ kind: "applied", status: "CONFIRMED" });
+    respondToProposal.mockResolvedValue({
+      kind: "applied",
+      status: "CONFIRMED",
+      businessId: "business-1",
+    });
     // NEXT_PUBLIC_SITE_URL (.env) es "http://localhost:3000". Un navegador
     // real sirviendo la app en el puerto 3101 (el que usa
     // `verify.sh --visual` por defecto) manda Origin/Host "localhost:3101" —
@@ -234,5 +275,53 @@ describe("POST — Origin cruzado (ADR 0024 defensa 8)", () => {
     });
     expect(response.status).toBe(200);
     expect(respondToProposal).toHaveBeenCalled();
+  });
+});
+
+describe("POST — el timbre, segundo disparador (F-020, architecture.md DA2)", () => {
+  it("aprobar (kind applied) programa after(() => ringOrderBell(businessId))", async () => {
+    respondToProposal.mockResolvedValue({
+      kind: "applied",
+      status: "CONFIRMED",
+      businessId: "business-1",
+    });
+    await postForm("aprobar");
+
+    expect(ringOrderBell).toHaveBeenCalledTimes(1);
+    expect(ringOrderBell).toHaveBeenCalledWith("business-1");
+  });
+
+  it("rechazar (kind applied) también programa el timbre, con el mismo businessId", async () => {
+    respondToProposal.mockResolvedValue({
+      kind: "applied",
+      status: "CANCELLED",
+      businessId: "business-2",
+    });
+    await postForm("rechazar");
+
+    expect(ringOrderBell).toHaveBeenCalledWith("business-2");
+  });
+
+  // R8/E14: repetir la misma decisión ya resuelta no escribe nada nuevo, así
+  // que no hay novedad que timbrar.
+  it("E14 — repetir la misma decisión (kind idempotent) NO timbra", async () => {
+    respondToProposal.mockResolvedValue({ kind: "idempotent", status: "CONFIRMED" });
+    await postForm("aprobar");
+
+    expect(ringOrderBell).not.toHaveBeenCalled();
+  });
+
+  it("un 409 (already_decided/expired/no_live_proposal) no timbra", async () => {
+    respondToProposal.mockResolvedValue({ kind: "already_decided", status: "CANCELLED" });
+    await postForm("aprobar");
+
+    expect(ringOrderBell).not.toHaveBeenCalled();
+  });
+
+  it("unknown_order no timbra", async () => {
+    respondToProposal.mockResolvedValue({ kind: "unknown_order" });
+    await postForm("aprobar");
+
+    expect(ringOrderBell).not.toHaveBeenCalled();
   });
 });
