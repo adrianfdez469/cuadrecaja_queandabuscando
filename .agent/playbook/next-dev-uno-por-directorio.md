@@ -37,7 +37,17 @@ al final del feedback. Si no se lee hasta abajo, parece que Next está roto.
    y solo cambia el mensaje: en vez de `EADDRINUSE` sale «Another next dev
    server is already running» con el PID y el `Dir:` del primero.
 
-2. Si aun así falla, el puerto lo ocupa **otro** proceso. Eso es distinto y peor:
+2. **En CI, la reutilización no se activa: ciérralo tú.** `servidor_propio()` y
+   `puerto_libre()` preguntan las dos a `lsof`, y en el runner de GitHub
+   ninguna vio el servidor que la etapa anterior dejó escuchando. El resultado
+   fue el peor posible: `next dev` murió con `EADDRINUSE` mientras el guion de
+   runtime corría contra el servidor del OTRO feature y asertaba
+   `0 aserciones fallidas` — solo el guardián de errores de servidor lo puso
+   rojo. Por eso `.github/workflows/ci.yml` **no depende de detectar nada**:
+   entre dos etapas smoke mata el servidor anterior y comprueba con `curl` que
+   el puerto dejó de responder, fallando ruidosamente si no.
+
+3. Si aun así falla, el puerto lo ocupa **otro** proceso. Eso es distinto y peor:
    ver § «Cuándo NO es esto».
 
 ## Cuándo NO es esto

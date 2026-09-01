@@ -233,8 +233,28 @@ jobs:
       - name: Auth emulator smoke (criterios 1, 2, 3, 8)
         run: bash .agent/verify.sh F-028 --only smoke
 
-      # Second smoke of this job. It does NOT start its own server: Next 16
-      # allows one `next dev` per directory and the previous smoke's is still
-      # up, so correr_smoke reuses it (.agent/verify.sh, servidor_propio()).
+      # correr_smoke reuses a running `next dev` when it can SEE one, and on
+      # this runner it cannot: both servidor_propio() and puerto_libre() ask
+      # lsof, and neither noticed the server the previous step left listening
+      # on 3100. What that produced was worse than a crash: `next dev` died
+      # with EADDRINUSE while the smoke ran happily against the OTHER
+      # feature's server and asserted 0 failures — only the server-error guard
+      # turned it red. So this does not rely on detection at all: the previous
+      # server is stopped here, and the check below fails loudly if it isn't,
+      # rather than letting the next step verify an application nobody meant
+      # to test (AGENTS.md, "un solo `next dev` por directorio, y comprueba de
+      # cuál es"; .agent/playbook/next-dev-uno-por-directorio.md).
+      - name: Stop the dev server the previous smoke left behind
+        run: |
+          pkill -f 'next dev' || true
+          pkill -f 'next-server' || true
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://localhost:3100/ || exit 0
+            sleep 1
+          done
+          echo "port 3100 is still answering after 30s — the next smoke would"
+          echo "test that server instead of its own"
+          exit 1
+
       - name: Realtime bell smoke (F-020 criterios 1, 2, 3, 4, 8, 9, 10, 11, 13)
         run: bash .agent/verify.sh F-020 --only smoke
