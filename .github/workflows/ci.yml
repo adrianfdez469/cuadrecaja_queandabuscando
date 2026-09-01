@@ -233,5 +233,14 @@ jobs:
       - name: Auth emulator smoke (criterios 1, 2, 3, 8)
         run: bash .agent/verify.sh F-028 --only smoke
 
+      # Its OWN port. This is the second smoke of this job, and the first one's
+      # `next dev` can still hold 3100 when this step starts: the port check
+      # uses lsof, which does not see a server that is closing but has not
+      # released the socket yet. What made it expensive is that it did NOT fail
+      # loudly -- `next dev` died with EADDRINUSE while the smoke ran happily
+      # against the OTHER feature's server and asserted 0 failures. Only the
+      # server-error guard caught it. A green built that way would have been
+      # verifying an application nobody meant to test (AGENTS.md, "un solo
+      # `next dev` por directorio, y comprueba de cuál es").
       - name: Realtime bell smoke (F-020 criterios 1, 2, 3, 4, 8, 9, 10, 11, 13)
-        run: bash .agent/verify.sh F-020 --only smoke
+        run: SMOKE_PORT=3102 bash .agent/verify.sh F-020 --only smoke
