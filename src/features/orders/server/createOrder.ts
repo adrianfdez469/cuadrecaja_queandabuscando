@@ -26,7 +26,17 @@ import { loadStoreForOrder, quoteCart, type OrderableLine, type OrderStore } fro
  */
 
 export type CreateOrderResult =
-  | { kind: "created"; code: string; orderUrl: string; whatsappUrl: string | null }
+  // F-020: `businessId` is what the first trigger's `after()` call needs
+  // (architecture.md § Componentes, "businessId en el resultado") — only
+  // this variant, never "idempotent" (E16: a 200-idempotent response has no
+  // new row to pull, so it never rings).
+  | {
+      kind: "created";
+      code: string;
+      orderUrl: string;
+      whatsappUrl: string | null;
+      businessId: string;
+    }
   | { kind: "idempotent"; code: string; orderUrl: string; whatsappUrl: string | null }
   | { kind: "empty_cart" }
   | { kind: "store_not_found" }
@@ -94,6 +104,7 @@ async function toCreatedResult(store: OrderStore, code: string): Promise<CreateO
     code,
     orderUrl: orderUrlFor(store.slug, code),
     whatsappUrl: await buildWhatsappUrlForOrder(store, code),
+    businessId: store.businessId,
   };
 }
 

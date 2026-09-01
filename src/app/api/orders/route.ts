@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createOrderRequestSchema } from "@/features/orders/schemas";
 import { createOrder, type CreateOrderResult } from "@/features/orders/server/createOrder";
+import { ringOrderBell } from "@/features/orders/server/bell";
 import { resolveOrderCustomerId } from "@/features/account/server/orderIdentity";
 import { NO_STORE, readJsonBody, zodIssuesToInvalidBody } from "./_lib/body";
 
@@ -30,6 +31,11 @@ export async function POST(request: Request) {
 
   try {
     const result = await createOrder(parsed.data, customerLink);
+    // F-020: the FIRST trigger (architecture.md DA2). ONLY on "created" —
+    // E16: the 200-idempotent path and every 4xx have no new row to pull,
+    // so nothing rings. Runs after the response object below is returned to
+    // the caller, never before (R2/R3 are structural, not discipline).
+    if (result.kind === "created") after(() => ringOrderBell(result.businessId));
     return toResponse(result);
   } catch (error) {
     console.error("[orders] create failed", error);

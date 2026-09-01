@@ -29,14 +29,18 @@ export type RespondToProposalInput = {
 };
 
 export type RespondToProposalResult =
-  | { kind: "applied"; status: OrderStatus }
+  // F-020: `businessId` is what the second trigger's `after()` call needs
+  // (architecture.md § Componentes, "businessId en el resultado") — the ONLY
+  // variant that ever rings the bell (R8/E14: an idempotent 200 writes
+  // nothing new, so it never carries one).
+  | { kind: "applied"; status: OrderStatus; businessId: string }
   | { kind: "idempotent"; status: OrderStatus }
   | { kind: "already_decided"; status: OrderStatus }
   | { kind: "expired"; status: OrderStatus }
   | { kind: "no_live_proposal"; status: OrderStatus }
   | { kind: "unknown_order" };
 
-type WonRow = { code: string };
+type WonRow = { code: string; businessId: string };
 
 export async function respondToProposal(
   input: RespondToProposalInput,
@@ -47,7 +51,11 @@ export async function respondToProposal(
     : await reject(input.storeId, input.code);
 
   if (rows.length > 0) {
-    return { kind: "applied", status: isApprove ? "CONFIRMED" : "CANCELLED" };
+    return {
+      kind: "applied",
+      status: isApprove ? "CONFIRMED" : "CANCELLED",
+      businessId: rows[0].businessId,
+    };
   }
 
   return classifyZeroRows(input.storeId, input.code, input.decision);
@@ -75,7 +83,7 @@ async function approve(storeId: string, code: string): Promise<WonRow[]> {
        WHERE code = ${code} AND "storeId" = ${storeId}
          AND status = 'AWAITING_CUSTOMER'::"OrderStatus"
          AND "expiresAt" > now()
-      RETURNING id, code, "proposedItems"
+      RETURNING id, code, "businessId", "proposedItems"
     ), cleared AS (
       DELETE FROM "OrderItem" WHERE "orderId" IN (SELECT id FROM won) RETURNING 1
     ), inserted AS (
@@ -93,7 +101,7 @@ async function approve(storeId: string, code: string): Promise<WonRow[]> {
              )
       RETURNING 1
     )
-    SELECT code FROM won
+    SELECT code, "businessId" FROM won
   `);
 }
 
@@ -116,7 +124,7 @@ async function reject(storeId: string, code: string): Promise<WonRow[]> {
      WHERE code = ${code} AND "storeId" = ${storeId}
        AND status = 'AWAITING_CUSTOMER'::"OrderStatus"
        AND "expiresAt" > now()
-    RETURNING code
+    RETURNING code, "businessId"
   `);
 }
 
