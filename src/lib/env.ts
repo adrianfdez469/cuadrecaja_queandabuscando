@@ -12,6 +12,11 @@ const serverSchema = z.object({
   CRON_SECRET: z.string().min(16).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default("store-media"),
+  // F-020: signs the Realtime subscription token (src/lib/realtime/
+  // subscriptionToken.ts). Optional, like SUPABASE_SERVICE_ROLE_KEY —
+  // required would break every route that never touches Realtime
+  // (architecture.md DA5, AP1 opción A).
+  SUPABASE_JWT_SECRET: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverSchema>;
