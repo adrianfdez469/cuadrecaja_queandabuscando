@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { CheckoutMode, DeliveryFeeMode } from "@/generated/prisma/enums";
+import { STORE_DELIVERY_CONFIG_INCONSISTENT } from "@/constants/sync";
 
 /**
  * Wire format for /api/internal/sync/*.
@@ -19,31 +21,58 @@ const isoDate = z.iso.datetime({ offset: true });
 
 // --- payloads --------------------------------------------------------------
 
-export const storePayloadSchema = z.object({
-  storeId: z.string().min(1),
-  businessId: z.string().min(1),
-  businessName: z.string().min(1),
-  name: z.string().min(1),
-  description: z.string().nullish(),
-  /** Optional: derived from the name when the POS does not supply one. */
-  slug: z.string().nullish(),
-  address: z.string().nullish(),
-  city: z.string().nullish(),
-  province: z.string().nullish(),
-  latitude: z.number().min(-90).max(90).nullish(),
-  longitude: z.number().min(-180).max(180).nullish(),
-  phone: z.string().nullish(),
-  whatsapp: z.string().nullish(),
-  email: z.string().nullish(),
-  openingHours: z.unknown().nullish(),
-  baseCurrency: z.string().length(3).default("CUP"),
-  /** The business's opt-in for this specific location. */
-  publishToStore: z.boolean(),
-  /** v3, optional (HD15, proposed in docs/sync-contract.md). Shown to the
-   *  shopper when `publishToStore` is false; ignored otherwise. */
-  unpublishReason: z.string().max(160).nullish(),
-  updatedAt: isoDate,
-});
+export const storePayloadSchema = z
+  .object({
+    storeId: z.string().min(1),
+    businessId: z.string().min(1),
+    businessName: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().nullish(),
+    /** Optional: derived from the name when the POS does not supply one. */
+    slug: z.string().nullish(),
+    address: z.string().nullish(),
+    city: z.string().nullish(),
+    province: z.string().nullish(),
+    latitude: z.number().min(-90).max(90).nullish(),
+    longitude: z.number().min(-180).max(180).nullish(),
+    phone: z.string().nullish(),
+    whatsapp: z.string().nullish(),
+    email: z.string().nullish(),
+    openingHours: z.unknown().nullish(),
+    baseCurrency: z.string().length(3).default("CUP"),
+    /**
+     * F-032 (R1-R3, R5, R19): the purchase configuration cuadrecaja is now the
+     * owner of. All five are OPTIONAL and PLAIN (R2) — absent means "leave the
+     * column alone", never "reset to the default" (R1, "omitir no es
+     * apagar"). Vocabulary comes from the generated Prisma enums, never a
+     * copied literal (R19). Only `deliveryFee` is `.nullish()`: `null` is the
+     * one way the POS has to clear the fee when it moves to
+     * `QUOTED_PER_ORDER` (R3/E4). `null` on any of the other four is a type
+     * error (R3/E5) — the column is not nullable, so translating `null` to
+     * "default" or "absent" would invent a meaning the POS cannot ask for.
+     */
+    checkoutMode: z.enum(CheckoutMode).optional(),
+    deliveryEnabled: z.boolean().optional(),
+    /** R5: `Decimal(14,2)` — more decimals round silently, more digits
+     *  overflow into a Postgres 22003 (a 500 instead of a 400). */
+    deliveryFee: z.number().nonnegative().multipleOf(0.01).max(999999999999.99).nullish(),
+    deliveryFeeMode: z.enum(DeliveryFeeMode).optional(),
+    /** R5: `expiry.ts`/`proposal.ts` do `now() ± make_interval(hours => …)`;
+     *  a value near `INT_MAX` pushes the timestamp out of range and breaks the
+     *  expiry sweep for every tenant, not just this one. */
+    orderExpiryHours: z.int().min(1).max(8760).optional(),
+    /** The business's opt-in for this specific location. */
+    publishToStore: z.boolean(),
+    /** v3, optional (HD15, proposed in docs/sync-contract.md). Shown to the
+     *  shopper when `publishToStore` is false; ignored otherwise. */
+    unpublishReason: z.string().max(160).nullish(),
+    updatedAt: isoDate,
+  })
+  .refine(
+    (p) =>
+      !(p.deliveryEnabled === true && p.deliveryFeeMode === "FLAT_RATE" && p.deliveryFee === null),
+    { error: STORE_DELIVERY_CONFIG_INCONSISTENT, path: ["deliveryFee"] },
+  );
 
 export const categoryPayloadSchema = z.object({
   categoryId: z.string().min(1),

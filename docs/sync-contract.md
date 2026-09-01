@@ -1,6 +1,6 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 6** · 1 de septiembre de 2026
+**Versión 7** · 1 de septiembre de 2026
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
 existe y está verificado contra los casos de abajo, **con una excepción marcada
@@ -30,6 +30,108 @@ delante es lo que implementó.
 
 Una corrección de tipografía o de un enlace roto es una menor: cuesta un dígito
 y evita la pregunta «¿es este el documento que leí?».
+
+## Cambios respecto a la v6
+
+Aditivo (F-032): un POS que implemente la v6 y no envíe ninguna de las cinco
+claves de abajo sigue siendo un emisor correcto y no tiene que tocar una
+línea. La única salvedad es de propiedad, no de forma del cable: un campo que
+antes era de queandabuscando pasa a ser de cuadrecaja.
+
+**Las cinco columnas que deciden cómo se compra en una tienda viajan ahora en
+el `payload` de `STORE`, planas y las cinco opcionales** —ver el `payload`
+completo y la tabla de propiedad en «`payload` de `STORE`», más abajo:
+
+| Campo              | Tipo           | Obligatoriedad | Rango                                       |
+| ------------------ | -------------- | -------------- | ------------------------------------------- |
+| `checkoutMode`     | string         | opcional       | `"WHATSAPP"` \| `"ONSITE"`                  |
+| `deliveryEnabled`  | boolean        | opcional       | `true` \| `false`                           |
+| `deliveryFee`      | number \| null | opcional       | `>= 0`, ≤ 2 decimales, `<= 999999999999.99` |
+| `deliveryFeeMode`  | string         | opcional       | `"FLAT_RATE"` \| `"QUOTED_PER_ORDER"`       |
+| `orderExpiryHours` | entero         | opcional       | `1..8760`                                   |
+
+**Regla que manda: ausente deja la columna intacta; `null` solo tiene
+significado en `deliveryFee`.** En las otras cuatro, `null` es un error de
+tipo y produce `400 INVALID_BATCH` — la columna no es anulable, así que
+traducir `null` a "el default" o a "como si no viniera" inventaría una
+semántica que el POS no puede pedir.
+
+| Campo              | Ausente         | `null`              | Valor   |
+| ------------------ | --------------- | ------------------- | ------- |
+| `checkoutMode`     | columna intacta | `400 INVALID_BATCH` | escribe |
+| `deliveryEnabled`  | columna intacta | `400 INVALID_BATCH` | escribe |
+| `deliveryFee`      | columna intacta | escribe `NULL`      | escribe |
+| `deliveryFeeMode`  | columna intacta | `400 INVALID_BATCH` | escribe |
+| `orderExpiryHours` | columna intacta | `400 INVALID_BATCH` | escribe |
+
+**`Store.orderExpiryHours` cambia de dueño.** Pasa a ser de cuadrecaja, junto
+con el resto de la configuración de compra. Tres líneas anteriores de este
+mismo documento dejan de ser ciertas, dicho con esas palabras, como la v6 ya
+hizo con la línea de las guardas de transición: la de § «Cambios respecto a la
+v4» —«`Store.orderExpiryHours` es de queandabuscando: el POS no lo envía y un
+evento `STORE` no lo pisa»—, y la de § «La renegociación»/③④ —«`Store.orderExpiryHours`
+es de queandabuscando (24 por defecto): el POS no lo envía y un evento `STORE`
+no lo pisa. Sigue siendo así en la v6 — cambia en la v7»—. Lo que ese número
+_significa_ no cambia: cuánto dura una propuesta y cuánto vive un pedido sin
+cotizar (v6). Cambia únicamente quién lo escribe. Ver
+[ADR 0028](adr/0028-configuracion-de-compra-del-pos.md).
+
+**El riesgo operativo: un solo valor mal formado tumba el LOTE ENTERO con
+`400`, y el reintento vuelve a fallar tal cual.** Ejemplo literal — un evento
+`STORE` con `"deliveryFee": 12.345` (más de dos decimales) en un lote que por
+lo demás es válido:
+
+```jsonc
+// petición: POST /api/internal/sync/catalog
+{
+  "businessId": "seed-negocio-1",
+  "events": [
+    /* ...eventos válidos... */
+    {
+      "eventId": "evt-store-1",
+      "entity": "STORE",
+      "operation": "UPDATE",
+      "occurredAt": "2026-09-01T14:03:00.000Z",
+      "payload": { "storeId": "uuid", /* ... */ "deliveryFee": 12.345 },
+    },
+  ],
+}
+```
+
+```jsonc
+// respuesta: 400
+{
+  "error": "INVALID_BATCH",
+  "issues": [{ "path": ["events", 1, "payload", "deliveryFee"], "message": "..." }],
+}
+```
+
+Ningún `SyncEvent` queda escrito — ni el del evento malo ni el de los demás
+eventos del mismo lote que sí eran válidos. El outbox del negocio se para
+hasta que el POS corrija el valor y reenvíe.
+
+**El fallo por evento cuando la contradicción solo se ve contra la fila
+guardada** (criterio 5): responde `207`, no `400` — un `refine` de Zod no
+puede ver la base, así que esta mitad de la guarda corre en el handler,
+después de leer la fila y antes de escribir nada:
+
+```jsonc
+{
+  "ok": ["evt-product-1"],
+  "failed": [{ "id": "evt-store-1", "error": "STORE_DELIVERY_CONFIG_INCONSISTENT" }],
+  "results": [
+    { "eventId": "evt-product-1", "status": "processed" },
+    { "eventId": "evt-store-1", "status": "failed", "error": "STORE_DELIVERY_CONFIG_INCONSISTENT" },
+  ],
+}
+```
+
+`STORE_DELIVERY_CONFIG_INCONSISTENT` protege un único invariante: una fila
+nunca queda con `deliveryEnabled: true` **y** `deliveryFeeMode: "FLAT_RATE"`
+**y** `deliveryFee` sin importe — una tienda que dice ofrecer domicilio sin
+nada con que cobrarlo. `failed` no es un duplicado (§ «Idempotencia, en dos
+capas»): el POS lo reintenta, y reintentarlo sin corregir el POS falla otra
+vez, indefinidamente.
 
 ## Cambios respecto a la v5.1
 
@@ -236,19 +338,21 @@ existían con otro nombre de variable; los siguientes son de la v3; la fila de
 `POST /api/internal/orders/proposal`; y `409 ORDER_DELIVERY_NOT_QUOTED` es de la
 v6 (F-031), propia de `POST /api/internal/orders/status`.
 
-| Código | Cuerpo                                      | Cuándo                                                                                                                                                                                                                                                            |
-| ------ | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `503`  | `{"error":"SYNC_NOT_CONFIGURED"}`           | Ningún negocio tiene un token acuñado todavía                                                                                                                                                                                                                     |
-| `401`  | `{"error":"UNAUTHORIZED"}`                  | Sin cabecera, esquema distinto de `Bearer`, token vacío/corto, o token que no resuelve ningún negocio                                                                                                                                                             |
-| `400`  | `{"error":"INVALID_BATCH","issues":[...]}`  | **Nuevo (v4).** El cuerpo no cumple el schema — incluida la clave `barcode` (singular) en cualquier `payload` de `PRODUCT`. Rechaza el **lote entero**, ninguna `SyncEvent` queda escrita, ni siquiera la de los demás eventos del mismo lote que sí eran válidos |
-| `403`  | `{"error":"BUSINESS_INACTIVE"}`             | El token es válido pero ese negocio está dado de baja                                                                                                                                                                                                             |
-| `403`  | `{"error":"BUSINESS_MISMATCH"}`             | El `businessId` del cuerpo (① o ②) no es el del negocio autenticado — el lote entero se rechaza, no se aplica nada                                                                                                                                                |
-| `404`  | `{"error":"UNKNOWN_ORDER"}`                 | El `orderId` no existe **o pertenece a otro negocio** — el mismo código en los dos casos, a propósito                                                                                                                                                             |
-| `404`  | `{"error":"UNKNOWN_STORE"}`                 | El `storeId` de ⑤ no existe **o pertenece a otro negocio**                                                                                                                                                                                                        |
-| `409`  | `{"error":"ORDER_NOT_PROPOSABLE","status"}` | **Nuevo (v5).** `POST /orders/proposal` sobre un pedido que no está en `PULLED`, `CONFIRMED` ni `AWAITING_CUSTOMER`. Nada se escribe; `status` trae el estado actual                                                                                              |
-| `400`  | `{"error":"CURRENCY_MISMATCH"}`             | **Nuevo (v5).** La propuesta llega en una moneda distinta de `Order.currencyCode`                                                                                                                                                                                 |
-| `409`  | `{"error":"ORDER_DELIVERY_NOT_QUOTED"}`     | **Nuevo (v6).** `POST /orders/status` llevando a `READY`, `IN_TRANSIT` o `DELIVERED` un pedido con `deliveryFeePending: true`. Nada se escribe. Cotiza primero por `POST /orders/proposal` y espera que el comprador apruebe                                      |
-| `400`  | `{"error":"MISSING_STORE_ID"}`              | **Aclaración, no cambio (F-014).** Falta el parámetro `storeId` en ⑤, o llega vacío. Ya lo devuelve el endpoint hoy; esta fila lo documenta                                                                                                                       |
+| Código | Cuerpo                                                                                  | Cuándo                                                                                                                                                                                                                                                            |
+| ------ | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `503`  | `{"error":"SYNC_NOT_CONFIGURED"}`                                                       | Ningún negocio tiene un token acuñado todavía                                                                                                                                                                                                                     |
+| `401`  | `{"error":"UNAUTHORIZED"}`                                                              | Sin cabecera, esquema distinto de `Bearer`, token vacío/corto, o token que no resuelve ningún negocio                                                                                                                                                             |
+| `400`  | `{"error":"INVALID_BATCH","issues":[...]}`                                              | **Nuevo (v4).** El cuerpo no cumple el schema — incluida la clave `barcode` (singular) en cualquier `payload` de `PRODUCT`. Rechaza el **lote entero**, ninguna `SyncEvent` queda escrita, ni siquiera la de los demás eventos del mismo lote que sí eran válidos |
+| `403`  | `{"error":"BUSINESS_INACTIVE"}`                                                         | El token es válido pero ese negocio está dado de baja                                                                                                                                                                                                             |
+| `403`  | `{"error":"BUSINESS_MISMATCH"}`                                                         | El `businessId` del cuerpo (① o ②) no es el del negocio autenticado — el lote entero se rechaza, no se aplica nada                                                                                                                                                |
+| `404`  | `{"error":"UNKNOWN_ORDER"}`                                                             | El `orderId` no existe **o pertenece a otro negocio** — el mismo código en los dos casos, a propósito                                                                                                                                                             |
+| `404`  | `{"error":"UNKNOWN_STORE"}`                                                             | El `storeId` de ⑤ no existe **o pertenece a otro negocio**                                                                                                                                                                                                        |
+| `409`  | `{"error":"ORDER_NOT_PROPOSABLE","status"}`                                             | **Nuevo (v5).** `POST /orders/proposal` sobre un pedido que no está en `PULLED`, `CONFIRMED` ni `AWAITING_CUSTOMER`. Nada se escribe; `status` trae el estado actual                                                                                              |
+| `400`  | `{"error":"CURRENCY_MISMATCH"}`                                                         | **Nuevo (v5).** La propuesta llega en una moneda distinta de `Order.currencyCode`                                                                                                                                                                                 |
+| `409`  | `{"error":"ORDER_DELIVERY_NOT_QUOTED"}`                                                 | **Nuevo (v6).** `POST /orders/status` llevando a `READY`, `IN_TRANSIT` o `DELIVERED` un pedido con `deliveryFeePending: true`. Nada se escribe. Cotiza primero por `POST /orders/proposal` y espera que el comprador apruebe                                      |
+| `400`  | `{"error":"MISSING_STORE_ID"}`                                                          | **Aclaración, no cambio (F-014).** Falta el parámetro `storeId` en ⑤, o llega vacío. Ya lo devuelve el endpoint hoy; esta fila lo documenta                                                                                                                       |
+| `400`  | `{"error":"INVALID_BATCH","issues":[{"message":"STORE_DELIVERY_CONFIG_INCONSISTENT"}]}` | **Nuevo (v7, F-032).** Un `payload` de `STORE` que por sí solo ya es contradictorio: `deliveryEnabled: true` + `deliveryFeeMode: "FLAT_RATE"` + `deliveryFee: null`. Rechaza el lote entero, igual que cualquier otro `INVALID_BATCH`                             |
+| `207`  | `"failed":[{"id":"...","error":"STORE_DELIVERY_CONFIG_INCONSISTENT"}]`                  | **Nuevo (v7, F-032).** El mismo invariante, pero solo visible al mezclar el `payload` con la fila ya guardada — no es un `400`, es el evento reportado `failed` dentro del `207` de siempre. No escribe nada; reintentarlo sin corregir el POS falla otra vez     |
 
 Un recurso de otro negocio nunca responde distinto de uno inexistente: ni
 `/orders/status`, ni `/reconciliation`, ni `/slug-availability` (que además
@@ -384,18 +488,27 @@ con el único campo nuevo de la v3 marcado aparte.
   "businessId": "uuid",
   "businessName": "La Rampa",
   "name": "La Rampa · Vedado",
-  "description": "Todo para la casa, a dos cuadras de 23 y L.", // null
+  "description": "Todo para la casa, a dos cuadras de 23 y L.", // null BORRA
   "slug": "tienda-demo", // null — solo se usa al CREAR, para el slug único
-  "address": "Calle 23 esq. L, Vedado", // null
-  "city": "La Habana", // null
+  "address": "Calle 23 esq. L, Vedado", // null BORRA
+  "city": "La Habana", // null BORRA
   "province": null,
   "latitude": null,
   "longitude": null,
   "phone": null,
-  "whatsapp": "+5350000001", // null
+  "whatsapp": "+5350000001", // null BORRA
   "email": null,
-  "openingHours": null,
+  "openingHours": null, // AUSENTE deja la columna intacta, no la borra
   "baseCurrency": "CUP", // por defecto CUP si se omite
+  // F-032 (v7): las cinco de la configuración de compra. Las cinco son
+  // OPCIONALES y las cinco dejan la columna INTACTA si se omiten — ver la
+  // tabla ausente/`null`/valor de § «Cambios respecto a la v6» y la tabla de
+  // propiedad de campos, justo abajo.
+  "checkoutMode": "ONSITE",
+  "deliveryEnabled": true,
+  "deliveryFee": 500.0,
+  "deliveryFeeMode": "FLAT_RATE",
+  "orderExpiryHours": 24,
   "publishToStore": true, // el opt-in del negocio para ESTA tienda
   "unpublishReason": null, // string?, ≤ 160 caracteres — v3, ver abajo
   "updatedAt": "2026-08-25T14:03:00.000Z", // guarda anti-rancio (HD10/AP6)
@@ -403,9 +516,39 @@ con el único campo nuevo de la v3 marcado aparte.
 ```
 
 `publishToStore: false` suspende la tienda (`Store.status = "SUSPENDED"`);
-`true` la publica o la reabre. Los campos vacíos con `null` omiten esa
-columna en la fila (o la dejan como está en un `UPDATE`), igual que en
-`PRODUCT`.
+`true` la publica o la reabre.
+
+**Dos semánticas de omisión conviven en este mismo `payload`, y hay que
+decirlo con todas las letras** (corregido en la v7 — I1 de F-032, la versión
+anterior de este párrafo describía un comportamiento que el código nunca tuvo):
+
+- **Los campos de contacto** —`description`, `address`, `city`, `province`,
+  `latitude`, `longitude`, `phone`, `whatsapp`, `email`— se escriben con
+  `payload.x ?? null`: **omitirlos BORRA la columna**, igual que enviar
+  `null` explícito. No hay forma de "no tocar" uno de estos nueve campos en
+  un `UPDATE`: si no viaja con su valor actual, se pierde.
+- **`openingHours` y las cinco de la configuración de compra** (`checkoutMode`,
+  `deliveryEnabled`, `deliveryFee`, `deliveryFeeMode`, `orderExpiryHours`) se
+  comportan al revés: **ausente deja la columna exactamente como estaba**.
+  Solo `deliveryFee` acepta además un `null` explícito, que sí borra el
+  importe (tabla de arriba).
+
+##### Tabla de propiedad de campos (F-032, semilla del criterio 4 de F-022)
+
+Quién es dueño de cada uno de los cinco campos de configuración de compra y
+qué hace un evento `STORE` que lo trae. El resto de columnas de `Store` y de
+`StoreProduct` queda para la tabla exhaustiva de F-022.
+
+| Campo              | Dueño                                         | Un evento `STORE` que lo trae                              |
+| ------------------ | --------------------------------------------- | ---------------------------------------------------------- |
+| `checkoutMode`     | cuadrecaja (desde v7)                         | Escribe el nuevo valor                                     |
+| `deliveryEnabled`  | cuadrecaja (desde v7)                         | Escribe el nuevo valor                                     |
+| `deliveryFee`      | cuadrecaja (desde v7)                         | Escribe el nuevo valor, o `NULL` si llega `null` explícito |
+| `deliveryFeeMode`  | cuadrecaja (desde v7)                         | Escribe el nuevo valor                                     |
+| `orderExpiryHours` | cuadrecaja (desde v7; antes, queandabuscando) | Escribe el nuevo valor                                     |
+
+Ausente en cualquiera de las cinco: la columna queda intacta (no aparece en
+esta tabla porque es el mismo comportamiento en las cinco filas).
 
 ##### Novedades de esta versión — `unpublishReason` y disponibilidad de slug
 
@@ -1234,7 +1377,35 @@ que es el documento corto para leer primero:
 
 La única columna que la v6 **no** pide y conviene saber que falta:
 `Tienda.modoEnvio` y sus cuatro vecinas de configuración de compra. Eso es la
-v7, § «Cambios respecto a la v5.1».
+v7, § «Cambios respecto a la v6».
+
+### De la v7 (F-032) — cinco columnas nuevas en `Tienda`, y emitirlas
+
+Los nombres son una **propuesta**: el schema de cuadrecaja es suyo, y lo que
+ata este contrato son los nombres del cable (`checkoutMode`, `deliveryEnabled`,
+`deliveryFee`, `deliveryFeeMode`, `orderExpiryHours`), no estos:
+
+```prisma
+model Tienda {
+  modoCheckout            String  @default("WHATSAPP") // "WHATSAPP" | "ONSITE"
+  envioHabilitado         Boolean @default(false)
+  costoEnvio              Decimal? @db.Decimal(14, 2)
+  modoEnvio               String  @default("FLAT_RATE") // "FLAT_RATE" | "QUOTED_PER_ORDER"
+  horasVencimientoPedido  Int     @default(24)
+}
+```
+
+Tres cosas más, aparte de la columna:
+
+1. **Exponerlas en la interfaz** donde el negocio ya configura su tienda —
+   checkout, domicilio y su tarifa, y cuántas horas dura una propuesta.
+2. **Emitirlas en el outbox** del evento `STORE` cuando cualquiera de las
+   cinco cambie, planas y opcionales, con la forma de arriba.
+3. **Omitir una clave dejarla como estaba, nunca enviar el default.** Un
+   evento `STORE` rutinario (corregir un teléfono, por ejemplo) que mande
+   las cinco a sus valores por defecto APAGARÍA el domicilio de cualquier
+   tienda que un humano configuró a mano por SQL antes de esta versión —
+   ver «omitir no es apagar» en [ADR 0028](adr/0028-configuracion-de-compra-del-pos.md).
 
 ### De las versiones anteriores
 

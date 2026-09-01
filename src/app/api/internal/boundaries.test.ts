@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const THIS_FILE = fileURLToPath(import.meta.url);
 
@@ -38,6 +38,15 @@ const THIS_FILE = fileURLToPath(import.meta.url);
  *   6. F-024 G7: `CanonicalBarcode` has exactly one writer in the whole repo
  *      — `features/sync/server/canonicalBarcodes.ts` — same discipline as
  *      F-015's `searchVector.ts` for `searchDocument`/`searchVector`.
+ *   7. F-032 (R21, architecture.md § DA5): `scripts/store-event.mjs`'s
+ *      `SEED_STORE_CONTACT` is a LITERAL copy of what `prisma/seed.ts`
+ *      writes for `seed-tienda-1` — it cannot `import` the seed (that file
+ *      is TypeScript; the scripts are plain `.mjs`) or read Postgres (the
+ *      scripts only need `QAB_BASE_URL` and a token, and can target another
+ *      host). A seed edit that is not mirrored here would make every run
+ *      of `send-catalog-batch.mjs`/`send-store-batch.mjs` silently blank
+ *      `tienda-demo`'s contact columns again (the exact trap R21 exists to
+ *      name) — this test turns THAT drift red before any script run does.
  */
 
 const ROOT = process.cwd();
@@ -47,6 +56,8 @@ const SRC_DIR = join(ROOT, "src");
 const SCRIPTS_DIR = join(ROOT, "scripts");
 const PRISMA_DIR = join(ROOT, "prisma");
 const ENV_EXAMPLE = join(ROOT, ".env.example");
+const SEED_FILE = join(PRISMA_DIR, "seed.ts");
+const STORE_EVENT_SCRIPT = join(SCRIPTS_DIR, "store-event.mjs");
 /** Generated Prisma client code: not our code, not linted (AGENTS.md), and
  *  it spells every model's delegate name — including `canonicalBarcode` —
  *  as part of its own typed API. Excluded from G6/G7 below the same way
@@ -193,5 +204,19 @@ describe("/api/internal/* boundaries (F-018)", () => {
         CANONICAL_BARCODE_TABLE_TOUCH.test(readFileSync(file, "utf8")),
     );
     expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
+  });
+
+  it("G-store (F-032, R21): scripts/store-event.mjs's SEED_STORE_CONTACT still matches prisma/seed.ts's seed-tienda-1 fixture", async () => {
+    const { SEED_STORE_CONTACT } = await import(pathToFileURL(STORE_EVENT_SCRIPT).href);
+    const seedSource = readFileSync(SEED_FILE, "utf8");
+
+    // Not vacuous: the fixture really has values to check.
+    const values = Object.values(SEED_STORE_CONTACT);
+    expect(values.length).toBeGreaterThan(0);
+
+    const offenders = Object.entries(SEED_STORE_CONTACT).filter(
+      ([, value]) => !seedSource.includes(JSON.stringify(value)),
+    );
+    expect(offenders).toEqual([]);
   });
 });

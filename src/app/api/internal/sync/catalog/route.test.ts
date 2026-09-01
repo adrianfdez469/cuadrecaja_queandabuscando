@@ -68,6 +68,27 @@ function productEvent(eventId: string, payloadOverrides: Record<string, unknown>
   };
 }
 
+/** F-032: a valid v6-shaped STORE event, with `payloadOverrides` for the
+ *  five purchase-configuration keys under test. */
+function storeEvent(eventId: string, payloadOverrides: Record<string, unknown> = {}) {
+  return {
+    eventId,
+    entity: "STORE",
+    operation: "UPDATE",
+    occurredAt: "2026-08-27T00:00:00.000Z",
+    payload: {
+      storeId: "seed-tienda-1",
+      businessId: "seed-negocio-1",
+      businessName: "La Rampa",
+      name: "La Rampa · Vedado",
+      publishToStore: true,
+      baseCurrency: "CUP",
+      updatedAt: "2026-08-27T00:00:00.000Z",
+      ...payloadOverrides,
+    },
+  };
+}
+
 function currencyEvent(eventId: string) {
   return {
     eventId,
@@ -307,5 +328,58 @@ describe("POST /api/internal/sync/catalog — credencial (E2–E6)", () => {
 
     expect(response.status).toBe(503);
     expect(processCatalogBatch).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/internal/sync/catalog — F-032 (R4, R10.1, R11): the 400 is of the WHOLE batch", () => {
+  it("a malformed deliveryFee on the STORE event 400s the batch — a valid PRODUCT in the SAME batch never reaches processCatalogBatch either", async () => {
+    const response = await post({
+      businessId: "seed-negocio-1",
+      events: [productEvent("evt-product"), storeEvent("evt-store", { deliveryFee: 12.345 })],
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe("INVALID_BATCH");
+    expect(body.issues).toBeDefined();
+    expect(processCatalogBatch).not.toHaveBeenCalled();
+  });
+
+  it("the payload-only contradiction (R10.1) 400s the batch before processCatalogBatch runs", async () => {
+    const response = await post({
+      businessId: "seed-negocio-1",
+      events: [
+        storeEvent("evt-store", {
+          deliveryEnabled: true,
+          deliveryFeeMode: "FLAT_RATE",
+          deliveryFee: null,
+        }),
+      ],
+    });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("INVALID_BATCH");
+    expect(processCatalogBatch).not.toHaveBeenCalled();
+  });
+
+  it("a STORE reported failed by processCatalogBatch still comes back as a 207, alongside a processed PRODUCT (R10.2, R12)", async () => {
+    processCatalogBatch.mockResolvedValue({
+      ok: ["evt-product"],
+      failed: [{ id: "evt-store", error: "STORE_DELIVERY_CONFIG_INCONSISTENT" }],
+      results: [
+        { eventId: "evt-product", status: "processed" },
+        { eventId: "evt-store", status: "failed", error: "STORE_DELIVERY_CONFIG_INCONSISTENT" },
+      ],
+    });
+
+    const response = await post({
+      businessId: "seed-negocio-1",
+      events: [productEvent("evt-product"), storeEvent("evt-store", { deliveryEnabled: true })],
+    });
+
+    expect(response.status).toBe(207);
+    const body = await response.json();
+    expect(body.ok).toEqual(["evt-product"]);
+    expect(body.failed).toEqual([{ id: "evt-store", error: "STORE_DELIVERY_CONFIG_INCONSISTENT" }]);
   });
 });

@@ -34,6 +34,15 @@ export function isDeliveryOffered(config: DeliveryConfig): boolean {
   return config.deliveryFee !== null;
 }
 
+/** F-032 R8: the state the sync must never write — delivery turned on with
+ *  nothing to charge for it. The degenerate case of `isDeliveryOffered`,
+ *  written IN TERMS OF it so the two can never drift apart (architecture.md
+ *  § DA1): the day a third `DeliveryFeeMode` appears, there is exactly one
+ *  place that decides "is there something to close delivery with". */
+export function isDeliveryConfigInconsistent(config: DeliveryConfig): boolean {
+  return config.deliveryEnabled && !isDeliveryOffered(config);
+}
+
 /**
  * The delivery fee to use for a NEW order, given the fulfillment that was
  * actually decided (already degraded to `"PICKUP"` in silence when

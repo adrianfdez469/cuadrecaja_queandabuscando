@@ -25,8 +25,18 @@
  * F-018: `QAB_BEARER_TOKEN` (or `--token=`) has to be seed-negocio-1's own
  * token — minted with `npm run mint:token -- seed-negocio-1` — or the
  * server answers 403 BUSINESS_MISMATCH.
+ *
+ * F-032 (R21, architecture.md § DA5, AP1): this script used to send a STORE
+ * payload with only `name`/`phone`/`businessName`/`baseCurrency` — since the
+ * handler's `common` object writes `payload.x ?? null` for every contact
+ * field, EVERY run of this script erased `description`/`address`/`city`/
+ * `whatsapp` from the seeded store. It now spreads the SAME
+ * `SEED_STORE_CONTACT` fixture `send-catalog-batch.mjs` uses, so a run
+ * against the default store (`seed-tienda-1`) restores those columns
+ * instead of blanking them.
  */
 import "dotenv/config";
+import { SEED_STORE_CONTACT } from "./store-event.mjs";
 
 const BASE = process.env.QAB_BASE_URL ?? "http://localhost:3000";
 const args = new Set(process.argv.slice(2));
@@ -60,6 +70,13 @@ const body = {
         businessId: "seed-negocio-1",
         businessName: "Distribuidora La Rampa",
         name: "La Rampa · Vedado",
+        // R21: the fixture's contact fields, always present — omitting them
+        // would BLANK the columns (`common`'s `?? null`), not leave them
+        // alone. Only accurate for the default target, seed-tienda-1; a
+        // `--store=` override still carries these values, which is fine for
+        // what this script tests (the opt-in flip), not a claim about that
+        // other store's own fixture.
+        ...SEED_STORE_CONTACT,
         // The one field a "routine" POS edit changes — proves AP5(b) is
         // about the opt-in flag, not "did anything change at all".
         phone: `+53555${suffix.slice(-4)}`,

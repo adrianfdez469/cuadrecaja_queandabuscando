@@ -1,8 +1,16 @@
 import { prisma } from "@/lib/prisma";
 import { canonicalSlug } from "@/lib/publicSlug";
 import { createStorefrontWithStore, expandBrandTouch } from "@/features/storefront/server/registry";
+import { isDeliveryConfigInconsistent, type DeliveryConfig } from "@/features/orders/deliveryOffer";
+import { STORE_DELIVERY_CONFIG_INCONSISTENT } from "@/constants/sync";
+import {
+  effectiveDeliveryConfig,
+  NEW_STORE_DELIVERY_BASELINE,
+  storeConfigWrite,
+  type StoreConfigWrite,
+} from "../storeConfig";
 import type { StorePayload } from "../../schemas";
-import { SKIPPED, STALE, type HandlerOutcome } from "./types";
+import { SKIPPED, STALE, SyncEventFailure, type HandlerOutcome } from "./types";
 
 /**
  * A Store row existing IS the business's opt-in for that location. When the POS
@@ -68,6 +76,12 @@ export async function handleStore(
       sourceUpdatedAt: true,
       sourceOptIn: true,
       businessId: true,
+      // F-032 (architecture.md § Flujo de datos): the R8 guard's "effective
+      // value" (R7) needs the row's OWN config when the payload only touches
+      // part of the triad — free on this query, it already reads the row.
+      deliveryEnabled: true,
+      deliveryFeeMode: true,
+      deliveryFee: true,
       storefront: {
         select: {
           slug: true,
@@ -94,12 +108,21 @@ export async function handleStore(
     return STALE;
   }
 
+  // R14/E11: a DELETE never configures — the payload's five keys mean
+  // nothing on that path, whatever it happens to carry.
+  const config: StoreConfigWrite = operation === "DELETE" ? {} : storeConfigWrite(payload);
+
   // DELETE has no meaningful `publishToStore` of its own: treat it exactly
   // like an explicit unpublish.
   const optIn = operation !== "DELETE" && payload.publishToStore;
 
   if (!optIn) {
     if (!existing) return SKIPPED;
+    // E10: an event that unpublishes still configures — it is data about
+    // the store, not about its publication. Called HERE, right before the
+    // write it guards, not once at the top: doing it before the SKIPPED
+    // above would turn E12 into a failure the spec requires stays skipped.
+    assertDeliveryConsistent(config, rowDeliveryConfig(existing));
     const optInChanged = existing.sourceOptIn !== false;
     await prisma.store.update({
       where: { id: existing.id },
@@ -118,6 +141,7 @@ export async function handleStore(
               disabledAt: new Date(),
             }
           : {}),
+        ...config,
       },
     });
     const canonical = canonicalSlug({
@@ -150,6 +174,12 @@ export async function handleStore(
   };
 
   if (!existing) {
+    // E13: a brand-new store is checked against the DEFAULTS the column
+    // would apply, not against nothing — a payload that only sets
+    // `deliveryEnabled: true` on a store that does not exist yet is exactly
+    // as inconsistent as it would be against `FLAT_RATE`/`NULL` on an
+    // existing row.
+    assertDeliveryConsistent(config, NEW_STORE_DELIVERY_BASELINE);
     // E9/HS2: the brand and its first branch are created in ONE nested
     // write. `payload.slug` travels as a DERIVATION SEED, never as a
     // proposal — a sync event must never fail over an unfortunate name
@@ -167,6 +197,7 @@ export async function handleStore(
         sourceOptIn: true,
         sourceUpdatedAt: payloadUpdatedAt,
         ...common,
+        ...config,
       },
     });
     // The registry only rejects an EXPLICIT proposal; `proposedSlug: null`
@@ -183,6 +214,11 @@ export async function handleStore(
     };
   }
 
+  // Called HERE, right before the write it guards (architecture.md
+  // § Flujo de datos) — not once at the top of the function, which would
+  // turn the SKIPPED/STALE returns above into failures the spec requires
+  // stay exactly what they are.
+  assertDeliveryConsistent(config, rowDeliveryConfig(existing));
   const optInChanged = existing.sourceOptIn !== true;
   const updated = await prisma.store.update({
     where: { id: existing.id },
@@ -202,6 +238,7 @@ export async function handleStore(
             disabledAt: null,
           }
         : {}),
+      ...config,
     },
     select: { slug: true },
   });
@@ -229,4 +266,40 @@ function siblingTouch(storefront: { slug: string; stores: { slug: string | null 
   return storefront.stores.length > 1
     ? expandBrandTouch(storefront.slug, storefront.stores)
     : undefined;
+}
+
+/** R7: the existing row's own delivery config, in the shape
+ *  `effectiveDeliveryConfig` mixes against — a `Decimal | null` becomes the
+ *  string `DeliveryConfig` already uses, via the column's own `.toString()`
+ *  (architecture.md § Contratos internos, punto 3). */
+function rowDeliveryConfig(row: {
+  deliveryEnabled: boolean;
+  deliveryFeeMode: DeliveryConfig["deliveryFeeMode"];
+  deliveryFee: { toString(): string } | null;
+}): DeliveryConfig {
+  return {
+    deliveryEnabled: row.deliveryEnabled,
+    deliveryFeeMode: row.deliveryFeeMode,
+    deliveryFee: row.deliveryFee?.toString() ?? null,
+  };
+}
+
+/**
+ * R9/R10.2: does nothing when `config` does not touch the delivery triad —
+ * a row already in violation (a stale hand-written `UPDATE`) must not fail
+ * an unrelated event, or "omitir no es apagar" becomes "omitir hace
+ * fallar". Otherwise mixes `config` with `fallback` (R7) and throws when
+ * the result is the one state the sync must never write (R8). Never writes
+ * anything itself — every caller runs this BEFORE its own write, never
+ * once at the top of the function (architecture.md § Flujo de datos).
+ */
+function assertDeliveryConsistent(config: StoreConfigWrite, fallback: DeliveryConfig): void {
+  const touchesTriad =
+    config.deliveryEnabled !== undefined ||
+    config.deliveryFeeMode !== undefined ||
+    config.deliveryFee !== undefined;
+  if (!touchesTriad) return;
+  if (isDeliveryConfigInconsistent(effectiveDeliveryConfig(config, fallback))) {
+    throw new SyncEventFailure(STORE_DELIVERY_CONFIG_INCONSISTENT);
+  }
 }

@@ -52,3 +52,15 @@ export type HandlerOutcome = {
 export const PROCESSED: HandlerOutcome = { status: "processed" };
 export const SKIPPED: HandlerOutcome = { status: "skipped_not_published" };
 export const STALE: HandlerOutcome = { status: "stale" };
+
+/**
+ * F-032 (architecture.md § DA4): a PER-EVENT failure, thrown instead of
+ * added as a new `HandlerOutcome["status"]` member. `processBatch.ts`'s
+ * `catch` already turns `error.message` into `failed[].error`,
+ * `results[].error` and `markFailed` — ZERO lines change there, which is
+ * the point: adding a `"failed"` member to the union above would fall into
+ * `processBatch.ts`'s `else` branch (`skipped.push(...)`) with no compiler
+ * error, and the event would be reported in `ok` — exactly the bug AGENTS.md
+ * ficha as "un evento fallido NO es un duplicado".
+ */
+export class SyncEventFailure extends Error {}

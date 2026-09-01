@@ -45,6 +45,8 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 const { handleStore } = await import("./store");
+const { SyncEventFailure } = await import("./types");
+const { STORE_DELIVERY_CONFIG_INCONSISTENT } = await import("@/constants/sync");
 
 const BUSINESS_ID = "business-1";
 
@@ -58,6 +60,12 @@ function existingStore(overrides: Partial<Record<string, unknown>> = {}) {
     sourceUpdatedAt: null,
     sourceOptIn: true,
     businessId: BUSINESS_ID,
+    // F-032: the row's own purchase config, read by the R8 guard's
+    // "effective value" (R7) whenever the payload only touches PART of the
+    // triad. Defaults mirror the column's own `@default(...)`s.
+    deliveryEnabled: false,
+    deliveryFeeMode: "FLAT_RATE",
+    deliveryFee: null,
     storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] },
     ...overrides,
   };
@@ -312,5 +320,132 @@ describe("handleStore() — F-017 ALTA #3 (tests.md § Fallos encontrados #3): a
     const outcome = await callHandleStore({ updatedAt: "2026-08-27T00:00:00.000Z" }, "UPDATE");
 
     expect(outcome.touchedSlugValues).toBeUndefined();
+  });
+});
+
+describe("handleStore() — F-032: la configuración de compra viaja con la fila (criterio 15)", () => {
+  it("E1: an event with none of the five keys does not include any of them in the update's data", async () => {
+    storeFindUnique.mockResolvedValue(
+      existingStore({
+        sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"),
+        checkoutMode: "ONSITE",
+        deliveryEnabled: true,
+        deliveryFeeMode: "QUOTED_PER_ORDER",
+        deliveryFee: "500.00",
+      }),
+    );
+
+    const outcome = await callHandleStore({ updatedAt: "2026-08-27T00:00:00.000Z" }, "UPDATE");
+
+    expect(outcome.status).toBe("processed");
+    const data = storeUpdate.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty("checkoutMode");
+    expect(data).not.toHaveProperty("deliveryEnabled");
+    expect(data).not.toHaveProperty("deliveryFee");
+    expect(data).not.toHaveProperty("deliveryFeeMode");
+    expect(data).not.toHaveProperty("orderExpiryHours");
+  });
+
+  it("E3: an event with only deliveryFee changes only that key", async () => {
+    storeFindUnique.mockResolvedValue(
+      existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z") }),
+    );
+
+    await callHandleStore({ updatedAt: "2026-08-27T00:00:00.000Z", deliveryFee: 300 }, "UPDATE");
+
+    const data = storeUpdate.mock.calls[0][0].data;
+    expect(data.deliveryFee).toBe(300);
+    expect(data).not.toHaveProperty("checkoutMode");
+    expect(data).not.toHaveProperty("deliveryEnabled");
+    expect(data).not.toHaveProperty("deliveryFeeMode");
+    expect(data).not.toHaveProperty("orderExpiryHours");
+  });
+
+  it("E8: a payload that is only contradictory once mixed with the row throws SyncEventFailure and writes nothing", async () => {
+    // The row is already FLAT_RATE with no fee on file; the payload only
+    // sends deliveryEnabled: true (`--store-config=enable-only`) — a `refine`
+    // over the payload alone could never see this.
+    storeFindUnique.mockResolvedValue(
+      existingStore({
+        sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"),
+        deliveryEnabled: false,
+        deliveryFeeMode: "FLAT_RATE",
+        deliveryFee: null,
+      }),
+    );
+
+    await expect(
+      callHandleStore({ updatedAt: "2026-08-27T00:00:00.000Z", deliveryEnabled: true }, "UPDATE"),
+    ).rejects.toThrow(SyncEventFailure);
+    await expect(
+      callHandleStore({ updatedAt: "2026-08-27T00:00:00.000Z", deliveryEnabled: true }, "UPDATE"),
+    ).rejects.toThrow(STORE_DELIVERY_CONFIG_INCONSISTENT);
+    expect(storeUpdate).not.toHaveBeenCalled();
+  });
+
+  it("E9: a stale event stays stale even when contradictory — anti-rancio guard runs BEFORE the consistency guard", async () => {
+    storeFindUnique.mockResolvedValue(
+      existingStore({ sourceUpdatedAt: new Date("2026-08-27T12:00:00.000Z") }),
+    );
+
+    const outcome = await callHandleStore(
+      { updatedAt: "2026-08-27T00:00:00.000Z", deliveryEnabled: true },
+      "UPDATE",
+    );
+
+    expect(outcome.status).toBe("stale");
+    expect(storeUpdate).not.toHaveBeenCalled();
+  });
+
+  it("E10: an event that unpublishes also configures — the five apply on the suspend path too", async () => {
+    storeFindUnique.mockResolvedValue(existingStore({ sourceUpdatedAt: null, sourceOptIn: true }));
+
+    await callHandleStore(
+      { publishToStore: false, deliveryEnabled: true, deliveryFeeMode: "QUOTED_PER_ORDER" },
+      "UPDATE",
+    );
+
+    const data = storeUpdate.mock.calls[0][0].data;
+    expect(data.status).toBe("SUSPENDED");
+    expect(data.deliveryEnabled).toBe(true);
+    expect(data.deliveryFeeMode).toBe("QUOTED_PER_ORDER");
+  });
+
+  it("E11: a DELETE never writes any of the five, even when the payload carries them", async () => {
+    storeFindUnique.mockResolvedValue(existingStore({ sourceUpdatedAt: null, sourceOptIn: true }));
+
+    await callHandleStore(
+      { publishToStore: true, deliveryEnabled: true, deliveryFeeMode: "QUOTED_PER_ORDER" },
+      "DELETE",
+    );
+
+    const data = storeUpdate.mock.calls[0][0].data;
+    expect(data.status).toBe("SUSPENDED");
+    expect(data).not.toHaveProperty("deliveryEnabled");
+    expect(data).not.toHaveProperty("deliveryFeeMode");
+  });
+
+  it("E13: a brand-new store is created with the payload's keys, checked against the column DEFAULTS", async () => {
+    storeFindUnique.mockResolvedValue(null);
+    storefrontCreate.mockResolvedValue({
+      id: "storefront-1",
+      slug: "tienda-demo",
+      stores: [{ id: "store-1" }],
+    });
+
+    const outcome = await callHandleStore({ deliveryFeeMode: "QUOTED_PER_ORDER" }, "CREATE");
+
+    expect(outcome.status).toBe("processed");
+    const call = storefrontCreate.mock.calls[0][0];
+    expect(call.data.stores.create.deliveryFeeMode).toBe("QUOTED_PER_ORDER");
+  });
+
+  it("E13: a brand-new store whose payload alone would violate R8 against the defaults throws", async () => {
+    storeFindUnique.mockResolvedValue(null);
+
+    await expect(callHandleStore({ deliveryEnabled: true }, "CREATE")).rejects.toThrow(
+      SyncEventFailure,
+    );
+    expect(storefrontCreate).not.toHaveBeenCalled();
   });
 });
