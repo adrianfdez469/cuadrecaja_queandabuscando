@@ -270,6 +270,16 @@ Un commit por unidad coherente. El hook de pre-commit corre `lint-staged`.
 - **Feature nuevo** → entrada en `.agent/features.json`, **escrita por el humano**.
 - **Cambio en el contrato** → versión nueva en `docs/sync-contract.md`,
   coordinada con el equipo de cuadrecaja.
+- **Cualquier edición de `docs/sync-contract.md`** → **mueve la versión de su
+  primera línea**, siempre, aunque sea una menor. Cambia lo que el POS envía o
+  recibe → mayor (`5` → `6`), coordinada antes con el otro equipo; solo aclara
+  lo ya acordado —redacción, ejemplo, SQL exacto, mecanismo opcional— → menor
+  (`5` → `5.1`), y una línea en «Cambios respecto a la vN». Sin cambios
+  silenciosos: el otro equipo usa la versión para saber si tiene delante lo que
+  implementó. Las reglas están en § «Versionado de este documento» del propio
+  contrato, y un hook `PostToolUse`
+  (`.claude/hooks/sync-contract-version.sh`) avisa si el fichero cambia sin
+  que la línea 3 se mueva.
 - **Paso operativo nuevo** → una línea en `docs/despliegue.md`, **en el mismo
   ciclo que lo introduce**. Cuenta como paso operativo un secreto, un cron, un
   bucket, una regla de plataforma, una migración que hay que revisar a mano o

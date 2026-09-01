@@ -1,9 +1,38 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 5** · 30 de agosto de 2026
+**Versión 5.1** · 1 de septiembre de 2026
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
 existe y está verificado contra los casos de abajo.
+
+## Versionado de este documento
+
+**Toda edición de este fichero mueve la versión de la primera línea**, y queda
+anotada en la sección «Cambios respecto a la vN» que le corresponde. No hay
+cambios silenciosos: el otro equipo lee la versión para saber si lo que tiene
+delante es lo que implementó.
+
+- **Mayor** (`5` → `6`): cambia lo que el POS envía o recibe —un endpoint, un
+  campo, un enum, un código de error, una regla de validación—, sea aditivo o
+  no. Se coordina con el equipo de cuadrecaja **antes** de publicarla.
+- **Menor** (`5` → `5.1`): aclara lo ya acordado sin cambiar el contrato —una
+  redacción ambigua, un ejemplo, el SQL exacto de algo descrito en
+  pseudocódigo, un mecanismo opcional que quien no lo implemente sigue siendo
+  un lector correcto de la mayor vigente—. No requiere que el otro equipo
+  cambie nada, pero sí que sepa que hay texto nuevo.
+
+Una corrección de tipografía o de un enlace roto es una menor: cuesta un dígito
+y evita la pregunta «¿es este el documento que leí?».
+
+## Cambios respecto a la v5
+
+Ninguno de estos cambia el contrato: la v5 sigue siendo la mayor vigente y un
+lector que la implemente no tiene que tocar nada.
+
+- **El SQL espejo de la reconciliación** (§ «El SQL espejo»): el pseudocódigo
+  del hash admitía más de una lectura del `precio` —`1990` y `1990.00` dan
+  hashes distintos sobre los mismos datos—, así que se publica la consulta
+  exacta, lista para copiar contra el schema de cuadrecaja.
 
 ## Cambios respecto a la v4
 
@@ -783,7 +812,7 @@ Si los hashes difieren: poner `dispPublicada = NULL` en las filas de ese local
 
 **Alertar también si no hubo una corrida exitosa en 30 minutos.**
 
-### El SQL espejo (aclaración aditiva, sin bump de versión)
+### El SQL espejo (aclaración aditiva, v5.1)
 
 Lo de arriba es pseudocódigo y admite más de una lectura del `precio` — la
 diferencia entre `1990` y `1990.00` da hashes distintos sobre los mismos

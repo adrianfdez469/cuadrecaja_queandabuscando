@@ -228,12 +228,15 @@ sincronización **cada 2 minutos** y el de reconciliación diario.
 
 ### 7.3 ⟳ Publicar una versión del contrato
 
-Cada cambio en `sync-contract.md` se coordina con el otro equipo. La versión
-vigente es la **v5**, y su primera frase dice que **no es aditiva** en el enum de
-estados de pedido: pasa de 6 a 9 valores y rompe a cualquier lector con un
-`switch` exhaustivo. Se publicó sin periodo de convivencia porque no hay
-consumidor vivo todavía. **Cuando lo haya, esa vía se cierra**: una versión no
-aditiva pasará a necesitar bandera por negocio y ventana de migración.
+Cada cambio en `sync-contract.md` se coordina con el otro equipo y **mueve la
+versión de su primera línea**, aunque sea una menor (§ «Versionado de este
+documento» del contrato): mayor si cambia lo que el POS envía o recibe, menor si
+solo aclara lo ya acordado. La versión vigente es la **v5.1**, y la primera
+frase de la v5 dice que **no es aditiva** en el enum de estados de pedido: pasa
+de 6 a 9 valores y rompe a cualquier lector con un `switch` exhaustivo. Se
+publicó sin periodo de convivencia porque no hay consumidor vivo todavía.
+**Cuando lo haya, esa vía se cierra**: una versión no aditiva pasará a necesitar
+bandera por negocio y ventana de migración.
 
 ### 7.4 SSO del administrador
 
