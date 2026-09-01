@@ -17,12 +17,25 @@ const serverSchema = z.object({
 export type ServerEnv = z.infer<typeof serverSchema>;
 
 let cached: ServerEnv | undefined;
+let warned = false;
 
 export function serverEnv(): ServerEnv {
   if (cached) return cached;
   const parsed = serverSchema.safeParse(process.env);
   if (!parsed.success) {
     const missing = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+    // Logged once per module instance (R7), before throwing, so the failure
+    // leaves a trace even though every caller today swallows the throw in a
+    // try/catch (getAdminSession(), src/lib/supabase/storage.ts). Plain
+    // string, never an Error object, and without the substring "Error:" —
+    // .agent/verify.sh marks the smoke stage red on (⨯|Unhandled|Error:) in
+    // the dev server's output (R8).
+    if (!warned) {
+      warned = true;
+      console.warn(
+        `[env] Invalid server environment — ${missing}. In local development, generate the missing secrets with: node scripts/dev-secrets.mjs --write`,
+      );
+    }
     throw new Error(`Invalid server environment — ${missing}`);
   }
   cached = parsed.data;
