@@ -47,5 +47,23 @@ export const PROFILE_FETCH_TIMEOUT_MS = 3000;
  */
 export const ORDER_CUSTOMER_LINK_TIMEOUT_MS = 600;
 
+/**
+ * F-030 R1/E3: half the ceiling above. Past this, a link that DOES happen
+ * already deserves a warning; past the ceiling, it stops happening at all.
+ * Human decision, 2026-09-01: "300 ms — la mitad del techo".
+ */
+export const ORDER_CUSTOMER_LINK_SLOW_MS = 300;
+
+/** F-030 R1: the six observable outcomes of one order-customer link attempt. */
+export const ORDER_LINK_OUTCOME = {
+  SLOW: "slow",
+  TIMEOUT: "timeout",
+  LATE: "late",
+  UNVERIFIED: "unverified",
+  NO_CUSTOMER: "no_customer",
+  ERROR: "error",
+} as const;
+export type OrderLinkOutcome = (typeof ORDER_LINK_OUTCOME)[keyof typeof ORDER_LINK_OUTCOME];
+
 /** design.md § Defensa de las cuatro rutas POST: plenty for an email + 6 digits. */
 export const ACCOUNT_MAX_BODY_BYTES = 4 * 1024;

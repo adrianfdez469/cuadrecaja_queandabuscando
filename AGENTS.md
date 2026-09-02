@@ -237,6 +237,23 @@ test: solo deja la búsqueda haciendo scans secuenciales en producción.
 marque su outbox como procesado y la actualización se pierda en silencio. Ver
 `features/sync/server/inbox.ts` y sus tests.
 
+**Toda instrumentación de servidor usa `console.warn` con un prefijo `[scope]`
+literal, nunca `console.error`.** Las etapas que levantan la app (`smoke`,
+`visual`, `probe`) leen la salida cruda de `next dev` y la comparan contra
+`SERVIDOR_ERROR_RE`: cualquier línea que EMPIECE por algo acabado en `Error`
+o contenga `⨯`/`Unhandled` marca la etapa como «el servidor se cayó», aunque
+todas las peticiones hayan respondido bien — es el guardián que vigila la
+salida de servidor de cualquier etapa que la capture. `console.error`
+imprime exactamente con esa forma, así que un log de dominio con esa función
+pone roja la etapa entera por algo que no tiene nada que ver con un fallo
+real. `console.warn` con el prefijo de dominio entre corchetes **al
+principio** de la línea —nunca la palabra `Error`— es lo que ya usan
+`src/features/orders/server/status.ts`,
+`src/features/orders/server/bell.ts`,
+`src/features/catalog/server/searchLog.ts` y
+`src/features/account/server/orderLinkObserver.ts` (F-030). Ficha:
+`.agent/playbook/console-error-dispara-guardian-servidor.md`.
+
 ---
 
 ## Idioma

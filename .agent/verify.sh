@@ -23,6 +23,9 @@ SPECS=".agent/specs"
 SMOKE_PORT="${SMOKE_PORT:-3100}"
 # Distinto del de smoke: las dos etapas pueden pedirse en la misma ejecución.
 VISUAL_PORT="${VISUAL_PORT:-3101}"
+# Distinto de los otros dos por el mismo motivo, y porque `probe` arranca y
+# rearranca su PROPIO next dev (no lo levanta esta etapa — DA6 de F-030).
+PROBE_PORT="${PROBE_PORT:-3102}"
 
 # Orden deliberado: lo que falla más rápido y señala más de cerca, primero.
 # Lo que cuenta como «el servidor petó» en el log de next dev, para las etapas
@@ -71,6 +74,7 @@ stage_cmd() {
     bundle)    echo "npm run check:bundle" ;;
     smoke)     echo "(servidor de desarrollo + .agent/specs/<ID>/smoke.sh)" ;;
     visual)    echo "(servidor de desarrollo + chromium headless + .agent/specs/<ID>/visual.mjs)" ;;
+    probe)     echo "(servidor propio + proxy lento + scripts/order-link-probe.mjs)" ;;
     *)         return 1 ;;
   esac
 }
@@ -104,6 +108,7 @@ extract_signature() { # <etapa> <log>
     test)      line="$(grep -aoE '(AssertionError|TypeError|ReferenceError|SyntaxError|RangeError|ZodError|Prisma[A-Za-z]*Error|Error): .*' "$log" | head -1)" ;;
     smoke)     line="$(grep -aoE 'SMOKE FAIL.*' "$log" | head -1)" ;;
     visual)    line="$(grep -aoE 'VISUAL FAIL.*' "$log" | head -1)" ;;
+    probe)     line="$(grep -aoE 'PROBE FAIL.*' "$log" | head -1)" ;;
   esac
   [ -z "$line" ] && line="$(primera_linea_de_error "$log")"
   [ -z "$line" ] && line="sin mensaje reconocible"
@@ -242,6 +247,8 @@ correr_etapa() { # <etapa> <log>
     correr_smoke "$2"
   elif [ "$1" = "visual" ]; then
     correr_visual "$2"
+  elif [ "$1" = "probe" ]; then
+    correr_probe "$2"
   else
     eval "$cmd" >>"$2" 2>&1
   fi
@@ -478,10 +485,74 @@ correr_visual() { # <log>
   return $code
 }
 
+# Provoca el fallo de verdad de F-030: un proxy lento delante del Auth real de
+# F-028, para ver el instrumento de src/features/account/server/orderLinkObserver.ts
+# dispararse en condiciones reales. A diferencia de smoke/visual, esta etapa
+# NUNCA reutiliza un `next dev` ajeno: el guion necesita arrancar el suyo con
+# `NEXT_PUBLIC_SUPABASE_URL` apuntando a un proxy que él mismo levanta, y
+# necesita rearrancarlo a mitad de camino con otro entorno (corrida F) — nada
+# de eso se puede hacer sobre un servidor que ya está corriendo con otra
+# configuración (architecture.md § F-030 DA6).
+correr_probe() { # <log>
+  local script="scripts/order-link-probe.mjs" srvlog puerto_propio code=0 i
+  if [ ! -f "$script" ]; then
+    echo "PROBE FAIL falta el guion del probe" >>"$1"
+    echo "  no existe $script" >>"$1"
+    return 1
+  fi
+
+  # A diferencia de smoke/visual: si YA hay un next dev de este worktree, esta
+  # etapa FALLA en vez de reutilizarlo — ese servidor apunta al Auth real sin
+  # retraso y su salida no va a ningún archivo que esta etapa pueda leer.
+  puerto_propio="$(servidor_propio)"
+  if [ -n "$puerto_propio" ]; then
+    {
+      printf 'PROBE FAIL ya hay un next dev de este worktree en el puerto %s\n' "$puerto_propio"
+      echo "  Esta etapa no puede reutilizarlo: necesita arrancar el suyo con"
+      echo "  NEXT_PUBLIC_SUPABASE_URL apuntando a su proxy lento y necesita"
+      echo "  capturar su salida en un archivo propio. Ciérralo y repite."
+    } >>"$1"
+    return 1
+  fi
+
+  puerto_libre "$PROBE_PORT" "PROBE FAIL" "$1" || return 1
+
+  srvlog="$(mktemp)"
+  PROBE_PORT="$PROBE_PORT" PROBE_SERVER_LOG="$srvlog" node "$script" >>"$1" 2>&1
+  code=$?
+
+  {
+    echo
+    echo "--- salida del servidor (runtime feedback) ---"
+    tail -120 "$srvlog"
+  } >>"$1"
+  # Mismo guardián que smoke/visual, y por el mismo motivo: antes del rm.
+  guardian_servidor "$srvlog" "PROBE FAIL" "$1" || code=1
+  rm -f "$srvlog"
+
+  # El guion limpia su propio next dev en su `finally`/SIGINT, pero esta etapa
+  # no se fía a ciegas: un next dev huérfano rompe el smoke de CUALQUIER otro
+  # feature con un mensaje que no dice la causa (AGENTS.md § "Un solo next
+  # dev por directorio"). Hasta ~5s de espera antes de darlo por fallado.
+  for i in $(seq 1 10); do
+    lsof -tPan -i "TCP:$PROBE_PORT" -s TCP:LISTEN >/dev/null 2>&1 || break
+    sleep 0.5
+  done
+  if lsof -tPan -i "TCP:$PROBE_PORT" -s TCP:LISTEN >/dev/null 2>&1; then
+    {
+      printf 'PROBE FAIL el puerto %s sigue ocupado tras terminar el guion\n' "$PROBE_PORT"
+      echo "  el guion dejó un next dev huérfano — mátalo antes de verificar otro feature"
+    } >>"$1"
+    code=1
+  fi
+
+  return $code
+}
+
 # ------------------------------------------------------------------ verify ----
 
 cmd_verify() {
-  local etapas="$STAGES_RAPIDO" solo="" smoke=0 visual=0
+  local etapas="$STAGES_RAPIDO" solo="" smoke=0 visual=0 probe=0
   FEATURE="_libre"
   # La misma llamada, para repetirla tal cual tras arreglar. `_libre` es un
   # nombre interno para el trabajo sin feature: no se puede volver a pasar.
@@ -493,9 +564,10 @@ cmd_verify() {
       --full) etapas="$STAGES_COMPLETO" ;;
       --smoke) smoke=1 ;;
       --visual) visual=1 ;;
+      --probe) probe=1 ;;
       --only) shift; solo="${1:-}"; [ -n "$solo" ] || die_uso "uso: --only <etapa>" ;;
       *) die_uso "opción desconocida: $1
-uso: bash .agent/verify.sh [F-NNN] [--full] [--smoke] [--visual] [--only <etapa>]" ;;
+uso: bash .agent/verify.sh [F-NNN] [--full] [--smoke] [--visual] [--probe] [--only <etapa>]" ;;
     esac
     shift
   done
@@ -515,6 +587,17 @@ uso: bash .agent/verify.sh F-007 --smoke"
       die_uso "--visual necesita un F-NNN: el guion vive en .agent/specs/<ID>/visual.mjs
 uso: bash .agent/verify.sh F-010 --visual"
     case " $etapas " in *" visual "*) ;; *) etapas="$etapas visual" ;; esac
+  fi
+
+  if [ "$probe" = 1 ]; then
+    # El guion vive en scripts/, no en la spec del feature (F-030 decisión del
+    # humano), pero lo que necesita el F-NNN es el DIARIO del sensor
+    # (.agent/runs/<ID>/), de donde salen la firma, el conteo de repeticiones
+    # y el corte por ESTANCADO (architecture.md § F-030 DA6).
+    [ "$FEATURE" = "_libre" ] &&
+      die_uso "--probe necesita un F-NNN: el diario de intentos vive en .agent/runs/<ID>/
+uso: bash .agent/verify.sh F-030 --probe"
+    case " $etapas " in *" probe "*) ;; *) etapas="$etapas probe" ;; esac
   fi
 
   local intento dir
@@ -654,6 +737,7 @@ y lo que la bitácora sepa de ese fallo.
   bash .agent/verify.sh F-007 --full       + prisma · build · theme · bundle
   bash .agent/verify.sh F-007 --smoke      + app levantada y peticiones reales
   bash .agent/verify.sh F-010 --visual     + chromium headless sobre las pantallas
+  bash .agent/verify.sh F-030 --probe      + servidor propio, proxy lento contra el Auth real
   bash .agent/verify.sh F-007 --only test  una sola etapa
   bash .agent/verify.sh journal F-007      historial de intentos
   bash .agent/verify.sh pending F-007      fallos sin lección escrita
