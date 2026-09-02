@@ -10,10 +10,12 @@ otro agente: se coordinan por estos archivos.
 | `specs/<id>/`      | La especificación viva del feature                                 | Un agente por archivo  |
 | `progress/<id>.md` | Estado del feature en curso + bitácora                             | El orquestador y todos |
 | `playbook/`        | Problemas ya resueltos, con su arreglo                             | Quien los resuelve     |
+| `solicitudes.md`   | Lo que pide cuadrecaja y qué contestamos nosotros                  | El orquestador         |
 | `templates/`       | Las plantillas de los artefactos                                   | Nadie, se copian       |
 | `sdd.sh`           | Crea, inspecciona y anota el trabajo                               | Nadie, se ejecuta      |
 | `verify.sh`        | **El sensor**: ejecuta, captura el fallo y lo busca en `playbook/` | Nadie, se ejecuta      |
 | `init.sh`          | Comprueba que el entorno sirve                                     | Nadie, se ejecuta      |
+| `solicitudes.sh`   | Cruza las solicitudes de cuadrecaja con nuestras respuestas        | Nadie, se ejecuta      |
 | `runs/`            | Logs crudos de cada verificación (no se commitea)                  | `verify.sh`            |
 
 Son tres memorias con tres destinos distintos al cerrar un feature:
@@ -51,6 +53,10 @@ describe **dónde vive el trabajo**, ese otro describe **cómo se reparte**.
    `ENTORNO LISTO`) y muestra cómo va cada feature en curso: artefactos, ciclos
    de prueba, próximo paso concreto y última entrada de bitácora. Con un id
    (`start F-007`) muestra solo ese.
+
+   Ahí sale también si el equipo de cuadrecaja dejó alguna solicitud nueva —
+   § «Lo que nos pide el otro equipo».
+
 2. Leer `AGENTS.md` (convenciones) y `features.json` (backlog) completos.
 3. Elegir un feature con `passes: false` cuyos `depends_on` estén todos en
    `true`. Si está sin empezar, `bash .agent/sdd.sh new F-007`. El script se
@@ -62,6 +68,25 @@ describe **dónde vive el trabajo**, ese otro describe **cómo se reparte**.
 Una idea que todavía no es feature no se cuela en el backlog:
 `bash .agent/sdd.sh propose <slug>` le da un sitio en `specs/propuestas/` hasta
 que el humano decida.
+
+## Lo que nos pide el otro equipo
+
+cuadrecaja está integrándose contra nuestra API, y lo que necesita y no tenemos
+lo anota en un documento de **su** repositorio: `.agents/solicitudes-qab.md`.
+Ese archivo es suyo — no se edita desde aquí. Lo nuestro es
+[`solicitudes.md`](solicitudes.md): una fila por solicitud con nuestra postura.
+
+`bash .agent/solicitudes.sh` cruza los dos y dice qué llegó nuevo, qué cambió y
+qué dieron ellos por cerrado. Lo llama `init.sh` en cada sesión, así que un
+`sdd.sh start` ya lo trae; ejecútalo sin `--breve` para verlo entero. La ruta a
+su repo la busca solo, y si en tu máquina está en otro sitio se fija una vez con
+`echo '/ruta/a/cuadrecaja' > .agent/cuadrecaja.path` (esa ruta no se commitea:
+es de la máquina, no del proyecto).
+
+Que una solicitud esté anotada no la convierte en trabajo. Aceptarla es un
+feature de `features.json`, que escribe el humano, y si cambia lo que el POS
+envía o recibe, una versión mayor de `docs/sync-contract.md` acordada con ellos
+antes de tocar nada.
 
 ## La puerta: el plan que firma el humano
 

@@ -39,6 +39,7 @@ Versiones **reales**, no rangos. Actualiza esta tabla cuando cambien.
 ```bash
 bash .agent/init.sh    # comprobar el entorno — hazlo primero
 bash .agent/verify.sh  # el sensor: typecheck·lint·format·test, y qué hacer si falla
+bash .agent/solicitudes.sh  # qué nos pide cuadrecaja y qué le contestamos
 npm run dev            # servidor de desarrollo
 npm run typecheck      # tsc --noEmit
 npm run lint           # eslint
@@ -152,7 +153,7 @@ del pool. Batchea en un solo round-trip. Es la misma restricción que arrastra
 cuadrecaja y está documentada en su código.
 
 **El `matcher` de `src/proxy.ts` no debe tocar `/[slug]`.** El proxy (antes
-`middleware`) corre en cada petición, incluidas las que el CDN serviría de
+`middleware`) corre en cada solicitud, incluidas las que el CDN serviría de
 caché. Hacer match sobre la tienda anula la estrategia ISR completa. Es el error
 más fácil de cometer en este repo.
 
@@ -287,6 +288,11 @@ Un commit por unidad coherente. El hook de pre-commit corre `lint-staged`.
 - **Feature nuevo** → entrada en `.agent/features.json`, **escrita por el humano**.
 - **Cambio en el contrato** → versión nueva en `docs/sync-contract.md`,
   coordinada con el equipo de cuadrecaja.
+- **Petición del equipo de cuadrecaja** → una fila con nuestra postura en
+  [`.agent/solicitudes.md`](.agent/solicitudes.md). Ellos las escriben en su
+  propio repositorio; `bash .agent/solicitudes.sh` cruza las dos listas y avisa
+  al empezar la sesión. Aceptar una no es implementarla: eso sigue siendo un
+  feature que escribe el humano.
 - **Cualquier edición de `docs/sync-contract.md`** → **mueve la versión de su
   primera línea**, siempre, aunque sea una menor. Cambia lo que el POS envía o
   recibe → mayor (`5` → `6`), coordinada antes con el otro equipo; solo aclara
