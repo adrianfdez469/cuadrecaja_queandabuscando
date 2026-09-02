@@ -101,6 +101,11 @@ const CITED_PATH = /`((?:\.\.\/|\.agent|\.claude|scripts)?[\w.-]*(?:\/[\w.-]+)+(
 // Created on demand by the scripts themselves, so absence proves nothing.
 const ON_DEMAND = /^\.agent\/(runs|specs\/propuestas)\b/;
 
+// `.agents/…` — with an s — is cuadrecaja's harness inside cuadrecaja's repo,
+// not ours. Naming their request document is the whole point of
+// .agent/solicitudes.md, and it can never exist here.
+const OTHER_REPO = /^\.agents\//;
+
 // A file an unfinished feature will create is a scheduled reference, not a dead
 // one — as long as the line says which feature. Naming it is the whole point:
 // the reader learns when it appears, and this check keeps holding it to that.
@@ -120,6 +125,7 @@ for (const doc of DOCS) {
     const bare = cited.replace(/:\d+(-\d+)?$/, "");
     if (/[<>*]|F-NNN|F-XXX|F-\d{3}|NNNN/.test(bare)) continue;
     if (ON_DEMAND.test(bare)) continue;
+    if (OTHER_REPO.test(bare)) continue;
     // A directory is a convention the docs prescribe, created when first
     // needed. Only a named file is a reference that can go dead.
     if (!/\.(ts|tsx|mjs|css|json|sh|prisma|md)$/.test(bare)) continue;

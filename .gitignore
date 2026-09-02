@@ -55,3 +55,6 @@ next-env.d.ts
 
 # logs del sensor del arnés — las lecciones viven en .agent/playbook/
 .agent/runs
+
+# ruta al repo de cuadrecaja: es de cada máquina, no del proyecto
+.agent/cuadrecaja.path

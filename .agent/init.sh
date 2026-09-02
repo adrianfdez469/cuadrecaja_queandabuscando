@@ -146,6 +146,14 @@ else
   warn "emulador de Realtime no responde — ejecuta: docker compose up -d"
 fi
 
+echo "== Solicitudes de cuadrecaja =="
+# El otro equipo anota lo que necesita de nuestra API en SU repo
+# (.agents/solicitudes-qab.md); esto lo cruza con nuestra respuesta
+# (.agent/solicitudes.md) y avisa de lo que llegó nuevo. Nunca `bad`: una sesión
+# que no toca la integración tiene que seguir leyendo ENTORNO LISTO aunque ese
+# repo no esté clonado en esta máquina.
+bash .agent/solicitudes.sh --breve
+
 echo
 if [ "$FAIL" -eq 0 ]; then
   printf '\033[32mENTORNO LISTO\033[0m\n'

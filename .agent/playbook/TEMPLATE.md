@@ -2,7 +2,7 @@
 slug: trampa-corta-en-kebab
 sintoma: la línea que verás en el log, no la causa
 firma: —
-etapa: harness | typecheck | lint | format | test | prisma | build | theme | bundle | smoke | review
+etapa: harness | typecheck | lint | format | test | prisma | build | theme | bundle | smoke | visual | probe | review
 visto_en: —
 creado: 1970-01-01T00:00:00Z
 promovido_a_agents: no

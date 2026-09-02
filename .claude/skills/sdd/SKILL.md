@@ -17,7 +17,7 @@ equivocada**. Si te descubres editando `src/`, delegaste mal.
 
 | Agente            | Produce              | Se le llama cuando                                                         |
 | ----------------- | -------------------- | -------------------------------------------------------------------------- |
-| `sdd-spec`        | `spec.md`            | hay una petición vaga, o un fallo revela un requisito mal escrito          |
+| `sdd-spec`        | `spec.md`            | hay una solicitud vaga, o un fallo revela un requisito mal escrito         |
 | `sdd-architect`   | `architecture.md`    | la spec está cerrada y hay que decidir componentes, contratos y escala     |
 | `sdd-designer`    | `design.md`          | el feature tiene interfaz, o hay que revisar una pantalla existente        |
 | `sdd-implementer` | código + `impl.md`   | el humano firmó `plan.md` (`sdd.sh gate <ID>` sale `0`)                    |
@@ -256,6 +256,9 @@ Paras y preguntas, siempre, ante:
   `AGENTS.md` marca como prohibidos;
 - un cambio en el contrato con cuadrecaja (`docs/sync-contract.md`): hay otro
   equipo al otro lado;
+- una solicitud nueva del equipo de cuadrecaja sin triar (`sdd.sh start` la
+  saca): la postura la decide el humano, y tú la anotas en
+  [`.agent/solicitudes.md`](../../../.agent/solicitudes.md);
 - dos ciclos de prueba seguidos sin que el veredicto se mueva, o un agente que
   vuelve con `ESTANCADO`. `sdd.sh status` te dice cuántos ciclos van y cómo
   acabó la última verificación. Insistir una vez más es tozudez, no diligencia.
