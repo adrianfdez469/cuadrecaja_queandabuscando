@@ -38,6 +38,34 @@ describe("storePayloadSchema — the v6 shape, unchanged (E14)", () => {
   });
 });
 
+describe("storePayloadSchema — F-022 E11: timezone is the panel's, the POS cannot write it even by accident", () => {
+  it("a payload carrying a timezone key parses successfully with the key silently stripped", () => {
+    const result = storePayloadSchema.safeParse(basePayload({ timezone: "Europe/Madrid" }));
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).not.toHaveProperty("timezone");
+    }
+  });
+
+  it("an INVALID timezone value does not fail the event either — the whole key is discarded, not validated", () => {
+    const result = storePayloadSchema.safeParse(basePayload({ timezone: "not-a-real-zone" }));
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("storePayloadSchema — F-022: openingHours stays z.unknown() at this layer (E10 lives in the handler, not here)", () => {
+  it("accepts openingHours: null/absent, exactly like before this feature", () => {
+    expect(storePayloadSchema.safeParse(basePayload()).success).toBe(true);
+    expect(storePayloadSchema.safeParse(basePayload({ openingHours: null })).success).toBe(true);
+  });
+
+  it("does NOT reject a malformed openingHours at the schema layer — architecture.md § Contratos internos, punto 6: rejecting a 500-event batch's shape here would 400 the WHOLE batch and write no SyncEvent, which is not what E10 asks for", () => {
+    const result = storePayloadSchema.safeParse(basePayload({ openingHours: { lunes: "9 a 6" } }));
+    expect(result.success).toBe(true);
+  });
+});
+
 describe("storePayloadSchema — the five are optional and applied when present (E1, E2, E3)", () => {
   it("all five present and distinct from the defaults (--store-config=all)", () => {
     const result = storePayloadSchema.safeParse(

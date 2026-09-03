@@ -46,7 +46,8 @@ vi.mock("@/lib/prisma", () => ({
 
 const { handleStore } = await import("./store");
 const { SyncEventFailure } = await import("./types");
-const { STORE_DELIVERY_CONFIG_INCONSISTENT } = await import("@/constants/sync");
+const { STORE_DELIVERY_CONFIG_INCONSISTENT, STORE_OPENING_HOURS_INVALID, STORE_TIMEZONE_INVALID } =
+  await import("@/constants/sync");
 
 const BUSINESS_ID = "business-1";
 
@@ -190,8 +191,15 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
   });
 
   it("a real opt-in flip to publish clears the disabled columns", async () => {
+    // F-022 R12: the gate now reads `existing.timezone` on this path — a
+    // canonical value here is what lets the flip through, exercising the
+    // gate rather than bypassing it (impl.md § Qué necesita quien pruebe).
     storeFindUnique.mockResolvedValue(
-      existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"), sourceOptIn: false }),
+      existingStore({
+        sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"),
+        sourceOptIn: false,
+        timezone: "America/Havana",
+      }),
     );
 
     await callHandleStore({ publishToStore: true }, "UPDATE");
@@ -214,6 +222,40 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
     const data = storeUpdate.mock.calls[0][0].data;
     expect(data).not.toHaveProperty("status");
     expect(data).not.toHaveProperty("disabledReasonCode");
+  });
+
+  it("R12: a real opt-in flip to publish with an unreadable existing.timezone fails, and never writes", async () => {
+    storeFindUnique.mockResolvedValue(
+      existingStore({
+        sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"),
+        sourceOptIn: false,
+        timezone: "Nowhere/Nothing",
+      }),
+    );
+
+    await expect(callHandleStore({ publishToStore: true }, "UPDATE")).rejects.toThrow(
+      SyncEventFailure,
+    );
+    await expect(callHandleStore({ publishToStore: true }, "UPDATE")).rejects.toThrow(
+      STORE_TIMEZONE_INVALID,
+    );
+    expect(storeUpdate).not.toHaveBeenCalled();
+  });
+
+  it("R12: a ROUTINE event (opt-in unchanged) on a store with an unreadable timezone does NOT fail — the gate only guards an actual flip to PUBLISHED", async () => {
+    storeFindUnique.mockResolvedValue(
+      existingStore({
+        sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z"),
+        sourceOptIn: true,
+        timezone: "Nowhere/Nothing",
+      }),
+    );
+
+    await callHandleStore({ publishToStore: true, phone: "+5350000099" }, "UPDATE");
+
+    const data = storeUpdate.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty("status");
+    expect(data.phone).toBe("+5350000099");
   });
 
   it("DELETE is treated as an unpublish regardless of publishToStore", async () => {
@@ -252,6 +294,81 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
 
     expect(outcome.status).toBe("skipped_not_published");
     expect(storeUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleStore() — F-022 E10/SP3: a malformed openingHours fails the WHOLE event, before any write", () => {
+  it("rejects a calendar missing a day key and writes nothing — not even name/phone in the SAME event", async () => {
+    storeFindUnique.mockResolvedValue(
+      existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z") }),
+    );
+    const malformed = {
+      version: 1,
+      days: { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [] },
+    };
+
+    await expect(
+      callHandleStore(
+        { openingHours: malformed, phone: "+5350000099", updatedAt: "2026-08-27T00:00:00.000Z" },
+        "UPDATE",
+      ),
+    ).rejects.toThrow(SyncEventFailure);
+    await expect(
+      callHandleStore(
+        { openingHours: malformed, phone: "+5350000099", updatedAt: "2026-08-27T00:00:00.000Z" },
+        "UPDATE",
+      ),
+    ).rejects.toThrow(STORE_OPENING_HOURS_INVALID);
+    expect(storeUpdate).not.toHaveBeenCalled();
+  });
+
+  it("caso límite 9: an ABSENT openingHours is not an error — the column stays untouched", async () => {
+    storeFindUnique.mockResolvedValue(
+      existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z") }),
+    );
+
+    const outcome = await callHandleStore({ updatedAt: "2026-08-27T00:00:00.000Z" }, "UPDATE");
+
+    expect(outcome.status).toBe("processed");
+    const data = storeUpdate.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty("openingHours");
+  });
+
+  it("a WELL-FORMED openingHours is applied as-is", async () => {
+    storeFindUnique.mockResolvedValue(
+      existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z") }),
+    );
+    const valid = {
+      version: 1,
+      days: {
+        mon: [{ from: "09:00", to: "18:00" }],
+        tue: [],
+        wed: [],
+        thu: [],
+        fri: [],
+        sat: [],
+        sun: [],
+      },
+    };
+
+    await callHandleStore({ openingHours: valid, updatedAt: "2026-08-27T00:00:00.000Z" }, "UPDATE");
+
+    const data = storeUpdate.mock.calls[0][0].data;
+    expect(data.openingHours).toEqual(valid);
+  });
+
+  it("E11: a timezone key riding in the payload never reaches the update's data — timezone is the panel's alone", async () => {
+    storeFindUnique.mockResolvedValue(
+      existingStore({ sourceUpdatedAt: new Date("2026-08-20T00:00:00.000Z") }),
+    );
+
+    await callHandleStore(
+      { timezone: "Europe/Madrid", updatedAt: "2026-08-27T00:00:00.000Z" } as never,
+      "UPDATE",
+    );
+
+    const data = storeUpdate.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty("timezone");
   });
 });
 

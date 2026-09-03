@@ -73,3 +73,55 @@ describe("image boundaries (F-023)", () => {
     expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
   });
 });
+
+/**
+ * F-022 architecture.md § Contratos internos, puntos 3 y 5.
+ *
+ * (a) The PUBLISHED gate (R12): every file with a line that WRITES
+ *     `status: "PUBLISHED"` must also mention `isCanonicalTimeZone` — the
+ *     one predicate `src/lib/timezone.ts` exports for it, so a fourth writer
+ *     can never forget the gate silently. The pattern is blind to intent, on
+ *     purpose (same technique as the two guards above): a line with a `|` in
+ *     it is a TYPE UNION (`"PUBLISHED" | "SUSPENDED"`), never a write, and is
+ *     excluded — measured today: `resolve.ts`, `branding.ts` and
+ *     `StoreBrandCard.tsx` (twice) all declare it that way. What is left
+ *     after that filter is the two writers
+ *     (`sync/server/handlers/store.ts`, `admin/server/mutations.ts`) and two
+ *     files that only MENTION the literal in a comment
+ *     (`catalog/server/queries.ts`'s own `where: { status: "PUBLISHED" }`
+ *     read filter, and `constants/sync.ts`'s doc comment on
+ *     `STORE_TIMEZONE_INVALID`) — all four already name
+ *     `isCanonicalTimeZone` in their own text, so none needs a hand-written
+ *     exception list. A fifth file that starts writing `PUBLISHED` without
+ *     the gate fails here, before `bundle`, with a message naming it.
+ * (b) A5: `evaluateStoreHours` has NO production caller this cycle (§
+ *     Alcance, punto 4) — the instant must never re-enter a cached view
+ *     through the back door of "let's just highlight today". Nothing under
+ *     `src/app/` or `src/components/` may mention the identifier.
+ */
+const PUBLISHED_WRITE_LINE = /status:\s*"PUBLISHED"/;
+const APP_DIR = join(ROOT, "src/app");
+const COMPONENTS_DIR = join(ROOT, "src/components");
+
+describe("PUBLISHED gate and evaluator boundaries (F-022)", () => {
+  it('every file that writes status: "PUBLISHED" also mentions isCanonicalTimeZone', () => {
+    const offenders = files.filter((file) => {
+      const source = readFileSync(file, "utf8");
+      const writesPublished = source
+        .split("\n")
+        .some((line) => PUBLISHED_WRITE_LINE.test(line) && !line.includes("|"));
+      if (!writesPublished) return false;
+      return !source.includes("isCanonicalTimeZone");
+    });
+    expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
+  });
+
+  it("no file under src/app/ or src/components/ mentions evaluateStoreHours (A5): the instant never re-enters a cached view", () => {
+    const offenders = files.filter((file) => {
+      if (!file.startsWith(APP_DIR) && !file.startsWith(COMPONENTS_DIR)) return false;
+      const source = readFileSync(file, "utf8");
+      return /\bevaluateStoreHours\b/.test(source);
+    });
+    expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
+  });
+});
