@@ -105,3 +105,39 @@ export const ORDER_STATUSES_REQUIRING_QUOTED_DELIVERY = [
   "IN_TRANSIT",
   "DELIVERED",
 ] as const;
+
+// ---------------------------------------------------------------------------
+// F-033 — lectura lateral
+// ---------------------------------------------------------------------------
+
+/**
+ * El vocabulario legible por máquina que viaja DENTRO de `issues[].message`
+ * del `400 INVALID_QUERY` de `GET /api/internal/orders`. Precedente:
+ * `STORE_DELIVERY_CONFIG_INCONSISTENT` (src/constants/sync.ts), la v7 del
+ * contrato. Un objeto y no cinco constantes sueltas porque los cinco viajan
+ * juntos: son UNA fila del vocabulario de errores de la v8.
+ */
+export const ORDER_QUERY_ISSUE = {
+  IDS_LIMIT_EXCEEDED: "IDS_LIMIT_EXCEEDED",
+  SINCE_WITH_LATERAL_READ: "SINCE_WITH_LATERAL_READ",
+  STATUS_WITH_IDS: "STATUS_WITH_IDS",
+  AFTER_WITHOUT_STATUS: "AFTER_WITHOUT_STATUS",
+  LIMIT_WITH_IDS: "LIMIT_WITH_IDS",
+} as const;
+export type OrderQueryIssue = (typeof ORDER_QUERY_ISSUE)[keyof typeof ORDER_QUERY_ISSUE];
+
+/** R9 (SP2): el tope de `?ids=`. 100 ids de ~7 cifras son ~700 caracteres de
+ *  URL, muy por debajo del límite seguro de proxies (~2.000). */
+export const ORDER_LATERAL_IDS_MAX = 100;
+
+/** El techo de `Order.id`: `BIGINT` de Postgres es `int8` con signo. Un id
+ *  por encima no es un 200 vacío, es un error de conversión — se rechaza
+ *  como query inválida antes de llegar a la base (DA3). */
+export const ORDER_ID_MAX = 9223372036854775807n;
+
+/** R12: el rango de `limit` es UNO, compartido por el pull y por la lectura
+ *  por estado. Dos constantes con el mismo valor serían dos sitios donde
+ *  divergir. Los valores son los que la ruta trae desde F-007. */
+export const ORDER_PULL_LIMIT_MIN = 1;
+export const ORDER_PULL_LIMIT_MAX = 500;
+export const ORDER_PULL_LIMIT_DEFAULT = 100;
