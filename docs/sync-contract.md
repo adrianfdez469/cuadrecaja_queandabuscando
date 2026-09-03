@@ -1,6 +1,6 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 7** · 1 de septiembre de 2026
+**Versión 9** · 3 de septiembre de 2026
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
 existe y está verificado contra los casos de abajo, **con una excepción marcada
@@ -30,6 +30,112 @@ delante es lo que implementó.
 
 Una corrección de tipografía o de un enlace roto es una menor: cuesta un dígito
 y evita la pregunta «¿es este el documento que leí?».
+
+## Cambios respecto a la v8
+
+Sube como **mayor** por dos motivos independientes, y el segundo solo por su
+propio peso ya lo sería: `openingHours` gana una regla de validación real
+(«cambia lo que el POS envía o recibe [...] una regla de validación», más
+arriba), y el cable gana **dos códigos de error nuevos**, que la propia
+§ Versionado también llama mayor. La tabla de propiedad de campos, sola,
+habría sido una **menor**: no cambia nada de lo que el POS envía o recibe,
+documenta campo a campo una propiedad que ya está en efecto en el código de
+hoy — un POS que implementó la v8 sigue siendo un lector correcto de la v9
+sin tocar una línea si nunca manda `openingHours`.
+
+**Antes de que mandéis un calendario, la frase incómoda, completa:** un
+evento `STORE` cuyo `openingHours` no cumple el formato de abajo **rechaza
+ese evento entero** con `STORE_OPENING_HOURS_INVALID` — y eso significa que
+**ninguno de sus otros campos se aplica tampoco**, ni siquiera un `name` o un
+`phone` corregidos que viajaran en el mismo evento. El resto del lote sí se
+aplica: es un rechazo por evento, nunca un `400` que tire el lote entero. El
+evento vuelve en `failed[]` para que lo reintentéis en cuanto el calendario
+sea válido.
+
+1. **La forma completa de `openingHours`.** Antes era `unknown`: cualquier
+   JSON entraba y se guardaba tal cual. Ahora es un objeto con versión y las
+   siete claves del día, cada una con sus tramos horarios:
+
+   ```jsonc
+   {
+     "version": 1,
+     "days": {
+       "mon": [{ "from": "09:00", "to": "18:00" }],
+       "tue": [
+         { "from": "09:00", "to": "13:00" },
+         { "from": "15:00", "to": "18:00" },
+       ],
+       "wed": [], // cerrado todo el día
+       "thu": [{ "from": "09:00", "to": "18:00" }],
+       "fri": [{ "from": "22:00", "to": "02:00" }], // cruza la medianoche
+       "sat": [{ "from": "00:00", "to": "24:00" }], // abierto todo el día
+       "sun": [],
+     },
+   }
+   ```
+
+   Reglas del formato: `version` es siempre `1` hoy; `days` tiene
+   **exactamente** las siete claves `mon`…`sun`, ni una menos ni una más;
+   cada día es un array de 0 a 4 ventanas, y `[]` significa «cerrado todo el
+   día»; `from`/`to` son `"HH:MM"` en 24 horas, y `to` admite además el valor
+   exacto `"24:00"` para decir «hasta el final del día»; una ventana con
+   `from` igual a `to` se rechaza, por ambigua; las ventanas de un mismo día
+   van estrictamente ordenadas por `from` y sin solaparse; y **como máximo
+   una ventana por día puede cruzar la medianoche** (`to < from`, como
+   `fri` arriba) — y tiene que ser la última del día. Una clave desconocida
+   en cualquier nivel (un `"tz"` o un `"timezone"` dentro de `openingHours`,
+   por ejemplo) se rechaza: la zona horaria **no** viaja aquí, ver el punto 4.
+   Serializado, el JSON no puede pasar de 2 KB.
+
+2. **El rechazo, con su nombre y su alcance.** `STORE_OPENING_HOURS_INVALID`
+   entra en el `207 failed[]` de siempre — nunca en un `400` de lote — y
+   significa lo que el párrafo de arriba dice con todas las letras.
+
+3. **La semántica de omisión no cambia.** `openingHours` ausente o `null`
+   deja la columna exactamente como estaba, igual que en la v7. Validar no es
+   lo mismo que exigir: un POS que nunca mande el campo sigue siendo un
+   lector correcto de la v9.
+
+4. **`Store` gana una columna `timezone`, y es del panel — el POS no la
+   manda.** Es un identificador IANA (`"America/Havana"`, nunca un
+   desplazamiento como `"-04:00"` ni un alias como `"Cuba"` o `"UTC"`), y
+   sirve para leer `openingHours` en la hora local del negocio en vez de en
+   la del servidor. No es un campo del `payload` de `STORE`: si llega una
+   clave `timezone` de todos modos, se descarta sin error y sin afectar al
+   resto del evento. `STORE_TIMEZONE_INVALID` es el segundo código nuevo,
+   visible en el `207 failed[]` cuando una tienda con una zona que
+   queandabuscando no reconoce intenta publicarse o republicarse — no lo
+   dispara nada que el POS envíe hoy, porque el POS no escribe esta columna.
+
+5. **El umbral de stock bajo se queda en cuadrecaja.** Sigue sin viajar en el
+   cable ni guardarse en queandabuscando: lo único que cruza la frontera es
+   el enum `Availability` de tres valores (ya desde antes de esta versión).
+
+**La tabla de propiedad de campos** (más abajo, en «`payload` de `STORE`»)
+deja de tener cinco filas y pasa a tener **las 31 columnas de `Store` y las
+23 de `StoreProduct`**, cada una con su dueño exacto y qué hace un evento que
+la toca — incluida `timezone`, del punto 4. Las cinco filas de la v7 se
+conservan con su texto tal cual («cuadrecaja (desde v7)»); esto no es una
+reescritura, es completar lo que la v7 dejó pendiente por escrito.
+
+## Cambios respecto a la v7
+
+Aditivo (F-033): un POS que implemente la v7 y no envíe ninguno de los tres
+parámetros de abajo sigue siendo un lector correcto de `GET
+/api/internal/orders` sin tocar una línea — mismo cuerpo, mismo cursor, mismo
+`updateMany`. Sube como **mayor** porque añade parámetros a lo que el POS
+puede enviar («cambia lo que el POS envía o recibe [...] sea aditivo o no»,
+más arriba), no porque rompa nada de la v7.
+
+**`GET /api/internal/orders` gana dos formas de lectura lateral: `?status=` y
+`?ids=`**, más un tercer parámetro de paginación propio de la primera,
+`?after=`. Las dos ignoran el cursor del pull incremental y no lo mueven — ver
+§ ③④ Pedidos, «Las lecturas laterales», para la forma completa, los topes y
+los rechazos. `Un pedido devuelto pasa de PENDING a PULLED` (§ ③④) queda
+acotado al pull incremental: ninguna lectura lateral marca nada (R7 de
+`.agent/specs/F-033/spec.md`). El vocabulario de errores gana la fila de `400
+INVALID_QUERY`, que la ruta ya emitía desde su primera versión (F-007) sin que
+este documento la recogiera (§ Vocabulario de errores).
 
 ## Cambios respecto a la v6
 
@@ -323,36 +429,45 @@ toca ninguna ruta.
 | ------ | ------------------------------------------------------ | ---------------------------------- | -------------------------------------------------------------------------------- |
 | `POST` | `/api/internal/sync/catalog`                           | `{ businessId, events[] }` (≤500)  | 207 `{ ok, failed, results }`                                                    |
 | `POST` | `/api/internal/sync/availability`                      | `{ businessId, items[] }` (≤2000)  | 200 `{ applied, confirmed }`                                                     |
-| `GET`  | `/api/internal/orders?since=&limit=`                   | —                                  | 200 `{ orders, nextCursor }`                                                     |
+| `GET`  | `/api/internal/orders?since=&limit=` (pull)            | —                                  | 200 `{ orders, nextCursor }`                                                     |
+| `GET`  | `/api/internal/orders?status=&limit=&after=` (lateral) | —                                  | 200 `{ orders, nextCursor: null, nextAfter }`                                    |
+| `GET`  | `/api/internal/orders?ids=a,b` (lateral)               | —                                  | 200 `{ orders, nextCursor: null, nextAfter: null }`                              |
 | `POST` | `/api/internal/orders/status`                          | `{ orderId, status, reason? }`     | 200 `{ ok: true }`                                                               |
 | `POST` | `/api/internal/orders/proposal`                        | ver § ③④ «Proponer un cambio» (v5) | 200 ver § ③④                                                                     |
 | `GET`  | `/api/internal/reconciliation?storeId=`                | —                                  | 200 `{ products, hash }`                                                         |
 | `GET`  | `/api/internal/slug-availability?slug=&name=&storeId=` | —                                  | 200 `{ candidate, available, reason, resolvedSlug, url, storeKnown, reserving }` |
 
-### Vocabulario de errores (v6)
+### Vocabulario de errores (v9)
 
 Válido para las siete rutas de arriba. Los tres primeros de `503`/`401` ya
 existían con otro nombre de variable; los siguientes son de la v3; la fila de
 `400 INVALID_BATCH` es de la v4 (F-024); `409 ORDER_NOT_PROPOSABLE` y
 `400 CURRENCY_MISMATCH` son de la v5 (F-019), propias de
-`POST /api/internal/orders/proposal`; y `409 ORDER_DELIVERY_NOT_QUOTED` es de la
-v6 (F-031), propia de `POST /api/internal/orders/status`.
+`POST /api/internal/orders/proposal`; `409 ORDER_DELIVERY_NOT_QUOTED` es de la
+v6 (F-031), propia de `POST /api/internal/orders/status`; `400
+INVALID_QUERY` es de `GET /api/internal/orders` — la ruta lo emite desde su
+primera versión (F-007), pero esta tabla nunca lo había documentado hasta la
+v8 (F-033)—; y `STORE_OPENING_HOURS_INVALID`/`STORE_TIMEZONE_INVALID` son de
+la v9 (F-022), las dos como `207 failed[]`, nunca como `400` de lote.
 
-| Código | Cuerpo                                                                                  | Cuándo                                                                                                                                                                                                                                                            |
-| ------ | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `503`  | `{"error":"SYNC_NOT_CONFIGURED"}`                                                       | Ningún negocio tiene un token acuñado todavía                                                                                                                                                                                                                     |
-| `401`  | `{"error":"UNAUTHORIZED"}`                                                              | Sin cabecera, esquema distinto de `Bearer`, token vacío/corto, o token que no resuelve ningún negocio                                                                                                                                                             |
-| `400`  | `{"error":"INVALID_BATCH","issues":[...]}`                                              | **Nuevo (v4).** El cuerpo no cumple el schema — incluida la clave `barcode` (singular) en cualquier `payload` de `PRODUCT`. Rechaza el **lote entero**, ninguna `SyncEvent` queda escrita, ni siquiera la de los demás eventos del mismo lote que sí eran válidos |
-| `403`  | `{"error":"BUSINESS_INACTIVE"}`                                                         | El token es válido pero ese negocio está dado de baja                                                                                                                                                                                                             |
-| `403`  | `{"error":"BUSINESS_MISMATCH"}`                                                         | El `businessId` del cuerpo (① o ②) no es el del negocio autenticado — el lote entero se rechaza, no se aplica nada                                                                                                                                                |
-| `404`  | `{"error":"UNKNOWN_ORDER"}`                                                             | El `orderId` no existe **o pertenece a otro negocio** — el mismo código en los dos casos, a propósito                                                                                                                                                             |
-| `404`  | `{"error":"UNKNOWN_STORE"}`                                                             | El `storeId` de ⑤ no existe **o pertenece a otro negocio**                                                                                                                                                                                                        |
-| `409`  | `{"error":"ORDER_NOT_PROPOSABLE","status"}`                                             | **Nuevo (v5).** `POST /orders/proposal` sobre un pedido que no está en `PULLED`, `CONFIRMED` ni `AWAITING_CUSTOMER`. Nada se escribe; `status` trae el estado actual                                                                                              |
-| `400`  | `{"error":"CURRENCY_MISMATCH"}`                                                         | **Nuevo (v5).** La propuesta llega en una moneda distinta de `Order.currencyCode`                                                                                                                                                                                 |
-| `409`  | `{"error":"ORDER_DELIVERY_NOT_QUOTED"}`                                                 | **Nuevo (v6).** `POST /orders/status` llevando a `READY`, `IN_TRANSIT` o `DELIVERED` un pedido con `deliveryFeePending: true`. Nada se escribe. Cotiza primero por `POST /orders/proposal` y espera que el comprador apruebe                                      |
-| `400`  | `{"error":"MISSING_STORE_ID"}`                                                          | **Aclaración, no cambio (F-014).** Falta el parámetro `storeId` en ⑤, o llega vacío. Ya lo devuelve el endpoint hoy; esta fila lo documenta                                                                                                                       |
-| `400`  | `{"error":"INVALID_BATCH","issues":[{"message":"STORE_DELIVERY_CONFIG_INCONSISTENT"}]}` | **Nuevo (v7, F-032).** Un `payload` de `STORE` que por sí solo ya es contradictorio: `deliveryEnabled: true` + `deliveryFeeMode: "FLAT_RATE"` + `deliveryFee: null`. Rechaza el lote entero, igual que cualquier otro `INVALID_BATCH`                             |
-| `207`  | `"failed":[{"id":"...","error":"STORE_DELIVERY_CONFIG_INCONSISTENT"}]`                  | **Nuevo (v7, F-032).** El mismo invariante, pero solo visible al mezclar el `payload` con la fila ya guardada — no es un `400`, es el evento reportado `failed` dentro del `207` de siempre. No escribe nada; reintentarlo sin corregir el POS falla otra vez     |
+| Código | Cuerpo                                                                                  | Cuándo                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `503`  | `{"error":"SYNC_NOT_CONFIGURED"}`                                                       | Ningún negocio tiene un token acuñado todavía                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `401`  | `{"error":"UNAUTHORIZED"}`                                                              | Sin cabecera, esquema distinto de `Bearer`, token vacío/corto, o token que no resuelve ningún negocio                                                                                                                                                                                                                                                                                                                                                                           |
+| `400`  | `{"error":"INVALID_BATCH","issues":[...]}`                                              | **Nuevo (v4).** El cuerpo no cumple el schema — incluida la clave `barcode` (singular) en cualquier `payload` de `PRODUCT`. Rechaza el **lote entero**, ninguna `SyncEvent` queda escrita, ni siquiera la de los demás eventos del mismo lote que sí eran válidos                                                                                                                                                                                                               |
+| `403`  | `{"error":"BUSINESS_INACTIVE"}`                                                         | El token es válido pero ese negocio está dado de baja                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `403`  | `{"error":"BUSINESS_MISMATCH"}`                                                         | El `businessId` del cuerpo (① o ②) no es el del negocio autenticado — el lote entero se rechaza, no se aplica nada                                                                                                                                                                                                                                                                                                                                                              |
+| `404`  | `{"error":"UNKNOWN_ORDER"}`                                                             | El `orderId` no existe **o pertenece a otro negocio** — el mismo código en los dos casos, a propósito                                                                                                                                                                                                                                                                                                                                                                           |
+| `404`  | `{"error":"UNKNOWN_STORE"}`                                                             | El `storeId` de ⑤ no existe **o pertenece a otro negocio**                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `409`  | `{"error":"ORDER_NOT_PROPOSABLE","status"}`                                             | **Nuevo (v5).** `POST /orders/proposal` sobre un pedido que no está en `PULLED`, `CONFIRMED` ni `AWAITING_CUSTOMER`. Nada se escribe; `status` trae el estado actual                                                                                                                                                                                                                                                                                                            |
+| `400`  | `{"error":"CURRENCY_MISMATCH"}`                                                         | **Nuevo (v5).** La propuesta llega en una moneda distinta de `Order.currencyCode`                                                                                                                                                                                                                                                                                                                                                                                               |
+| `409`  | `{"error":"ORDER_DELIVERY_NOT_QUOTED"}`                                                 | **Nuevo (v6).** `POST /orders/status` llevando a `READY`, `IN_TRANSIT` o `DELIVERED` un pedido con `deliveryFeePending: true`. Nada se escribe. Cotiza primero por `POST /orders/proposal` y espera que el comprador apruebe                                                                                                                                                                                                                                                    |
+| `400`  | `{"error":"MISSING_STORE_ID"}`                                                          | **Aclaración, no cambio (F-014).** Falta el parámetro `storeId` en ⑤, o llega vacío. Ya lo devuelve el endpoint hoy; esta fila lo documenta                                                                                                                                                                                                                                                                                                                                     |
+| `400`  | `{"error":"INVALID_BATCH","issues":[{"message":"STORE_DELIVERY_CONFIG_INCONSISTENT"}]}` | **Nuevo (v7, F-032).** Un `payload` de `STORE` que por sí solo ya es contradictorio: `deliveryEnabled: true` + `deliveryFeeMode: "FLAT_RATE"` + `deliveryFee: null`. Rechaza el lote entero, igual que cualquier otro `INVALID_BATCH`                                                                                                                                                                                                                                           |
+| `207`  | `"failed":[{"id":"...","error":"STORE_DELIVERY_CONFIG_INCONSISTENT"}]`                  | **Nuevo (v7, F-032).** El mismo invariante, pero solo visible al mezclar el `payload` con la fila ya guardada — no es un `400`, es el evento reportado `failed` dentro del `207` de siempre. No escribe nada; reintentarlo sin corregir el POS falla otra vez                                                                                                                                                                                                                   |
+| `400`  | `{"error":"INVALID_QUERY","issues":[{"path":[...],"message":"..."}]}`                   | **Documentado en v8 (F-033), la ruta lo emite desde F-007.** Propia de `GET /api/internal/orders`. `path` nombra el parámetro con forma inválida (`status`, `ids`, `after`, `limit`, `since`); `path: []` cuando el problema es la COMBINACIÓN de parámetros, con `message` uno de `SINCE_WITH_LATERAL_READ`, `STATUS_WITH_IDS`, `AFTER_WITHOUT_STATUS`, `LIMIT_WITH_IDS` o `IDS_LIMIT_EXCEEDED` (este último con `path: ["ids"]`) — ver § ③④ Pedidos, «Las lecturas laterales» |
+| `207`  | `"failed":[{"id":"...","error":"STORE_OPENING_HOURS_INVALID"}]`                         | **Nuevo (v9, F-022).** Un `payload` de `STORE` cuyo `openingHours` no cumple el formato de § «`payload` de `STORE`». Rechaza **ese evento**, nunca el lote: `SyncEvent.status = "FAILED"`, ninguno de sus campos se aplica —tampoco un `name` o un `phone` que viajaran con él— y el resto del lote sí se aplica. Reintentadlo cuando el calendario sea válido                                                                                                                  |
+| `207`  | `"failed":[{"id":"...","error":"STORE_TIMEZONE_INVALID"}]`                              | **Nuevo (v9, F-022).** Al publicar o republicar una tienda (`publishToStore: true` cuando el opt-in cambia), su `timezone` no es un identificador IANA que queandabuscando reconozca. `timezone` es del panel — no lo dispara nada que el `payload` del POS envíe hoy —, y se corrige a mano en queandabuscando, nunca desde el POS                                                                                                                                             |
 
 Un recurso de otro negocio nunca responde distinto de uno inexistente: ni
 `/orders/status`, ni `/reconciliation`, ni `/slug-availability` (que además
@@ -498,7 +613,22 @@ con el único campo nuevo de la v3 marcado aparte.
   "phone": null,
   "whatsapp": "+5350000001", // null BORRA
   "email": null,
-  "openingHours": null, // AUSENTE deja la columna intacta, no la borra
+  // F-022 (v9): objeto con versión y las siete claves del día, o AUSENTE/null
+  // para dejar la columna intacta. Ver la forma completa y sus reglas en
+  // «Cambios respecto a la v8», arriba. Un valor que no cumple el formato
+  // rechaza ESTE evento entero con STORE_OPENING_HOURS_INVALID.
+  "openingHours": {
+    "version": 1,
+    "days": {
+      "mon": [{ "from": "09:00", "to": "18:00" }],
+      "tue": [{ "from": "09:00", "to": "18:00" }],
+      "wed": [{ "from": "09:00", "to": "18:00" }],
+      "thu": [{ "from": "09:00", "to": "18:00" }],
+      "fri": [{ "from": "22:00", "to": "02:00" }], // cruza la medianoche
+      "sat": [{ "from": "00:00", "to": "24:00" }], // abierto todo el día
+      "sun": [],
+    },
+  },
   "baseCurrency": "CUP", // por defecto CUP si se omite
   // F-032 (v7): las cinco de la configuración de compra. Las cinco son
   // OPCIONALES y las cinco dejan la columna INTACTA si se omiten — ver la
@@ -533,22 +663,83 @@ anterior de este párrafo describía un comportamiento que el código nunca tuvo
   Solo `deliveryFee` acepta además un `null` explícito, que sí borra el
   importe (tabla de arriba).
 
-##### Tabla de propiedad de campos (F-032, semilla del criterio 4 de F-022)
+##### Tabla de propiedad de campos (F-022, criterio 4)
 
-Quién es dueño de cada uno de los cinco campos de configuración de compra y
-qué hace un evento `STORE` que lo trae. El resto de columnas de `Store` y de
-`StoreProduct` queda para la tabla exhaustiva de F-022.
+Quién es dueño de cada columna de `Store` y de `StoreProduct` y qué hace un
+evento que la toca — las **31** de `Store` (30 de siempre más `timezone`) y
+las **23** de `StoreProduct`, 54 filas en total. Hasta la v8 esta tabla solo
+traía los cinco campos de configuración de compra de F-032, con una nota
+diciendo que el resto quedaba pendiente para esta versión; esas cinco filas
+se conservan con su texto tal cual («cuadrecaja (desde v7)»).
 
-| Campo              | Dueño                                         | Un evento `STORE` que lo trae                              |
-| ------------------ | --------------------------------------------- | ---------------------------------------------------------- |
-| `checkoutMode`     | cuadrecaja (desde v7)                         | Escribe el nuevo valor                                     |
-| `deliveryEnabled`  | cuadrecaja (desde v7)                         | Escribe el nuevo valor                                     |
-| `deliveryFee`      | cuadrecaja (desde v7)                         | Escribe el nuevo valor, o `NULL` si llega `null` explícito |
-| `deliveryFeeMode`  | cuadrecaja (desde v7)                         | Escribe el nuevo valor                                     |
-| `orderExpiryHours` | cuadrecaja (desde v7; antes, queandabuscando) | Escribe el nuevo valor                                     |
+**`Store`** — 31 columnas:
 
-Ausente en cualquiera de las cinco: la columna queda intacta (no aparece en
-esta tabla porque es el mismo comportamiento en las cinco filas).
+| Campo                | Dueño                                         | Un evento `STORE` que lo trae                                                                                                                                                                                                                                                    |
+| -------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                 | plataforma                                    | Nada: la fila se localiza por `storeId` (el `externalId` interno), el `id` no viaja                                                                                                                                                                                              |
+| `businessId`         | plataforma                                    | Nada. El negocio sale del token autenticado, no del `payload`; una tienda cuyo `storeId` es de otro negocio se ignora                                                                                                                                                            |
+| `storefrontId`       | plataforma (registro de marcas)               | Se fija al crear y no se mueve. Solo lo mueve el panel cuando el negocio agrupa dos tiendas en una marca                                                                                                                                                                         |
+| `externalId`         | cuadrecaja                                    | Se escribe al crear, desde `payload.storeId`. Es la identidad de la `Tienda` en el POS y la clave de búsqueda                                                                                                                                                                    |
+| `slug`               | plataforma (registro de slugs)                | Nada. `payload.slug` es **semilla de derivación** al crear y nada más — si el valor está tomado o es reservado, queandabuscando deriva el siguiente libre en silencio (nunca falla)                                                                                              |
+| `name`               | cuadrecaja                                    | Escribe el nuevo valor. Viaja siempre                                                                                                                                                                                                                                            |
+| `description`        | cuadrecaja                                    | Escribe el valor; **ausente o `null` BORRA** la columna                                                                                                                                                                                                                          |
+| `status`             | compartida, árbitro escrito                   | El sync la toca **solo** si `publishToStore` difiere del valor ya guardado; el panel de administración la escribe cuando el negocio cierra o reabre a mano. Desde F-022, pasar a `PUBLISHED` exige una `timezone` que queandabuscando reconozca (`STORE_TIMEZONE_INVALID` si no) |
+| `phone`              | cuadrecaja                                    | Escribe el valor; ausente o `null` BORRA                                                                                                                                                                                                                                         |
+| `whatsapp`           | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
+| `email`              | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
+| `address`            | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
+| `city`               | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
+| `province`           | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
+| `latitude`           | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
+| `longitude`          | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
+| `openingHours`       | cuadrecaja                                    | Escribe el calendario **completo**, por reemplazo. Ausente o `null` deja la columna intacta. Desde la v9, un valor que no cumple el formato **no se guarda** — rechaza el evento (`STORE_OPENING_HOURS_INVALID`)                                                                 |
+| `timezone`           | **panel**                                     | **Nada.** No es un campo del `payload`; si llega una clave `timezone` de todos modos, se descarta sin error. Se corrige a mano en queandabuscando mientras el panel no tenga editor                                                                                              |
+| `checkoutMode`       | cuadrecaja (desde v7)                         | Escribe el nuevo valor; ausente la deja intacta                                                                                                                                                                                                                                  |
+| `deliveryEnabled`    | cuadrecaja (desde v7)                         | Ídem                                                                                                                                                                                                                                                                             |
+| `deliveryFee`        | cuadrecaja (desde v7)                         | Escribe el nuevo valor, o `NULL` si llega `null` explícito                                                                                                                                                                                                                       |
+| `deliveryFeeMode`    | cuadrecaja (desde v7)                         | Escribe el nuevo valor; ausente la deja intacta                                                                                                                                                                                                                                  |
+| `orderExpiryHours`   | cuadrecaja (desde v7; antes, queandabuscando) | Ídem                                                                                                                                                                                                                                                                             |
+| `publishedAt`        | sync                                          | Se pone al publicar o republicar, y se borra al suspender, siempre junto a `status` y con la misma puerta. El panel no la toca ni al reabrir                                                                                                                                     |
+| `disabledReasonCode` | panel (vocabulario propio)                    | El sync solo la pone a `null`: al suspender por un cambio de `publishToStore`, y al republicar                                                                                                                                                                                   |
+| `disabledMessage`    | compartida, árbitro escrito                   | El sync escribe `unpublishReason ?? null` al suspender por un cambio de opt-in; el panel escribe su propio texto libre al cerrar desde la interfaz. Gana el último que actúe                                                                                                     |
+| `disabledAt`         | compartida, árbitro escrito                   | El sync la pone al suspender y la borra al republicar; el panel, al cerrar y al abrir                                                                                                                                                                                            |
+| `sourceUpdatedAt`    | cuadrecaja                                    | Escribe `payload.updatedAt` en todo evento aplicado. Un evento con `updatedAt` menor o igual al guardado no escribe nada (guarda anti-rancio)                                                                                                                                    |
+| `sourceOptIn`        | cuadrecaja                                    | Escribe `payload.publishToStore` (y `false` en un `DELETE`)                                                                                                                                                                                                                      |
+| `createdAt`          | plataforma                                    | Nada: default de la base                                                                                                                                                                                                                                                         |
+| `updatedAt`          | plataforma                                    | Se mueve sola en cualquier evento aplicado                                                                                                                                                                                                                                       |
+
+**`StoreProduct`** — 23 columnas:
+
+| Campo                   | Dueño                            | Un evento `PRODUCT` que lo trae                                                                                 |
+| ----------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `id`                    | plataforma                       | Nada                                                                                                            |
+| `storeId`               | plataforma                       | Se fija al crear, desde la tienda que resuelve el evento                                                        |
+| `canonicalProductId`    | plataforma (fusión canónica)     | Se recalcula en cada evento, por identidad de código de barras — nunca lo decide el `payload` directamente      |
+| `externalId`            | cuadrecaja                       | Se escribe al crear. Identidad del `ProductoTienda`                                                             |
+| `slug`                  | plataforma                       | Se deriva **solo al crear** y se congela: renombrar en el POS cambia `localName`, nunca esto                    |
+| `localName`             | cuadrecaja                       | Escribe el nuevo valor                                                                                          |
+| `syncedPrice`           | cuadrecaja                       | Escribe el nuevo valor. El precio efectivo es `priceOverride ?? syncedPrice`                                    |
+| `syncedPriceCurrency`   | cuadrecaja                       | Escribe el nuevo valor                                                                                          |
+| `availability`          | cuadrecaja                       | Escribe el enum de tres valores. El entero de existencias y su umbral **nunca cruzan la frontera** (§ de abajo) |
+| `localCategoryId`       | cuadrecaja                       | Se resuelve desde la categoría del `payload`                                                                    |
+| `sourceUpdatedAt`       | cuadrecaja                       | Guarda anti-rancio: un evento más viejo que el guardado no escribe nada                                         |
+| `syncedAt`              | plataforma                       | Instante de la escritura local, no del `payload`                                                                |
+| `deletedAt`             | cuadrecaja                       | Un `DELETE` la pone; un producto que reaparece la vuelve a `null`                                               |
+| `description`           | **panel**                        | **Nada: sobrevive.** Un evento `PRODUCT` nunca la toca                                                          |
+| `imageUrls`             | **panel**                        | Nada: sobrevive                                                                                                 |
+| `priceOverride`         | **panel**                        | Nada: sobrevive. Un override de cero es un precio real, no un valor ausente                                     |
+| `priceOverrideCurrency` | **panel**                        | Nada: sobrevive                                                                                                 |
+| `visible`               | **panel**                        | Nada: sobrevive                                                                                                 |
+| `featured`              | **panel**                        | Nada: sobrevive                                                                                                 |
+| `searchDocument`        | de ninguno de los dos (derivado) | Se **recalcula** desde el estado de la fila, nunca se copia del `payload`                                       |
+| `searchVector`          | de ninguno de los dos (derivado) | Ídem, calculado por queandabuscando                                                                             |
+| `createdAt`             | plataforma                       | Nada                                                                                                            |
+| `updatedAt`             | plataforma                       | Se mueve sola                                                                                                   |
+
+**El umbral de stock bajo no existe en ninguna columna de `Store` ni de
+`StoreProduct`, aquí ni en el cable.** Se configura y se queda en cuadrecaja:
+calcular el enum `Availability` requiere el conteo de existencias, que nunca
+viaja hacia queandabuscando.
 
 ##### Novedades de esta versión — `unpublishReason` y disponibilidad de slug
 
@@ -771,8 +962,10 @@ GET /api/internal/orders?since=<último id visto>&limit=100
 ```
 
 `nextCursor: null` significa «al día». El id es un `BIGINT` autoincremental, así
-que el cursor es monotónico. Un pedido devuelto pasa de `PENDING` a `PULLED`,
-y **no se borra**: la página de estado del cliente sigue funcionando.
+que el cursor es monotónico. **Un pedido devuelto por el pull incremental**
+pasa de `PENDING` a `PULLED` (v8, F-033: esta frase se acota al pull —
+ninguna lectura lateral, más abajo, marca nada), y **no se borra**: la página
+de estado del cliente sigue funcionando.
 
 **Este endpoint asume un único poller por negocio, secuencial.** La lectura
 (`findMany`) y la marca como `PULLED` (`updateMany`) no son atómicas entre sí.
@@ -794,6 +987,69 @@ más abajo) siguen la misma regla: un `orderId`/`storeId` de otro negocio
 responde exactamente igual que uno inexistente (`404`, § Vocabulario de
 errores) — nunca un error distinto que confirme que el recurso existe en otro
 lado.
+
+### Las lecturas laterales (v8, F-033)
+
+El pull incremental de arriba solo entrega un pedido **una vez**: `id > since`
+lo excluye para siempre en cuanto el cursor lo supera. Pero la resolución de
+una propuesta de renegociación ocurre sobre un pedido que el POS **ya
+pulleó** — su `id` es menor que el cursor —, así que sin otra forma de leer,
+el POS nunca se entera de que el comprador aprobó o rechazó. `GET
+/api/internal/orders` gana dos formas de lectura lateral que resuelven eso,
+**ignorando el cursor por completo**:
+
+```
+GET /api/internal/orders?status=<UN estado>&limit=&after=<id>
+→ { orders: [...], nextCursor: null, nextAfter: "<id>" | null }
+
+GET /api/internal/orders?ids=<a>,<b>
+→ { orders: [...], nextCursor: null, nextAfter: null }
+```
+
+- **`?status=`** relee todos los pedidos del negocio en **un solo** estado de
+  los nueve del enum (una coma, `?status=PULLED,CONFIRMED`, es `400`; ampliar
+  a lista es aditivo el día que haga falta, precisamente porque hoy es un
+  rechazo). Es la pregunta del ciclo normal: el POS no necesita llevar la
+  lista de qué pedidos tiene en `AWAITING_CUSTOMER`, solo preguntar.
+- **`?ids=`** relee un conjunto puntual y ya conocido, hasta **100** ids
+  separados por coma. Más de 100 responde `400 INVALID_QUERY` —nunca la lista
+  recortada en silencio—, y un id repetido se sirve una sola vez.
+- **`?after=<id>`** pagina **solo** `?status=`, sobre su propio puntero,
+  `nextAfter`: keyset (`id > after`) sobre el mismo orden ascendente que el
+  pull. Solo tiene sentido junto a `?status=`; sin él es `400`.
+- **`nextCursor` es SIEMPRE `null` en las dos** — nunca lo que devolvería el
+  pull —, y ninguna lectura lateral avanza ni consume el cursor del pull
+  incremental: repetir el pull con el `since` que ya tenías devuelve
+  exactamente el mismo cuerpo que antes de leer lateralmente. `nextAfter`
+  viaja en las dos respuestas laterales (`null` fijo en la de `?ids=`, que no
+  pagina) y **nunca** en el pull incremental — un consumidor de la v7 no ve
+  un campo que no esperaba.
+- **Un id de otro negocio en `?ids=` responde igual que uno inexistente**:
+  `200 { "orders": [] }`, sin ningún campo que distinga los dos casos — la
+  misma invariante que ya rige `/orders/status` y `/reconciliation` más
+  arriba en esta misma sección.
+- **`?since=` no convive con `?status=` ni con `?ids=`**, ni `?status=` con
+  `?ids=` entre sí, ni `?after=` sin `?status=`, ni `?limit=` con `?ids=`
+  (servir 1 de 2 ids pedidos sería la misma lista recortada en silencio que
+  el tope de 100 prohíbe): las cinco combinaciones responden
+  `400 INVALID_QUERY` en vez de elegir en silencio cuál gana — ver
+  § Vocabulario de errores para el mensaje de cada una.
+- **Una lectura lateral SÍ aplica los dos vencimientos** (el de una propuesta
+  sin respuesta y el del pedido cuyo envío nadie cotizó, § «El envío sin
+  cotizar» más abajo) antes de leer, exactamente igual que el pull
+  incremental: nunca entrega una propuesta ya caducada como si siguiera viva.
+  Es la única escritura que una lectura lateral produce — cancela lo que el
+  reloj ya venció —, y es idempotente: repetirla no tiene efecto adicional.
+- **Los importes y el resto de campos son idénticos** a los del pull, byte a
+  byte: mismo `PulledOrder`, mismo `deliveryFeePending`, mismo `proposal`
+  presente solo en `AWAITING_CUSTOMER`. El POS reutiliza su parser sin
+  ramificar por endpoint.
+
+`?since=` no lleva el mismo tope que `?after=`/`?ids=`: un `since` por encima
+de `2^63−1` sigue respondiendo `500` como hasta hoy —preexistente, fuera del
+alcance de F-033—, mientras que `?after=` y cada elemento de `?ids=` por
+encima de ese mismo techo responden `400 INVALID_QUERY` en vez de reventar
+contra Postgres. Asimetría documentada, no un descuido.
 
 Los campos que ya conocías siguen siendo exactamente lo que eran: `unitPrice`,
 `currencyCode`, `lineTotal`, `subtotal`, `discountTotal`, `deliveryFee` y
@@ -1182,7 +1438,11 @@ que tenga en `AWAITING_CUSTOMER`. El motivo: el pull incremental filtra
 `id > since`, y la resolución de una propuesta ocurre sobre un pedido que el
 POS **ya pulleó** (su `id` es menor que el cursor). Sin la segunda lectura,
 el timbre del segundo disparador dispara un pull que responde
-`{ orders: [], nextCursor: null }` y el encargado no ve el cambio.
+`{ orders: [], nextCursor: null }` y el encargado no ve el cambio. **Esa
+segunda lectura es, literalmente, `GET
+/api/internal/orders?status=AWAITING_CUSTOMER`** (v8, F-033, § ③④ Pedidos,
+«Las lecturas laterales» más arriba) — hasta esta versión el contrato pedía
+la relectura sin decir con qué parámetro se hacía.
 
 **Un solo pull en vuelo por negocio, aunque timbren N pestañas.** La regla ya
 existía más arriba en esta misma sección («este endpoint asume un único
@@ -1192,6 +1452,19 @@ tener dos pollers a la vez; con el timbre basta con que el encargado tenga
 tres pestañas abiertas, cada una disparando su propio pull al oírlo. Sigue
 siendo responsabilidad de cuadrecaja mantener un solo pull en vuelo por
 negocio en todo momento, sin importar cuántas pestañas lo oigan.
+
+**La lectura lateral NO cuenta para esa regla (v8, F-033).** Se puede lanzar
+en paralelo con el pull incremental y con otra lectura lateral, del mismo
+negocio, sin coordinarla con nada de lo anterior. El motivo por el que existe
+la regla de «un solo pull en vuelo» —`findMany` y `updateMany` no son
+atómicos entre sí, así que dos pollers pueden entregar el mismo pedido dos
+veces— no aplica aquí: una lectura lateral nunca marca `PULLED`, así que no
+hay entrega que duplicar ni que perder. **Lo que sí puede pasar:** dos
+lecturas laterales simultáneas pueden ver **estados distintos del mismo
+pedido**, porque cada una aplica los dos vencimientos por su cuenta y el
+pedido cuyo reloj expira justo entre las dos sale `AWAITING_CUSTOMER` en una y
+`CANCELLED` en la otra. No es una carrera que haya que evitar ni un bug que
+reportar: es el reloj, y la respuesta más reciente es siempre la que vale.
 
 **La credencial de suscripción.** El POS la pide presentando el mismo bearer
 por negocio que ya usa en `/api/internal/*` — no hay autenticación nueva que
@@ -1407,6 +1680,29 @@ Tres cosas más, aparte de la columna:
    tienda que un humano configuró a mano por SQL antes de esta versión —
    ver «omitir no es apagar» en [ADR 0028](adr/0028-configuracion-de-compra-del-pos.md).
 
+### De la v9 (F-022) — si mandáis calendario, con esta forma; si no, no cambia nada
+
+No hay columna nueva que pedir en `Tienda`: `horario` (o como se llame ya en
+vuestro schema) es vuestro y sigue siéndolo. Lo que cambia es lo que
+queandabuscando acepta cuando lo mandéis.
+
+1. **Si ya emitís `openingHours` con otra forma, tenéis que migrar a la de
+   arriba** (§ «Cambios respecto a la v8»): objeto con `version: 1` y las
+   siete claves de día, cada una con 0 a 4 ventanas `{from, to}` en `"HH:MM"`.
+   Un valor que no cumpla el formato hace fallar **ese evento entero** —
+   incluidos los demás campos que viajaran con él— con
+   `STORE_OPENING_HOURS_INVALID` en el `207 failed[]`.
+2. **Si nunca habéis mandado `openingHours`, no tenéis que hacer nada.**
+   Omitirlo sigue dejando la columna intacta en queandabuscando, igual que
+   siempre.
+3. **No mandéis una clave `timezone` dentro de `openingHours` ni en el
+   `payload` de `STORE`.** La zona horaria de la tienda es un dato del
+   panel de administración de queandabuscando, no del POS; si la mandáis de
+   todos modos, se descarta sin error.
+4. **El umbral de stock bajo sigue sin viajar.** Nada que cambiar de este
+   lado: seguid calculando el enum `Availability` con vuestro propio umbral,
+   como hasta ahora.
+
 ### De las versiones anteriores
 
 Todos aditivos y nullable, así que la migración no reescribe tablas — importante
@@ -1455,6 +1751,7 @@ Más: el índice parcial de divergencia con `CREATE INDEX CONCURRENTLY`, el cron
 | **Un POS todavía en v5 ignora el `409 ORDER_DELIVERY_NOT_QUOTED`**                                 | Sus pedidos con el envío sin cotizar **no avanzan**: cada intento de `READY`/`IN_TRANSIT`/`DELIVERED` se rechaza y, si el POS no mira el código de respuesta, el pedido se queda quieto sin ningún error visible en su lado hasta que vence solo | Cotizar por `POST /orders/proposal` antes de despachar, y tratar el `409` como «falta cotizar», no como un fallo transitorio que se reintenta                           |
 | **Un POS todavía en v5 lee el `deliveryFee: "0.00"` de un pedido sin cotizar como «envío gratis»** | **Cobra de menos**, en silencio y en todos los pedidos de las tiendas con envío cotizado: el importe del envío nunca llega a la venta                                                                                                            | Leer `deliveryFeePending` antes de usar `deliveryFee`. No hay error HTTP que avise: es un fallo del lado del POS y solo se ve en la caja                                |
 | **Un POS todavía en v4 no reconoce `AWAITING_CUSTOMER`/`IN_TRANSIT`/`REJECTED_BY_STORE`**          | Un `switch` exhaustivo sobre `status` se rompe al primer pedido en uno de los tres estados nuevos — no hay error HTTP que avise, es un fallo del lado del POS                                                                                    | Migrar el lector del enum antes de recibir tráfico real. No hay periodo de convivencia: mismo corte que la v3/v4 (F-019)                                                |
+| **Dos lecturas laterales simultáneas del mismo negocio (v8, F-033)**                               | Pueden ver **estados distintos del mismo pedido** si su vencimiento cae justo entre las dos — `AWAITING_CUSTOMER` en una, `CANCELLED` en la otra                                                                                                 | No es un fallo ni hay nada que reintentar: cada lectura aplicó el reloj en su propio instante y la respuesta más reciente es la que vale                                |
 
 ---
 

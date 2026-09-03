@@ -231,6 +231,16 @@ se entera si alguien lo borra de un panel.
 4. **Aplicar la política RLS de Realtime en el editor SQL del proyecto** (§4,
    paso 2). Sin ella, RLS deniega a todo el mundo — falla **cerrado**, no
    abierto: nadie oye el timbre, y el sistema entero degrada a solo cron.
+5. **Comprobar una vez, en un preview, que el ICU del runtime trae el juego
+   completo de zonas horarias** (F-022, `AP2`). `Store.timezone` se valida
+   contra `Intl.supportedValuesOf("timeZone")`, y una lista recortada
+   rechazaría zonas legítimas en vez de mentir en silencio. El CI ya cubre la
+   mitad que puede — un test afirma que el default (`America/Havana`) está en
+   la lista y que la lista pasa de 300 entradas —, pero corre en la máquina
+   del runner, que no es la que sirve las peticiones. Medido aquí para tener
+   contra qué comparar: en este repo, Node 24.13.1 con ICU 78.2 devuelve
+   **418** zonas e incluye `America/Havana`. Si el runtime de despliegue trae
+   menos, es una pregunta nueva para el humano, no un ajuste silencioso.
 
 ---
 
@@ -345,6 +355,24 @@ de Postgres; no se implementa mientras el dato real siga tan lejos del techo.
    ese motivo escribirla a mano por SQL ya no es el camino — mientras
    cuadrecaja no la emita para un negocio, esa tienda simplemente se comporta
    con los valores por defecto de la columna hasta que el POS la alcance.
+6. **⚠ La zona horaria de la tienda se cambia a mano mientras el panel no
+   tenga editor (F-022; el editor es F-011).** `Store.timezone` es un
+   identificador IANA (`America/Havana`, `America/New_York`,
+   `Europe/Madrid`…), es del panel de administración —el POS nunca la
+   manda— y por defecto **todas** las tiendas nacen en `America/Havana`. Un
+   negocio en otro huso hay que corregirlo al darlo de alta:
+
+   ```sql
+   UPDATE "Store" SET timezone = 'America/New_York' WHERE id = '<storeId>';
+   ```
+
+   Tiene que ser un valor que `Intl.supportedValuesOf("timeZone")` reconozca
+   tal cual, sensible a mayúsculas (`america/new_york` o `EST5EDT` no
+   sirven, aunque `Intl` los acepte para otros usos) — si no, la tienda deja
+   de poder publicarse o republicarse (`STORE_TIMEZONE_INVALID`) hasta que se
+   corrija. El horario de apertura (`openingHours`, del sync) se lee **en
+   esta zona**, así que cambiarla cambia cómo se interpreta el calendario
+   desde ese momento, nunca hacia atrás.
 
 ---
 
