@@ -22,6 +22,8 @@ import { StoreTrail } from "@/components/store/StoreTrail";
 import { BranchBar } from "@/components/store/BranchBar";
 import { BranchList } from "@/components/store/BranchList";
 import { StoreSearchBox } from "@/components/store/StoreSearchBox";
+import { StoreHoursNotice } from "@/components/store/StoreHoursNotice";
+import { readWeeklySchedule } from "@/lib/openingHours";
 
 /**
  * Pre-render every published store at build time. New stores that appear later
@@ -144,6 +146,11 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
   ]);
 
   const trail = catalogTrail(branchTrailStore(resolution, store));
+  // F-022 R8/E8/E9: only reached in the PUBLISHED branch (the closed branch
+  // returns earlier, above). `readWeeklySchedule` returns `null` for both
+  // "no horario" and "horario ilegible" (E8, E12), and then nothing new is
+  // painted — the page stays byte-for-byte what it was before this feature.
+  const weeklySchedule = readWeeklySchedule(store.openingHours);
 
   return (
     <>
@@ -155,6 +162,7 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
       />
       <Container className="pt-4 pb-8">
         <StoreTrail trail={trail} jsonLd />
+        {weeklySchedule && <StoreHoursNotice schedule={weeklySchedule} />}
         <StoreSearchBox storeSlug={store.canonicalSlug} storeName={store.name} />
         <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold">Catálogo</h1>

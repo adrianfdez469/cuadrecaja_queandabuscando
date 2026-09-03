@@ -385,6 +385,11 @@ describe("saveProduct() — purging removed images (F-023 R9/R14)", () => {
 
 describe("setStoreEnabled()", () => {
   it("publishes and clears the disabled columns, then revalidates (HD10)", async () => {
+    // F-022 R12: the `enabled: true` branch now reads `timezone` before
+    // writing — a canonical value here is what lets the flip through,
+    // exercising the gate rather than bypassing it (impl.md § Qué necesita
+    // quien pruebe).
+    storeFindUnique.mockResolvedValue({ timezone: "America/Havana" });
     storeUpdate.mockResolvedValue({
       id: "store-1",
       slug: null,
@@ -434,6 +439,10 @@ describe("setStoreEnabled()", () => {
   });
 
   it("returns not_found and never revalidates when the row vanished (P2025)", async () => {
+    // F-022: the timezone read must find a row (so this exercises the
+    // UPDATE's own P2025, not the new "no row to read" early return, which
+    // has its own case right below).
+    storeFindUnique.mockResolvedValue({ timezone: "America/Havana" });
     storeUpdate.mockRejectedValue({ code: "P2025" });
 
     const result = await setStoreEnabled("store-1" as never, { enabled: true });
@@ -442,7 +451,53 @@ describe("setStoreEnabled()", () => {
     expect(revalidateStores).not.toHaveBeenCalled();
   });
 
+  it("F-022 E5: returns not_found when the row vanished BEFORE the timezone read itself", async () => {
+    storeFindUnique.mockResolvedValue(null);
+
+    const result = await setStoreEnabled("store-1" as never, { enabled: true });
+
+    expect(result).toEqual({ kind: "not_found" });
+    expect(storeUpdate).not.toHaveBeenCalled();
+  });
+
+  it("F-022 E5/R12: an unreadable timezone returns invalid_timezone and never writes", async () => {
+    storeFindUnique.mockResolvedValue({ timezone: "Nowhere/Nothing" });
+
+    const result = await setStoreEnabled("store-1" as never, { enabled: true });
+
+    expect(result).toEqual({ kind: "invalid_timezone" });
+    expect(storeUpdate).not.toHaveBeenCalled();
+    expect(revalidateStores).not.toHaveBeenCalled();
+  });
+
+  it("F-022 E5: closing (enabled: false) never reads timezone and always works, even with an unreadable zone on file", async () => {
+    storeFindUnique.mockResolvedValue({ timezone: "Nowhere/Nothing" });
+    storeUpdate.mockResolvedValue({
+      id: "store-1",
+      slug: null,
+      storefront: { slug: "tienda-demo", stores: [{ id: "store-1" }] },
+      status: "SUSPENDED",
+      disabledReasonCode: "VACACIONES",
+      disabledMessage: "Volvemos el 5",
+      disabledAt: new Date("2026-08-27T00:00:00.000Z"),
+    });
+
+    const result = await setStoreEnabled("store-1" as never, {
+      enabled: false,
+      reasonCode: "VACACIONES",
+      message: "Volvemos el 5",
+    });
+
+    expect(result.kind).toBe("saved");
+    expect(storeFindUnique).not.toHaveBeenCalled();
+  });
+
   it("single-branch brand: never calls revalidateSlugs (nothing about a selector exists to go stale)", async () => {
+    // F-022: without this, the `enabled: true` branch's timezone read
+    // resolves `undefined` and returns `not_found` BEFORE reaching
+    // `storeUpdate` — the assertion below would then pass vacuously, on a
+    // call that never happened, rather than on the real single-branch path.
+    storeFindUnique.mockResolvedValue({ timezone: "America/Havana" });
     storeUpdate.mockResolvedValue({
       id: "store-1",
       slug: null,

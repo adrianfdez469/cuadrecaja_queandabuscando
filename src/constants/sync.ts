@@ -21,3 +21,23 @@ export const CANONICAL_BARCODE_INSERT_CHUNK = 1000;
  * as the `207` `failed[].error` when the row is what makes it contradictory.
  */
 export const STORE_DELIVERY_CONFIG_INCONSISTENT = "STORE_DELIVERY_CONFIG_INCONSISTENT";
+
+/**
+ * F-022 E10/SP3: a `STORE` event whose `openingHours` does not match the
+ * format `src/lib/openingHours.ts` validates. Thrown by
+ * `assertOpeningHoursValid` in `src/features/sync/server/handlers/store.ts`,
+ * BEFORE the write it guards — the same pattern as
+ * `STORE_DELIVERY_CONFIG_INCONSISTENT` above. That event fails whole: none
+ * of its other fields (a corrected `name` or `phone`) apply either, and the
+ * rest of the batch still does.
+ */
+export const STORE_OPENING_HOURS_INVALID = "STORE_OPENING_HOURS_INVALID";
+
+/**
+ * F-022 R12: `Store.timezone` fails `isCanonicalTimeZone` (`src/lib/timezone.ts`)
+ * at the moment a `STORE` event would set `status: "PUBLISHED"` (create, or
+ * republish when the opt-in flips). The row's zone never becomes readable by
+ * this event alone — only a corrected `UPDATE` (docs/despliegue.md, while
+ * F-011 has no editor) fixes it.
+ */
+export const STORE_TIMEZONE_INVALID = "STORE_TIMEZONE_INVALID";

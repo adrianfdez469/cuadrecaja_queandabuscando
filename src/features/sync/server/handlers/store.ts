@@ -2,7 +2,14 @@ import { prisma } from "@/lib/prisma";
 import { canonicalSlug } from "@/lib/publicSlug";
 import { createStorefrontWithStore, expandBrandTouch } from "@/features/storefront/server/registry";
 import { isDeliveryConfigInconsistent, type DeliveryConfig } from "@/features/orders/deliveryOffer";
-import { STORE_DELIVERY_CONFIG_INCONSISTENT } from "@/constants/sync";
+import {
+  STORE_DELIVERY_CONFIG_INCONSISTENT,
+  STORE_OPENING_HOURS_INVALID,
+  STORE_TIMEZONE_INVALID,
+} from "@/constants/sync";
+import { DEFAULT_STORE_TIMEZONE } from "@/constants/storeHours";
+import { isCanonicalTimeZone } from "@/lib/timezone";
+import { openingHoursSchema } from "@/lib/openingHours";
 import {
   effectiveDeliveryConfig,
   NEW_STORE_DELIVERY_BASELINE,
@@ -76,6 +83,9 @@ export async function handleStore(
       sourceUpdatedAt: true,
       sourceOptIn: true,
       businessId: true,
+      // F-022 R12: read for free here so the republish path can gate
+      // `status: "PUBLISHED"` without a second round-trip.
+      timezone: true,
       // F-032 (architecture.md § Flujo de datos): the R8 guard's "effective
       // value" (R7) needs the row's OWN config when the payload only touches
       // part of the triad — free on this query, it already reads the row.
@@ -173,6 +183,14 @@ export async function handleStore(
     ...(payload.openingHours == null ? {} : { openingHours: payload.openingHours as object }),
   };
 
+  // F-022 E10/SP3: a malformed calendar fails THIS event only, before either
+  // write below applies it — the same pattern as `assertDeliveryConsistent`.
+  // `storePayloadSchema.openingHours` stays `z.unknown().nullish()`: this
+  // check cannot live in the payload's batch-level schema, which would
+  // reject the whole batch with a 400 and write no `SyncEvent` at all
+  // (`src/app/api/internal/sync/catalog/route.ts:31-37`).
+  assertOpeningHoursValid(payload.openingHours);
+
   if (!existing) {
     // E13: a brand-new store is checked against the DEFAULTS the column
     // would apply, not against nothing — a payload that only sets
@@ -180,6 +198,13 @@ export async function handleStore(
     // as inconsistent as it would be against `FLAT_RATE`/`NULL` on an
     // existing row.
     assertDeliveryConsistent(config, NEW_STORE_DELIVERY_BASELINE);
+    // R12: a brand-new row has not written its own zone yet, so what is
+    // ABOUT to publish is the column's default — checked as a constant, kept
+    // honest by the caso límite 1 test that the default is itself a value
+    // `isCanonicalTimeZone` accepts.
+    if (!isCanonicalTimeZone(DEFAULT_STORE_TIMEZONE)) {
+      throw new SyncEventFailure(STORE_TIMEZONE_INVALID);
+    }
     // E9/HS2: the brand and its first branch are created in ONE nested
     // write. `payload.slug` travels as a DERIVATION SEED, never as a
     // proposal — a sync event must never fail over an unfortunate name
@@ -220,6 +245,14 @@ export async function handleStore(
   // stay exactly what they are.
   assertDeliveryConsistent(config, rowDeliveryConfig(existing));
   const optInChanged = existing.sourceOptIn !== true;
+  // R12: only checked when `data` below is about to carry
+  // `status: "PUBLISHED"` — a routine event (a new phone number) on a store
+  // already published with an unreadable zone must NOT fail, same doctrine
+  // as `assertDeliveryConsistent` not failing when `config` does not touch
+  // the triad.
+  if (optInChanged && !isCanonicalTimeZone(existing.timezone)) {
+    throw new SyncEventFailure(STORE_TIMEZONE_INVALID);
+  }
   const updated = await prisma.store.update({
     where: { id: existing.id },
     data: {
@@ -301,5 +334,20 @@ function assertDeliveryConsistent(config: StoreConfigWrite, fallback: DeliveryCo
   if (!touchesTriad) return;
   if (isDeliveryConfigInconsistent(effectiveDeliveryConfig(config, fallback))) {
     throw new SyncEventFailure(STORE_DELIVERY_CONFIG_INCONSISTENT);
+  }
+}
+
+/**
+ * F-022 E10/R9/SP3: `openingHours` is validated by the SAME strict schema
+ * the reader tolerates (`src/lib/openingHours.ts`). `null`/`undefined`
+ * leaves the column intact (caso límite 9) and is not an error. A value that
+ * fails the schema fails THIS event alone, before the write that would apply
+ * it — like `assertDeliveryConsistent` above, never at the top of the
+ * function.
+ */
+function assertOpeningHoursValid(value: unknown): void {
+  if (value == null) return;
+  if (!openingHoursSchema.safeParse(value).success) {
+    throw new SyncEventFailure(STORE_OPENING_HOURS_INVALID);
   }
 }

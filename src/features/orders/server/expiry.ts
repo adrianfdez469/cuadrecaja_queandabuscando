@@ -92,3 +92,25 @@ export function expireUnquotedDeliveryOrdersQuery(businessId?: string) {
        ${scope}
   `);
 }
+
+/**
+ * F-033 DA2: toda lectura de pedidos del POS —el pull incremental y las dos
+ * lecturas laterales— barre primero y lee después, en la MISMA
+ * `$transaction([...])` en forma de array (nunca el callback interactivo,
+ * ficha `pooler-transaccion-deadlock`). `read` llega SIN `await`: una
+ * promesa ya resuelta no es una `PrismaPromise` y no se puede transaccionar
+ * — el compilador lo rechaza, que es justo el punto. Ir primero es lo que
+ * deja que `read` vea su propia escritura: el POS nunca recibe un
+ * `AWAITING_CUSTOMER` que esta misma llamada acaba de vencer (R8).
+ */
+export async function readAfterExpirySweeps<T>(
+  businessId: string,
+  read: Prisma.PrismaPromise<T>,
+): Promise<T> {
+  const [, , rows] = await prisma.$transaction([
+    expireProposalsQuery(businessId),
+    expireUnquotedDeliveryOrdersQuery(businessId),
+    read,
+  ]);
+  return rows;
+}

@@ -14,6 +14,8 @@ import {
   recordCanonicalBarcodes,
 } from "../src/features/sync/server/canonicalBarcodes";
 import { mintSyncToken } from "../src/lib/syncAuth";
+import { OPENING_HOURS_VERSION } from "../src/constants/storeHours";
+import type { OpeningHours } from "../src/lib/openingHours";
 import { detectImageMime, extensionForMime, isAllowedImageMime } from "../src/lib/imageType";
 import { encodeImageVariants } from "../src/lib/imageEncoder";
 import { publicUrlFor, storageAvailability, uploadStoreObjects } from "../src/lib/supabase/storage";
@@ -36,6 +38,28 @@ if (!connectionString) throw new Error("DATABASE_URL is not set — see .env.exa
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
 const now = new Date();
+
+/**
+ * F-022 caso límite 5, design.md § La presentación de la semana, "Caso 3":
+ * two windows in one day, a closed day, a window crossing midnight (Friday)
+ * and a 24-hour day (Saturday) — the irregular week the visual stage needs
+ * to see every compaction branch and every clock edge at once.
+ */
+const DEMO_OPENING_HOURS: OpeningHours = {
+  version: OPENING_HOURS_VERSION,
+  days: {
+    mon: [{ from: "09:00", to: "18:00" }],
+    tue: [
+      { from: "09:00", to: "13:00" },
+      { from: "15:00", to: "18:00" },
+    ],
+    wed: [],
+    thu: [{ from: "09:00", to: "18:00" }],
+    fri: [{ from: "22:00", to: "02:00" }],
+    sat: [{ from: "00:00", to: "24:00" }],
+    sun: [],
+  },
+};
 
 const CURRENCIES = [
   { code: "CUP", name: "Peso cubano", symbol: "$" },
@@ -369,6 +393,7 @@ async function main() {
     checkoutMode: "WHATSAPP",
     deliveryEnabled: false,
     deliveryFee: null,
+    openingHours: DEMO_OPENING_HOURS,
     products: DEMO_PRODUCTS,
     categories,
     globalCategories,
@@ -723,6 +748,11 @@ async function seedStore(input: {
   checkoutMode: "WHATSAPP" | "ONSITE";
   deliveryEnabled: boolean;
   deliveryFee: string | null;
+  /** F-022 caso límite 5: only `tienda-demo` sets this, so the visual stage
+   *  has a real calendar to look at — including a window that crosses
+   *  midnight. `timezone` is left untouched: the column's default is
+   *  already the correct one for every seeded store. */
+  openingHours?: OpeningHours;
   products: SeedProduct[];
   categories: Map<string, string>;
   /** F-021 (SP3): name -> GlobalCategory id, so `upsertCanonical` can assign

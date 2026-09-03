@@ -256,6 +256,10 @@ model Store {
   longitude Decimal? @db.Decimal(9, 6)
 
   openingHours Json?
+  /// F-022 R1: IANA canonical, owned by the PANEL. The POS never sends this
+  /// and a `timezone` key in a STORE payload is discarded without error
+  /// (E11).
+  timezone     String @default("America/Havana")
 
   checkoutMode     CheckoutMode    @default(WHATSAPP)
   deliveryEnabled  Boolean         @default(false)

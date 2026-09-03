@@ -62,6 +62,14 @@ export type StoreSummary = {
   disabledReasonCode: string | null;
   disabledMessage: string | null;
   disabledAt: Date | null;
+  /** F-022 R1: canonical IANA identifier, owned by the panel. Raw — nothing
+   *  here validates it again; `isCanonicalTimeZone` already gates it before
+   *  a row can be `PUBLISHED`. */
+  timezone: string;
+  /** F-022: the calendar exactly as the column carries it — `null` most of
+   *  the time (E8). `readWeeklySchedule` is what turns this into the seven
+   *  ordered rows the cartel paints; this type never does that itself. */
+  openingHours: unknown;
 };
 
 export type CatalogProduct = {
@@ -119,6 +127,8 @@ async function loadStore(storeId: string): Promise<StoreSummaryWithoutCanonical 
       disabledReasonCode: true,
       disabledMessage: true,
       disabledAt: true,
+      timezone: true,
+      openingHours: true,
       business: { select: { baseCurrencyCode: true } },
       storefront: {
         select: {
@@ -163,6 +173,8 @@ async function loadStore(storeId: string): Promise<StoreSummaryWithoutCanonical 
     disabledReasonCode: store.disabledReasonCode,
     disabledMessage: store.disabledMessage,
     disabledAt: store.disabledAt,
+    timezone: store.timezone,
+    openingHours: store.openingHours,
   };
 }
 

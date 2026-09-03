@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildSearchDocument } from "@/lib/canonical";
+import { PANEL_PRODUCT_COLUMNS } from "@/constants/admin";
 
 /**
  * Criterio 3, escrito por primera vez: `handleProduct` de `UPDATE` no toca
@@ -114,14 +115,12 @@ beforeEach(() => {
   reindexStoreProductsOfCanonicalMock.mockReset().mockResolvedValue(1);
 });
 
-const PANEL_COLUMNS = [
-  "description",
-  "imageUrls",
-  "priceOverride",
-  "priceOverrideCurrency",
-  "visible",
-  "featured",
-];
+// F-022 architecture.md § La exhaustividad del criterio 4, punto 5: ONE list,
+// not three — `PANEL_PRODUCT_COLUMNS` is promoted to `src/constants/admin.ts`
+// so this test, `mutations.ts`'s own `PanelProductColumn` type, and
+// `fieldOwnership.test.ts`'s cross-check against the contract document
+// cannot drift apart. Not re-declared here as a literal (AC5).
+const PANEL_COLUMNS: readonly string[] = PANEL_PRODUCT_COLUMNS;
 
 describe("handleProduct() UPDATE", () => {
   it("changes syncedPrice but never touches any of the six panel-owned fields", async () => {
