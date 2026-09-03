@@ -4,6 +4,8 @@ import { canonicalSlug, type PublicSlug } from "@/lib/publicSlug";
 import type { Prisma } from "@/generated/prisma/client";
 import { extensionForMime } from "@/lib/imageType";
 import type { AllowedImageMime, ImageVariantFormat } from "@/constants/media";
+import { PANEL_PRODUCT_COLUMNS } from "@/constants/admin";
+import { isCanonicalTimeZone } from "@/lib/timezone";
 import {
   objectPathOf,
   publicUrlFor,
@@ -54,8 +56,7 @@ import type { ThemeTokens } from "@/features/theming/storeTheme";
  * `setStoreEnabled`'s own `data`, never inside a product write. That is
  * exactly what `boundaries.test.ts`'s inverted assertion checks.
  */
-type PanelProductColumn =
-  "description" | "imageUrls" | "priceOverride" | "priceOverrideCurrency" | "visible" | "featured";
+type PanelProductColumn = (typeof PANEL_PRODUCT_COLUMNS)[number];
 type PanelProductWrite = Pick<Prisma.StoreProductUpdateInput, PanelProductColumn>;
 
 type PanelStoreColumn = "status" | "disabledReasonCode" | "disabledMessage" | "disabledAt";
@@ -396,6 +397,18 @@ export async function setStoreEnabled(
   body: StoreStatusBody,
 ): Promise<AdminWriteResult<AdminStoreRow>> {
   try {
+    // F-022 R12/E5: an unreadable zone must never let a store back into
+    // PUBLISHED. Only the `enabled: true` branch reads this — closing below
+    // reads nothing new and keeps working always, so a bad zone can never
+    // block closing a store (E5).
+    if (body.enabled) {
+      const store = await prisma.store.findUnique({
+        where: { id: storeId },
+        select: { timezone: true },
+      });
+      if (!store) return { kind: "not_found" };
+      if (!isCanonicalTimeZone(store.timezone)) return { kind: "invalid_timezone" };
+    }
     // Two separate calls, each with its own inline `data` object, one per
     // branch — rather than one ternary assigned to a shared `const data` —
     // so each is independently greppable by `boundaries.test.ts`, and only

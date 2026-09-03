@@ -169,4 +169,5 @@ export type AdminWriteResult<T> =
   | { kind: "not_found" } // -> 404: the authorized store was deleted mid-session
   | { kind: "different_business" } // -> 409 (HS8): grouping across businesses
   | { kind: "already_in_brand" } // -> 409 (HS8): nothing to do
+  | { kind: "invalid_timezone" } // -> 409 (F-022 E5, R12): the store's zone is unreadable
   | { kind: "failed" }; // -> 500
