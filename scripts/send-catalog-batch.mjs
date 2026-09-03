@@ -20,6 +20,11 @@
  * `npm run mint:token -- seed-negocio-1`, or the server answers 403
  * BUSINESS_MISMATCH instead of the cases this script means to exercise.
  *
+ * F-034: `QAB_BUSINESS_ID` overrides `businessId` (default unchanged:
+ * `seed-negocio-1`), so this script's own `argv` can stay literal while it
+ * targets a business provisioned by `POST /api/provisioning/credential`
+ * instead of the seed — see spec.md I8, "cómo se ejecuta el criterio 2".
+ *
  * F-024: the `PRODUCT` payload sends `barcodes` (a list), never `barcode` —
  * v4 rejects the singular key outright. `--singular-barcode` deliberately
  * sends the old shape to demonstrate the whole-batch 400 (E10).
@@ -46,7 +51,7 @@ const token = args.has("--bad-token")
   ? "wrong-token-value-that-is-long-enough"
   : (explicitToken ?? process.env.QAB_BEARER_TOKEN);
 
-const businessId = "seed-negocio-1";
+const businessId = process.env.QAB_BUSINESS_ID ?? "seed-negocio-1";
 const storeId = args.has("--unknown-store") ? "no-such-store" : "seed-tienda-1";
 
 // A fixed id when repeating, so the second delivery is recognised as duplicate.
@@ -89,7 +94,7 @@ const productPayload = {
 // F-005 already verifies.
 const storeEvent = args.has("--unknown-store")
   ? null
-  : buildStoreEvent(`evt-store-${suffix}`, { updatedAt, configCase: storeConfigCase });
+  : buildStoreEvent(`evt-store-${suffix}`, { businessId, updatedAt, configCase: storeConfigCase });
 
 const body = {
   businessId,
