@@ -1,7 +1,7 @@
 ---
 propuesta: credenciales-de-integracion
 agente: orquestador
-actualizado: 2026-08-31T00:20:00Z
+actualizado: 2026-09-03T00:00:00Z
 estado: propuesta
 ---
 
@@ -17,15 +17,29 @@ estado: propuesta
 > Origen: conversación con el humano el 2026-08-30. La escribe el orquestador,
 > no `sdd-spec`: no ha pasado por el ciclo de spec.
 
+> **Su primera mitad se aceptó y es F-034 (2026-09-03).** El humano recortó el
+> alcance a **solo el alta** —«enfoquémonos en la primera parte»— y decidió las
+> dos cosas que quedaban abiertas de ella: el disparador y la forma de la
+> credencial (D6, D7, D8 abajo). Lo que **sigue siendo propuesta** es la segunda
+> mitad: la tabla `BusinessCredential`, la rotación con solape y la revocación,
+> o sea el problema 2 de § Problema. Esta propuesta no se archiva por eso —
+> `Business.syncTokenHash` sigue siendo una columna y rotar sigue sin tener
+> solape.
+>
+> Qué se movió a F-034 y qué se quedó aquí está en § El recorte de F-034.
+
 ## Decisiones ya tomadas
 
-| Id     | Decisión                                                                  | Quién y cuándo                                  |
-| ------ | ------------------------------------------------------------------------- | ----------------------------------------------- |
-| **D1** | No hay puerta comercial del lado de QAB. La admisión existe y vive en CC  | humano, 2026-08-30 (SP1)                        |
-| **D2** | Credencial propia para esta ruta, distinta del secreto del SSO            | humano, 2026-08-30 (SP2)                        |
-| **D3** | **No habrá terceros. Siempre serán CC y QAB**                             | humano, 2026-08-30 (SP3) — corrige la versión 2 |
-| **D4** | Firma **asimétrica**: CC firma con su privada, QAB solo guarda la pública | orquestador — **vetable**, ver abajo            |
-| **D5** | El futuro son tiendas nativas de QAB, y **no se prepara terreno ahora**   | humano + orquestador, 2026-08-30                |
+| Id     | Decisión                                                                      | Quién y cuándo                                           |
+| ------ | ----------------------------------------------------------------------------- | -------------------------------------------------------- |
+| **D1** | No hay puerta comercial del lado de QAB. La admisión existe y vive en CC      | humano, 2026-08-30 (SP1)                                 |
+| **D2** | Credencial propia para esta ruta, distinta del secreto del SSO                | humano, 2026-08-30 (SP2)                                 |
+| **D3** | **No habrá terceros. Siempre serán CC y QAB**                                 | humano, 2026-08-30 (SP3) — corrige la versión 2          |
+| **D4** | Firma **asimétrica**: CC firma con su privada, QAB solo guarda la pública     | orquestador — **vetable**, ver abajo                     |
+| **D5** | El futuro son tiendas nativas de QAB, y **no se prepara terreno ahora**       | humano + orquestador, 2026-08-30                         |
+| **D6** | El alcance se parte: **solo el alta** es F-034; rotación y solape siguen aquí | humano, 2026-09-03                                       |
+| **D7** | El disparador es el superadministrador de CC, **una vez por negocio**         | humano, 2026-09-03 — cierra la ambigüedad de § La trampa |
+| **D8** | **D4 queda vetado para F-034**: secreto simétrico en una cabecera             | humano, 2026-09-03 (SP7)                                 |
 
 **D4 dejó de ser una consecuencia forzada y es ahora un juicio de valor.** Su
 argumento tenía dos patas y D3 le quitó una:
@@ -111,6 +125,46 @@ admitía una ruta y nada más.
   ni payload.
 - **Borrar `scripts/mint-sync-token.ts`.** Un aprovisionamiento que solo
   funciona si CC está bien configurado no es una vía de rescate.
+
+## El recorte de F-034
+
+D6 partió esta propuesta en dos. Lo que se construye ahora, y lo que se queda
+esperando:
+
+| Pieza                                               | Dónde vive ahora                     |
+| --------------------------------------------------- | ------------------------------------ |
+| Una ruta que da de alta el negocio y acuña su token | **F-034**                            |
+| Crear el `Business` si no existe (D1)               | **F-034**                            |
+| Idempotencia: registrar no rota jamás (R3)          | **F-034**                            |
+| El token en claro una sola vez (R1, R2)             | **F-034**                            |
+| Credencial propia, distinta del SSO (D2)            | **F-034**, ya como secreto simétrico |
+| Tabla `BusinessCredential`                          | sigue aquí                           |
+| Rotación con solape y revocación (E3, E4, E5, R9)   | sigue aquí                           |
+| Retirar `Business.syncTokenHash`                    | sigue aquí                           |
+| `resolveCaller()` contra la tabla                   | sigue aquí                           |
+| El HMAC de ADR 0008 (SP5)                           | sigue aquí, sin decidir              |
+
+**Qué cambia D7 en § La trampa.** Esa sección daba por hecho que el disparador
+era «el administrador abre su tienda», o sea una llamada **por sucursal**. El
+humano decidió lo contrario: lo dispara el superadministrador de cuadrecaja **una
+vez por negocio**. El argumento del segundo `upsert` que rompe el sync de la
+primera sucursal, por tanto, **no aplica a F-034** — pero R3 sigue siendo
+obligatoria por una razón más simple: un reintento de CC (timeout, respuesta
+perdida, doble pulsación) invalidaría el token que la primera llamada ya
+entregó. La regla es la misma; el motivo que la sostiene, no.
+
+**Qué cambia D8.** Con el alcance recortado a una sola acción sin consecuencias
+destructivas, la firma asimétrica dejó de pagar su complejidad: no hay `action`
+que proteger dentro de un JWT, no hay rotación que un tercero pudiera disparar, y
+el equipo es el mismo a los dos lados. F-034 usa un secreto compartido en una
+cabecera, comparado en tiempo constante. **Si algún día se le añade la rotación
+de esta propuesta, D8 se reabre**: ahí sí hay tres acciones con consecuencias
+distintas y quién decide cuál debería ser el firmante, no el transporte.
+
+**Lo que F-034 no puede hacer, y esta propuesta sí preveía.** Devolver el token
+de un negocio que ya lo tiene. Sin la tabla no hay solape, así que la única forma
+de darle a CC un token que perdió sigue siendo rotar con corte, desde el guion.
+Es la arruga conocida del recorte y está anotada en el `spec.md` de F-034.
 
 ## La trampa que hace que esto no sea trivial
 
