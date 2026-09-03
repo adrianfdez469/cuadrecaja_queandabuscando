@@ -1,6 +1,6 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 9** · 3 de septiembre de 2026
+**Versión 10** · 3 de septiembre de 2026
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
 existe y está verificado contra los casos de abajo, **con una excepción marcada
@@ -30,6 +30,60 @@ delante es lo que implementó.
 
 Una corrección de tipografía o de un enlace roto es una menor: cuesta un dígito
 y evita la pregunta «¿es este el documento que leí?».
+
+## Cambios respecto a la v9
+
+Sube como **mayor** por un endpoint nuevo — § Versionado lo llama mayor «sea
+aditivo o no» — y esta lo es de verdad: **ninguna de las siete rutas de
+arriba cambia de forma ni de significado**, y un token de negocio acuñado
+antes de esta versión sigue valiendo exactamente igual.
+
+**El alta de un negocio deja de exigir un acto manual del lado de
+queandabuscando.** Hasta la v9, la única forma de que un negocio existiera y
+tuviera token era `npm run mint:token -- <externalId>`, ejecutado desde una
+terminal con acceso a la base de producción de queandabuscando — un paso
+fuera de este contrato, y una cita entre los dos equipos por cada comercio
+nuevo. La v10 abre una octava ruta, **`POST /api/provisioning/credential`**,
+que cuadrecaja puede llamar sola: dado un `externalId` (el `Negocio.id`),
+crea el `Business` si no existe y acuña su token, devolviéndolo en claro
+**una sola vez**. Ver § «Aprovisionamiento de negocios» para el cuerpo, las
+dos respuestas y su propia tabla de códigos — deliberadamente **fuera** de
+la tabla de § Endpoints y del alcance de § Vocabulario de errores: tiene
+otra autenticación (un secreto de integrador, no un token de negocio) y otro
+vocabulario.
+
+**Lo que esto NO cambia:**
+
+- El guion sigue existiendo, sin cambios de comportamiento, como vía de
+  rescate y como la **única** forma de rotar un token — la ruta nueva nunca
+  rota, solo acuña una vez (ver § «Aprovisionamiento de negocios»).
+- Un negocio que **ya** tiene token no puede pedir otro por esta vía. Si
+  cuadrecaja pierde el valor, la recuperación sigue siendo rotar con corte
+  (§ Modos de falla).
+- El secreto de aprovisionamiento **no** autentica ninguna de las siete
+  rutas de sync, y ningún token de negocio autentica la ruta de
+  aprovisionamiento. Son dos credenciales con sujetos distintos —ver
+  [ADR 0029](adr/0029-alta-de-negocio-por-api.md)— y ninguna sirve en el
+  sitio de la otra.
+
+**Dos correcciones a frases de este documento que ya eran falsas antes de
+esta versión**, aprovechando que hay que tocar § Autenticación de todos
+modos:
+
+- **«No hay ninguna variable de entorno compartida entre los dos
+  proyectos»** (§ Autenticación) ya era inexacta desde que existe
+  `SSO_JWT_SECRET`, que tiene que valer lo mismo en los dos lados
+  (`docs/despliegue.md` § 5). La v10 la corrige y de paso documenta el
+  reparto del secreto de aprovisionamiento, que es la segunda variable
+  compartida entre los dos proyectos, con una salvedad: lo que viaja igual
+  a los dos lados es el secreto en claro (`SSO_JWT_SECRET`) o el
+  aprovisionamiento (`QAB_PROVISIONING_SECRET` en cuadrecaja); el token de
+  **negocio** sigue sin tener ninguna variable compartida — cada negocio
+  guarda el suyo, en su propia configuración.
+- **«Válido para las siete rutas de arriba»** (§ Vocabulario de errores) se
+  queda corta desde que hay una octava ruta. La v10 la acota explícitamente
+  a las siete rutas de sync — la de aprovisionamiento tiene su propio
+  vocabulario, en su propia sección.
 
 ## Cambios respecto a la v8
 
@@ -402,10 +456,29 @@ solo su SHA-256. Bearer largo y aleatorio en `Authorization`:
 Authorization: Bearer <token del negocio>
 ```
 
-Rotarlo (re-acuñarlo) invalida al instante el valor viejo de ESE negocio y no
-afecta a ningún otro. No hay ninguna variable de entorno compartida entre los
-dos proyectos: cada negocio guarda su propio token en su propia
-configuración, del lado de cuadrecaja.
+**Por dónde se acuña (v10).** Dos vías, no una:
+
+1. **`POST /api/provisioning/credential`** (§ «Aprovisionamiento de
+   negocios»), autenticada con un secreto de integrador propio —no el token
+   de ningún negocio—, que cuadrecaja llama sola para dar de alta un negocio
+   nuevo o acuñar el token de uno que ya existe sin token. Es el camino
+   normal desde la v10.
+2. **`npm run mint:token -- <externalId>`**, ejecutado por un desarrollador
+   de queandabuscando desde una terminal con acceso a su base. Sigue
+   existiendo sin cambios, como vía de rescate y como la **única** forma de
+   **rotar** un token que ya existe — la vía 1 nunca rota (§
+   «Aprovisionamiento de negocios»).
+
+Rotarlo (re-acuñarlo, siempre por la vía 2) invalida al instante el valor
+viejo de ESE negocio y no afecta a ningún otro. **No hay ninguna variable de
+entorno compartida entre los dos proyectos para el token de negocio**: cada
+negocio guarda el suyo en su propia configuración, del lado de cuadrecaja —
+la frase de las versiones anteriores decía esto sin la acotación final, y ya
+era inexacta: `SSO_JWT_SECRET` (`docs/despliegue.md` § 5) tiene que valer lo
+mismo en los dos proyectos, y desde la v10 también el secreto de
+aprovisionamiento viaja en claro a cuadrecaja (queandabuscando solo guarda su
+SHA-256, `PROVISIONING_SECRET_SHA256`) — dos variables compartidas que no
+tienen nada que ver con el token de ningún negocio en particular.
 
 `/api/internal/*` queda fuera del rate limiting público y excluido de
 `robots.txt`. Si **ningún** negocio tiene un token acuñado todavía, el
@@ -437,9 +510,17 @@ toca ninguna ruta.
 | `GET`  | `/api/internal/reconciliation?storeId=`                | —                                  | 200 `{ products, hash }`                                                         |
 | `GET`  | `/api/internal/slug-availability?slug=&name=&storeId=` | —                                  | 200 `{ candidate, available, reason, resolvedSlug, url, storeKnown, reserving }` |
 
+**La octava ruta, `POST /api/provisioning/credential` (v10), vive fuera de
+esta tabla a propósito**: da de alta negocios, no sincroniza los que ya
+existen, se autentica con un secreto de integrador distinto del token de
+negocio, y su vocabulario de errores es el suyo — nunca el de la tabla de
+abajo. Ver § «Aprovisionamiento de negocios».
+
 ### Vocabulario de errores (v9)
 
-Válido para las siete rutas de arriba. Los tres primeros de `503`/`401` ya
+Válido para las siete rutas de arriba — **no** para
+`POST /api/provisioning/credential` (v10), que tiene su propio vocabulario
+en § «Aprovisionamiento de negocios». Los tres primeros de `503`/`401` ya
 existían con otro nombre de variable; los siguientes son de la v3; la fila de
 `400 INVALID_BATCH` es de la v4 (F-024); `409 ORDER_NOT_PROPOSABLE` y
 `400 CURRENCY_MISMATCH` son de la v5 (F-019), propias de
@@ -473,6 +554,96 @@ Un recurso de otro negocio nunca responde distinto de uno inexistente: ni
 `/orders/status`, ni `/reconciliation`, ni `/slug-availability` (que además
 responde `storeKnown: false`, nunca un error) sirven para averiguar si un
 `Tienda.id` o un pedido existen en OTRO negocio.
+
+---
+
+## Aprovisionamiento de negocios (v10)
+
+**`POST /api/provisioning/credential`.** Da de alta un negocio y acuña su
+token de sync — el reemplazo de la sesión manual de terminal que las
+versiones anteriores de este documento no describían (§ «Cambios respecto a
+la v9»). Quien la dispara es el **superadministrador de cuadrecaja**, una
+vez **por negocio**, nunca por sucursal.
+
+**Autenticación, distinta de la del resto del contrato.** No es un token de
+negocio: es un secreto de integrador, compartido una sola vez entre los dos
+equipos, que identifica a **cuadrecaja**, no a ningún `Business` en
+particular.
+
+```
+Authorization: Bearer <secreto de aprovisionamiento, en claro>
+Content-Type: application/json
+```
+
+Ninguna de las siete rutas de sync acepta este secreto, y esta ruta no
+acepta ningún token de negocio — son credenciales de sujetos distintos
+([ADR 0029](adr/0029-alta-de-negocio-por-api.md)).
+
+**Cuerpo de la petición.**
+
+| Campo        | Tipo     | Obligatorio | Límites                                                                   |
+| ------------ | -------- | ----------- | ------------------------------------------------------------------------- |
+| `externalId` | `string` | **sí**      | no vacío tras recortar espacios, ≤ 128 caracteres                         |
+| `name`       | `string` | no          | no vacío tras recortar espacios, ≤ 200; se ignora si el negocio ya existe |
+
+```jsonc
+{
+  "externalId": "neg-000123", // el Negocio.id de cuadrecaja
+  "name": "Bodega La Rampa", // opcional; si falta, se usa el propio externalId
+}
+```
+
+Cuerpo completo ≤ 4 KB. Claves que este documento no lista se descartan en
+silencio — el típo `external_id` en vez de `externalId` sigue dando `400`,
+porque `externalId` falta.
+
+**Respuesta 201 — se acuñó un token (negocio nuevo o negocio existente sin
+token todavía):**
+
+```jsonc
+{
+  "externalId": "neg-000123",
+  "created": true, // false si el Business ya existía y solo se le acuñó el token
+  "minted": true,
+  "token": "<48 caracteres, la única vez que se ve>",
+}
+```
+
+**Respuesta 200 — el negocio ya tenía un token, y esta llamada no lo
+toca:**
+
+```jsonc
+{
+  "externalId": "neg-000123",
+  "created": false,
+  "minted": false,
+  "token": null,
+}
+```
+
+**Es idempotente y no rota jamás.** Repetir la misma llamada con el mismo
+`externalId` no cambia nada de la fila y no devuelve ningún token — la
+respuesta pasa a ser la `200` de arriba. Si cuadrecaja pierde el token que
+esta ruta le entregó, la única recuperación es rotar con corte desde
+`npm run mint:token -- <externalId>` (§ Modos de falla); esta ruta **no**
+tiene forma de volver a mostrar un token que ya se entregó.
+
+**Códigos de error.**
+
+| Código | Cuerpo                                    | Cuándo                                                                                                                               |
+| ------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `400`  | `{"error":"INVALID_BODY","issues":[...]}` | El cuerpo no es JSON, no llega con `content-type: application/json`, pesa más de 4 KB, o no cumple la forma de arriba                |
+| `401`  | `{"error":"UNAUTHORIZED"}`                | Cabecera `Authorization` ausente, con otro esquema, o con un valor que no es el secreto — el mismo cuerpo en los tres casos          |
+| `403`  | `{"error":"BUSINESS_INACTIVE"}`           | El negocio existe pero está dado de baja (`Business.active = false`). No se acuña y no se reactiva                                   |
+| `405`  | (el del framework)                        | Cualquier método distinto de `POST`                                                                                                  |
+| `503`  | `{"error":"PROVISIONING_NOT_CONFIGURED"}` | queandabuscando no tiene configurado el secreto de aprovisionamiento. Nunca `401`: un secreto ausente no significa «deja pasar todo» |
+| `503`  | `{"error":"TOKEN_COLLISION"}`             | Colisión interna al acuñar el token (extraordinariamente improbable). Nada queda escrito; reintentar                                 |
+
+**Lo que esta ruta no hace.** No revoca, no lista y no borra negocios; no
+hay `DELETE` ni `GET` de inventario. Un `externalId` mal escrito deja una
+fila que solo se limpia por SQL del lado de queandabuscando. Y no es la vía
+para reactivar un negocio dado de baja: `Business.active` se cambia por
+otro camino, ajeno a este contrato.
 
 ---
 
@@ -1739,27 +1910,32 @@ Más: el índice parcial de divergencia con `CREATE INDEX CONCURRENTLY`, el cron
 
 ## Modos de falla
 
-| Falla                                                                                              | Qué le pasa al usuario                                                                                                                                                                                                                           | Recuperación                                                                                                                                                            |
-| -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| La tienda está caída                                                                               | Nada: el POS sigue vendiendo                                                                                                                                                                                                                     | La outbox no se drena, `intentos++`. Se recupera solo                                                                                                                   |
-| El POS está caído                                                                                  | La tienda sirve el último snapshot y **acepta pedidos igual**                                                                                                                                                                                    | Los pedidos esperan a que el POS vuelva a hacer pull                                                                                                                    |
-| El cron no corre                                                                                   | Precios y disponibilidad se atrasan                                                                                                                                                                                                              | La reconciliación lo detecta. Alerta a los 30 min                                                                                                                       |
-| Evento con payload inválido                                                                        | Ese producto queda viejo; el resto fluye                                                                                                                                                                                                         | `intentos > 5` → DLQ + alerta                                                                                                                                           |
-| Se perdió `dispPublicada`                                                                          | Resincroniza todo el stock una vez                                                                                                                                                                                                               | Idempotente, sin intervención                                                                                                                                           |
-| El token de un negocio se filtró                                                                   | Alguien podría escribir catálogo falso a nombre de ESE negocio, ninguno más                                                                                                                                                                      | Re-acuñar el token de ese negocio (invalida el viejo al instante, no toca a los demás). Motivo para pasar a HMAC                                                        |
-| **Un POS todavía en v3 envía `barcode` (singular)**                                                | **No sincroniza catálogo en absoluto**: el lote entero responde `400 INVALID_BATCH` y ni siquiera queda una `SyncEvent` para reintentar — no es un producto el que falla, es el lote completo                                                    | Migrar el payload de `PRODUCT` a `barcodes: string[]` (v4). No hay periodo de gracia ni modo de compatibilidad: es el mismo corte que hizo la v3 en autenticación (HD5) |
-| **Un POS todavía en v5 ignora el `409 ORDER_DELIVERY_NOT_QUOTED`**                                 | Sus pedidos con el envío sin cotizar **no avanzan**: cada intento de `READY`/`IN_TRANSIT`/`DELIVERED` se rechaza y, si el POS no mira el código de respuesta, el pedido se queda quieto sin ningún error visible en su lado hasta que vence solo | Cotizar por `POST /orders/proposal` antes de despachar, y tratar el `409` como «falta cotizar», no como un fallo transitorio que se reintenta                           |
-| **Un POS todavía en v5 lee el `deliveryFee: "0.00"` de un pedido sin cotizar como «envío gratis»** | **Cobra de menos**, en silencio y en todos los pedidos de las tiendas con envío cotizado: el importe del envío nunca llega a la venta                                                                                                            | Leer `deliveryFeePending` antes de usar `deliveryFee`. No hay error HTTP que avise: es un fallo del lado del POS y solo se ve en la caja                                |
-| **Un POS todavía en v4 no reconoce `AWAITING_CUSTOMER`/`IN_TRANSIT`/`REJECTED_BY_STORE`**          | Un `switch` exhaustivo sobre `status` se rompe al primer pedido en uno de los tres estados nuevos — no hay error HTTP que avise, es un fallo del lado del POS                                                                                    | Migrar el lector del enum antes de recibir tráfico real. No hay periodo de convivencia: mismo corte que la v3/v4 (F-019)                                                |
-| **Dos lecturas laterales simultáneas del mismo negocio (v8, F-033)**                               | Pueden ver **estados distintos del mismo pedido** si su vencimiento cae justo entre las dos — `AWAITING_CUSTOMER` en una, `CANCELLED` en la otra                                                                                                 | No es un fallo ni hay nada que reintentar: cada lectura aplicó el reloj en su propio instante y la respuesta más reciente es la que vale                                |
+| Falla                                                                                                            | Qué le pasa al usuario                                                                                                                                                                                                                           | Recuperación                                                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| La tienda está caída                                                                                             | Nada: el POS sigue vendiendo                                                                                                                                                                                                                     | La outbox no se drena, `intentos++`. Se recupera solo                                                                                                                                                                                                                         |
+| El POS está caído                                                                                                | La tienda sirve el último snapshot y **acepta pedidos igual**                                                                                                                                                                                    | Los pedidos esperan a que el POS vuelva a hacer pull                                                                                                                                                                                                                          |
+| El cron no corre                                                                                                 | Precios y disponibilidad se atrasan                                                                                                                                                                                                              | La reconciliación lo detecta. Alerta a los 30 min                                                                                                                                                                                                                             |
+| Evento con payload inválido                                                                                      | Ese producto queda viejo; el resto fluye                                                                                                                                                                                                         | `intentos > 5` → DLQ + alerta                                                                                                                                                                                                                                                 |
+| Se perdió `dispPublicada`                                                                                        | Resincroniza todo el stock una vez                                                                                                                                                                                                               | Idempotente, sin intervención                                                                                                                                                                                                                                                 |
+| El token de un negocio se filtró                                                                                 | Alguien podría escribir catálogo falso a nombre de ESE negocio, ninguno más                                                                                                                                                                      | Re-acuñar el token de ese negocio (invalida el viejo al instante, no toca a los demás). Motivo para pasar a HMAC                                                                                                                                                              |
+| **Un POS todavía en v3 envía `barcode` (singular)**                                                              | **No sincroniza catálogo en absoluto**: el lote entero responde `400 INVALID_BATCH` y ni siquiera queda una `SyncEvent` para reintentar — no es un producto el que falla, es el lote completo                                                    | Migrar el payload de `PRODUCT` a `barcodes: string[]` (v4). No hay periodo de gracia ni modo de compatibilidad: es el mismo corte que hizo la v3 en autenticación (HD5)                                                                                                       |
+| **Un POS todavía en v5 ignora el `409 ORDER_DELIVERY_NOT_QUOTED`**                                               | Sus pedidos con el envío sin cotizar **no avanzan**: cada intento de `READY`/`IN_TRANSIT`/`DELIVERED` se rechaza y, si el POS no mira el código de respuesta, el pedido se queda quieto sin ningún error visible en su lado hasta que vence solo | Cotizar por `POST /orders/proposal` antes de despachar, y tratar el `409` como «falta cotizar», no como un fallo transitorio que se reintenta                                                                                                                                 |
+| **Un POS todavía en v5 lee el `deliveryFee: "0.00"` de un pedido sin cotizar como «envío gratis»**               | **Cobra de menos**, en silencio y en todos los pedidos de las tiendas con envío cotizado: el importe del envío nunca llega a la venta                                                                                                            | Leer `deliveryFeePending` antes de usar `deliveryFee`. No hay error HTTP que avise: es un fallo del lado del POS y solo se ve en la caja                                                                                                                                      |
+| **Un POS todavía en v4 no reconoce `AWAITING_CUSTOMER`/`IN_TRANSIT`/`REJECTED_BY_STORE`**                        | Un `switch` exhaustivo sobre `status` se rompe al primer pedido en uno de los tres estados nuevos — no hay error HTTP que avise, es un fallo del lado del POS                                                                                    | Migrar el lector del enum antes de recibir tráfico real. No hay periodo de convivencia: mismo corte que la v3/v4 (F-019)                                                                                                                                                      |
+| **Dos lecturas laterales simultáneas del mismo negocio (v8, F-033)**                                             | Pueden ver **estados distintos del mismo pedido** si su vencimiento cae justo entre las dos — `AWAITING_CUSTOMER` en una, `CANCELLED` en la otra                                                                                                 | No es un fallo ni hay nada que reintentar: cada lectura aplicó el reloj en su propio instante y la respuesta más reciente es la que vale                                                                                                                                      |
+| **Cuadrecaja perdió el token de un negocio que `POST /api/provisioning/credential` ya le había entregado (v10)** | El sync de ese negocio queda parado: sin token no hay forma de autenticar ninguna de las siete rutas de arriba                                                                                                                                   | `POST /api/provisioning/credential` **no** lo recupera — es idempotente y no rota. La única salida sigue siendo rotar con corte desde `npm run mint:token -- <externalId>`, avisando antes al equipo de cuadrecaja para que guarde el valor nuevo (`docs/despliegue.md` § 11) |
 
 ---
 
 ## Verificación
 
-Con el servidor local levantado y el token de `seed-negocio-1` acuñado
-(`npm run mint:token -- seed-negocio-1`) exportado como `QAB_BEARER_TOKEN` — o
-pasado con `--token=` en cada script:
+Con el servidor local levantado y un token de negocio exportado como
+`QAB_BEARER_TOKEN` — o pasado con `--token=` en cada script. Desde la v10 hay
+dos formas de conseguirlo (§ Autenticación): acuñarlo con
+`npm run mint:token -- seed-negocio-1` como hasta ahora, o pedirlo con
+`POST /api/provisioning/credential` (§ «Aprovisionamiento de negocios») — el
+guion sigue siendo el más rápido para el negocio de desarrollo ya
+sembrado, y la ruta es el camino real para un negocio nuevo de cuadrecaja:
 
 ```bash
 node scripts/send-catalog-batch.mjs --repeat        # processed

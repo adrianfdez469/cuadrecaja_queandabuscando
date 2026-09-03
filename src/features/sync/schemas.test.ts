@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { storePayloadSchema, syncEventSchema } from "./schemas";
+import { provisionCredentialSchema, storePayloadSchema, syncEventSchema } from "./schemas";
 import { STORE_DELIVERY_CONFIG_INCONSISTENT } from "@/constants/sync";
 
 /**
@@ -156,5 +156,67 @@ describe("storePayloadSchema — the payload-only contradiction (E7, R10.1, --st
       basePayload({ deliveryEnabled: true, deliveryFeeMode: "FLAT_RATE", deliveryFee: 500 }),
     );
     expect(result.success).toBe(true);
+  });
+});
+
+describe("provisionCredentialSchema — F-034 spec.md § Datos y contrato", () => {
+  it("accepts an externalId alone", () => {
+    const result = provisionCredentialSchema.safeParse({ externalId: "neg-000123" });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual({ externalId: "neg-000123" });
+  });
+
+  it("trims externalId and name, rather than rejecting the surrounding whitespace", () => {
+    const result = provisionCredentialSchema.safeParse({
+      externalId: "  neg-1  ",
+      name: "  Bodega La Rampa  ",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ externalId: "neg-1", name: "Bodega La Rampa" });
+    }
+  });
+
+  it("R17: trims but never case-folds — it has to compare byte for byte against the sync's businessId", () => {
+    const result = provisionCredentialSchema.safeParse({ externalId: "  Neg-Uno  " });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.externalId).toBe("Neg-Uno");
+  });
+
+  it("rejects a missing externalId (400 INVALID_BODY)", () => {
+    expect(provisionCredentialSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("rejects an externalId that is empty or only whitespace after trim", () => {
+    expect(provisionCredentialSchema.safeParse({ externalId: "" }).success).toBe(false);
+    expect(provisionCredentialSchema.safeParse({ externalId: "   " }).success).toBe(false);
+  });
+
+  it("rejects an externalId over 128 characters", () => {
+    expect(provisionCredentialSchema.safeParse({ externalId: "x".repeat(129) }).success).toBe(
+      false,
+    );
+    expect(provisionCredentialSchema.safeParse({ externalId: "x".repeat(128) }).success).toBe(true);
+  });
+
+  it("rejects a name over 200 characters, but leaves it out entirely as valid", () => {
+    expect(
+      provisionCredentialSchema.safeParse({ externalId: "neg-1", name: "x".repeat(201) }).success,
+    ).toBe(false);
+    expect(provisionCredentialSchema.safeParse({ externalId: "neg-1" }).success).toBe(true);
+  });
+
+  it("strips unknown keys instead of rejecting the request — `strip`, not `strict` (E8)", () => {
+    const result = provisionCredentialSchema.safeParse({
+      externalId: "neg-1",
+      trackingLabel: "cuadrecaja's own tag",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).not.toHaveProperty("trackingLabel");
+  });
+
+  it("the typo `external_id` still 400s — the unknown key is dropped, but `externalId` is then missing", () => {
+    const result = provisionCredentialSchema.safeParse({ external_id: "neg-1" });
+    expect(result.success).toBe(false);
   });
 });

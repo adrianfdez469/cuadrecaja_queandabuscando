@@ -3,7 +3,7 @@ slug: prisma7-p2002-sin-meta-target-driver-adapter
 sintoma: "un P2002 real (contra Postgres de verdad) no lo reconoce un chequeo que compara error.meta.target, y el catch que debía tragárselo deja pasar el PrismaClientKnownRequestError sin capturar"
 firma: Unique constraint failed on the fields
 etapa: test
-visto_en: F-012
+visto_en: F-012, F-034
 creado: 2026-08-29T15:26:00Z
 promovido_a_agents: no
 arreglo: usa src/features/orders/server/prismaErrors.ts::isUniqueViolation() — ya sabe leer las dos formas — y si escribes tu propio chequeo, lee también error.meta.driverAdapterError.cause.constraint.fields

@@ -41,3 +41,11 @@ export const STORE_OPENING_HOURS_INVALID = "STORE_OPENING_HOURS_INVALID";
  * F-011 has no editor) fixes it.
  */
 export const STORE_TIMEZONE_INVALID = "STORE_TIMEZONE_INVALID";
+
+/**
+ * F-034: hard cap on `POST /api/provisioning/credential`'s body — the same
+ * pattern as `ORDER_MAX_BODY_BYTES` (`src/constants/orders.ts`). The body is
+ * just `{ externalId, name? }`, so 4 KB is generous headroom over the 128 +
+ * 200 character limits the schema already enforces, not a tight budget.
+ */
+export const PROVISIONING_MAX_BODY_BYTES = 4096;

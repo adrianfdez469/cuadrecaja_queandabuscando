@@ -227,6 +227,26 @@ export type CategoryPayload = z.infer<typeof categoryPayloadSchema>;
 export type CurrencyPayload = z.infer<typeof currencyPayloadSchema>;
 export type ExchangeRatePayload = z.infer<typeof exchangeRatePayloadSchema>;
 
+// --- provisioning (F-034) ---------------------------------------------------
+
+/**
+ * `POST /api/provisioning/credential`'s body (spec.md § Datos y contrato).
+ * Deliberately `strip` (Zod's default), not `strict`: a caller-added key
+ * cuadrecaja wants to carry (a label, a trace id) is silently dropped rather
+ * than 400ing the whole request, while the typo that actually matters —
+ * `external_id` instead of `externalId` — still 400s, because `externalId`
+ * is then missing. `trim` runs before the length checks, so `"   "` fails
+ * `min(1)` and `" neg-1 "` becomes `neg-1` — trimmed, never case-folded
+ * (R17): it has to compare byte for byte against what the sync's payloads
+ * send as `businessId`.
+ */
+export const provisionCredentialSchema = z.object({
+  externalId: z.string().trim().min(1).max(128),
+  name: z.string().trim().min(1).max(200).optional(),
+});
+
+export type ProvisionCredentialInput = z.infer<typeof provisionCredentialSchema>;
+
 export function summarize(results: EventResult[]): CatalogBatchResponse {
   return {
     ok: results.filter((r) => r.status !== "failed").map((r) => r.eventId),

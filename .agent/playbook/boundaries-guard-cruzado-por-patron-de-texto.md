@@ -3,7 +3,7 @@ slug: boundaries-guard-cruzado-por-patron-de-texto
 sintoma: expected [ Array(1) ] to deeply equal []
 firma: expected \[ Array\(1\) \] to deeply equal \[\]
 etapa: test
-visto_en: F-015
+visto_en: F-015, F-034
 creado: 2026-08-27T18:24:27Z
 promovido_a_agents: no
 arreglo: cambia la FORMA del texto (misma intención), no el guardián ajeno — ver § Cómo se arregla

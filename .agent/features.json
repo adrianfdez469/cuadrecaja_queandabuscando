@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "project": "queandabuscando",
-  "updated_at": "2026-09-02",
+  "updated_at": "2026-09-03",
   "rules": [
     "Solo se cambia 'passes' a true cuando TODOS los acceptance_criteria fueron verificados ejecutando algo, no leyendo código.",
     "Nunca se borra un feature: se marca 'status': 'deprecated' y se explica en 'notes'.",
@@ -665,6 +665,31 @@
       ],
       "passes": true,
       "notes": "Anadido el 2026-09-02 por decision expresa del humano (regla 4). NACE DE UNA SOLICITUD DEL OTRO EQUIPO: es la S-001 de su documento de solicitudes, y la postura esta anotada en .agent/solicitudes.md — aceptadas LAS DOS formas, ?status= y ?ids=. EL PROBLEMA, en sus palabras y confirmado en el codigo: el unico endpoint de lectura de pedidos filtra id > since (src/features/orders/server/pull.ts, src/app/api/internal/orders/route.ts), pero la resolucion de una propuesta ocurre SIEMPRE sobre un pedido que el POS ya pulleo, cuyo id es por tanto menor que el cursor. El pull incremental nunca lo devuelve, asi que el encargado no se entera nunca de que el comprador acepto o rechazo. No es un caso raro: con el envio cotizado de F-031, cotizar ES proponer, de modo que ese camino se recorre en cada pedido a domicilio de una tienda en QUOTED_PER_ORDER. El contrato ya PRESUPONE esta lectura —seccion 'El timbre del canal negocio:' pide dos lecturas al oir el timbre, el pull incremental y una relectura de los AWAITING_CUSTOMER— y nunca dijo con que parametro; el hueco no es del timbre de F-020, porque el filtro del cursor es el mismo con cron solo. EL APANO QUE NO SE TOMA: emular la relectura con ?since=<id-1>&limit=1 por pedido. Funciona, pero es una llamada por pedido y por ciclo, abusa de un parametro para lo que no es y choca con la regla de un solo pull en vuelo por negocio. POR QUE LAS DOS FORMAS y no solo la que ellos prefieren: ?status= es la pregunta que de verdad quieren hacer en el ciclo normal (el POS no lleva la lista) y ?ids= es la relectura puntual de un conjunto ya conocido, mas acotada y mas facil de topar. A FAVOR: Order ya tiene @@index([businessId, status, id]) desde F-018, asi que el filtro por estado no pide migracion. LA REGLA QUE MANDA: es una lectura LATERAL, no un avance — nextCursor no se mueve, y por eso el criterio 8 rechaza mezclarla con since en vez de elegir en silencio cual gana. FUERA: empujar nada hacia cuadrecaja (seguimos sin llamar nunca al POS, ADR 0003), tocar el timbre de F-020, tocar el pull incremental y sus consumidores, y paginar por otra cosa que no sea limit. PENDIENTES DE RESOLVER AL EMPEZAR: SP1, si ?status= acepta varios estados separados por coma o uno solo; SP2, cual es el tope de ?ids= (100, o el mismo 500 del limit maximo); SP3, como se pagina una lectura por estado que excede limit sin usar el cursor del pull (criterio 9); SP4, si la lectura lateral cuenta para la regla de un solo pull en vuelo por negocio. AL CERRARLO: avisar al equipo de cuadrecaja con la version del contrato que lo incorpora y mover la fila S-001 de .agent/solicitudes.md a 'Cerradas' — su documento lo actualizan ellos, no nosotros."
+    },
+    {
+      "id": "F-034",
+      "category": "integracion",
+      "status": "active",
+      "depends_on": ["F-018"],
+      "description": "El alta de un negocio y su token de sync los pide cuadrecaja por API, sin que un dev de queandabuscando corra un script.",
+      "acceptance_criteria": [
+        "POST a la ruta de aprovisionamiento con el secreto correcto y un externalId que no existe responde 201 con un token no vacio, y queda exactamente una fila nueva de Business con ese externalId.",
+        "Ese token autentica de verdad: node scripts/send-catalog-batch.mjs --token=<el devuelto> responde 207.",
+        "Repetir la MISMA llamada responde 200 con token null, y el syncTokenHash de la base es identico antes y despues.",
+        "Tras esa repeticion, el token de la primera llamada sigue respondiendo 207: registrar no rota nunca.",
+        "Sobre un negocio que ya existe pero no tiene syncTokenHash, la llamada responde 201 con token y no crea ningun Business nuevo.",
+        "Sin el secreto configurado en el servidor la ruta responde 503 y no escribe nada, y las rutas de /api/internal/* con un token valido siguen respondiendo lo suyo.",
+        "Con el secreto configurado, una cabecera ausente, con otro esquema y con un valor equivocado dan 401 con el mismo cuerpo en los tres casos, y no se escribe nada.",
+        "Un cuerpo sin externalId, con externalId vacio, o que no es JSON, responde 400 y no crea ningun Business.",
+        "Sobre un Business con active false la ruta responde 403 y no acuña: su syncTokenHash queda como estaba.",
+        "Dos llamadas concurrentes con el mismo externalId desconocido dejan UN solo Business, ninguna responde 500, y el token devuelto autentica.",
+        "El secreto de aprovisionamiento no autentica ninguna ruta de /api/internal/*: enviarlo como Bearer a GET /api/internal/orders responde 401.",
+        "La comparacion del secreto es en tiempo constante: grep de timingSafeEqual sobre el guard de la ruta no sale vacio.",
+        "La ruta, su cuerpo, sus codigos y el procedimiento de alta estan en docs/sync-contract.md con la version movida, y el secreto nuevo esta en docs/despliegue.md.",
+        "bash .agent/verify.sh F-034 --full termina con codigo 0."
+      ],
+      "passes": false,
+      "notes": "Entrada escrita por el agente por indicacion expresa del humano (2026-09-03): «modifica la propuesta, crea el feature y arranca con el». Recorta .agent/specs/propuestas/credenciales-de-integracion.md al alcance de SOLO EL ALTA: la tabla BusinessCredential, la rotacion con solape y la revocacion se quedan en la propuesta. Decisiones del humano en esa conversacion: el disparador es el superadministrador de cuadrecaja UNA VEZ POR NEGOCIO (no por sucursal); el secreto es SIMETRICO en una cabecera, no firma asimetrica, porque con el alcance recortado y el mismo equipo a los dos lados no hay tercero que distinguir. No depende de F-029: el secreto se lee de process.env como hace el guard de /api/crons/*, asi que serverEnv() no se toca."
     }
   ]
 }
