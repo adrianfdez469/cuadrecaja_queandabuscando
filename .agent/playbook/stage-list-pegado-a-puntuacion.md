@@ -3,7 +3,7 @@ slug: stage-list-pegado-a-puntuacion
 sintoma: "stage list is missing X, Y — verify.sh runs ..."
 firma: stage list is missing
 etapa: harness
-visto_en: F-032
+visto_en: F-032, F-033
 creado: 2026-09-01T21:42:35Z
 promovido_a_agents: no
 arreglo: pon la lista de etapas en UNA sola línea que contenga `verify.sh` y `·`, sin paréntesis ni puntuación pegada a la primera o la última etapa
