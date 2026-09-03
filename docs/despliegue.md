@@ -171,16 +171,17 @@ ventana de mantenimiento, no como un cambio de una línea.
 
 Todos van en el entorno del despliegue. `.env.example` los lista con su formato.
 
-| Variable               | Para qué                                     | Si falta o está mal                                               |
-| ---------------------- | -------------------------------------------- | ----------------------------------------------------------------- |
-| `DATABASE_URL`         | La app en marcha                             | No arranca                                                        |
-| `DIRECT_URL`           | Migraciones                                  | `db:deploy` falla                                                 |
-| `SSO_JWT_SECRET`       | ↔ Verifica el token de entrada del admin     | El admin no puede entrar; se registra el motivo en el log         |
-| `ADMIN_SESSION_SECRET` | Firma la sesión local del admin              | La sesión no se puede crear                                       |
-| `CRON_SECRET`          | Autoriza los crons                           | Los crons responden 401 y **nada avisa**: el reloj deja de correr |
-| `SUPABASE_*`           | Imágenes y cuenta del comprador              | Ver §2 y §3                                                       |
-| `SUPABASE_JWT_SECRET`  | Firma la credencial de suscripción al timbre | El endpoint responde `503 REALTIME_NOT_CONFIGURED`; ver §4        |
-| `NEXT_PUBLIC_SITE_URL` | **Ver abajo — es el más fácil de dejar mal** |                                                                   |
+| Variable                     | Para qué                                                                | Si falta o está mal                                                                      |
+| ---------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `DATABASE_URL`               | La app en marcha                                                        | No arranca                                                                               |
+| `DIRECT_URL`                 | Migraciones                                                             | `db:deploy` falla                                                                        |
+| `SSO_JWT_SECRET`             | ↔ Verifica el token de entrada del admin                                | El admin no puede entrar; se registra el motivo en el log                                |
+| `ADMIN_SESSION_SECRET`       | Firma la sesión local del admin                                         | La sesión no se puede crear                                                              |
+| `CRON_SECRET`                | Autoriza los crons                                                      | Los crons responden 401 y **nada avisa**: el reloj deja de correr                        |
+| `SUPABASE_*`                 | Imágenes y cuenta del comprador                                         | Ver §2 y §3                                                                              |
+| `SUPABASE_JWT_SECRET`        | Firma la credencial de suscripción al timbre                            | El endpoint responde `503 REALTIME_NOT_CONFIGURED`; ver §4                               |
+| `PROVISIONING_SECRET_SHA256` | ↔ Verifica el secreto con el que cuadrecaja da de alta negocios (F-034) | `POST /api/provisioning/credential` responde `503 PROVISIONING_NOT_CONFIGURED`; ver §8.1 |
+| `NEXT_PUBLIC_SITE_URL`       | **Ver abajo — es el más fácil de dejar mal**                            |                                                                                          |
 
 **`NEXT_PUBLIC_SITE_URL` merece su propio párrafo.** No es cosmético: de él
 salen el `sitemap.xml`, la URL canónica de cada tienda y —lo que más duele— **el
@@ -192,6 +193,13 @@ variable.
 `SSO_JWT_SECRET` tiene que valer **lo mismo** aquí y en cuadrecaja: es lo que
 firma la aserción de identidad. `ADMIN_SESSION_SECRET` es solo de este lado y no
 se comparte con nadie.
+
+`PROVISIONING_SECRET_SHA256` es distinto de los dos anteriores: lo que
+cuadrecaja guarda **no** es lo mismo que queandabuscando guarda. cuadrecaja
+guarda el secreto **en claro**; queandabuscando guarda solo su **SHA-256**
+(R9 de `.agent/specs/F-034/spec.md`) — un volcado de esta configuración no
+permite llamar a la ruta de aprovisionamiento. El par de comandos para
+generar los dos valores está en §8.1.
 
 ---
 
@@ -241,6 +249,14 @@ se entera si alguien lo borra de un panel.
    contra qué comparar: en este repo, Node 24.13.1 con ICU 78.2 devuelve
    **418** zonas e incluye `America/Havana`. Si el runtime de despliegue trae
    menos, es una pregunta nueva para el humano, no un ajuste silencioso.
+6. **Una regla de firewall de Vercel por IP sobre `/api/provisioning/*`**
+   (F-034, `.agent/specs/F-034/architecture.md` § Escalabilidad y límites).
+   No hay límite de tasa en el código —el rechazo del guard ya cuesta cero
+   sentencias contra la base, y el secreto son 256 bits, así que la fuerza
+   bruta no está en el modelo de amenaza— y esta regla es la mitigación
+   recomendada en su lugar, con el mismo precedente que la del punto 1: una
+   defensa que no se despliega con el código y que ningún sensor puede
+   afirmar.
 
 ---
 
@@ -252,7 +268,53 @@ nunca llama a cuadrecaja.
 
 ### 8.1 Acuñar el token de cada negocio ⟳
 
-**El token es por negocio, no un secreto de plataforma.**
+**El token es por negocio, no un secreto de plataforma.** Desde F-034 hay dos
+vías para conseguirlo — la primera es la normal, la segunda es de rescate.
+
+#### Vía normal: `POST /api/provisioning/credential`
+
+El superadministrador de cuadrecaja la llama, una vez por negocio, sin que
+ningún desarrollador de queandabuscando tenga que abrir una terminal. Antes
+de que puedan usarla, este lado necesita el secreto de aprovisionamiento
+configurado (§5, tabla de secretos):
+
+```bash
+# 1. El secreto en claro — se reparte a cuadrecaja UNA sola vez, por un canal
+#    que no sea este repositorio.
+node -e "console.log(require('crypto').randomBytes(36).toString('base64url'))"
+
+# 2. Su SHA-256 hex — lo que va aquí, en PROVISIONING_SECRET_SHA256.
+node -e "console.log(require('crypto').createHash('sha256').update(process.argv[1], 'utf8').digest('hex'))" '<pega aquí el secreto del paso 1>'
+```
+
+queandabuscando guarda solo el hash del paso 2 (R9 de `.agent/specs/F-034/spec.md`
+— un volcado de esta configuración no permite llamar a la ruta); cuadrecaja
+guarda el valor en claro del paso 1. Con eso configurado, cuadrecaja hace:
+
+```bash
+curl -X POST https://<dominio>/api/provisioning/credential \
+  -H "authorization: Bearer <secreto del paso 1>" \
+  -H 'content-type: application/json' \
+  -d '{"externalId":"<Negocio.id>","name":"<nombre, opcional>"}'
+```
+
+Crea el `Business` si no existía y acuña su token, devolviéndolo en claro
+**una sola vez** (`docs/sync-contract.md` § «Aprovisionamiento de negocios»
+tiene el cuerpo, las dos respuestas y la tabla de códigos completa). Es
+**idempotente y nunca rota**: repetir la llamada sobre un negocio que ya
+tiene token no cambia nada y no devuelve ningún token — si cuadrecaja pierde
+el valor, la vía de rescate de abajo es la única salida.
+
+**⚠ El secreto tiene que tener 32 caracteres o más.** La ruta reutiliza el
+mismo lector de cabecera `Bearer` que el sync (`readBearerToken`,
+`src/lib/syncAuth.ts`), que impone ese mínimo. Un secreto **correcto pero más
+corto de 32 caracteres** responde `401 UNAUTHORIZED`, no `503` — el mismo
+código que un secreto simplemente equivocado, así que si acabas de configurar
+uno y ves `401` en vez del `503` de «no configurado», mide su longitud antes
+de sospechar de otra cosa. Los 36 bytes aleatorios del paso 1 de arriba dan
+48 caracteres, muy por encima del mínimo.
+
+#### Vía de rescate: `npm run mint:token`
 
 ```bash
 npm run mint:token -- <externalId>
@@ -260,13 +322,19 @@ npm run mint:token -- <externalId>
 
 - Si ese `externalId` no existe, crea el negocio.
 - Si existe, **rota** su token: el viejo deja de valer al instante y ningún otro
-  negocio se ve afectado.
+  negocio se ve afectado. Es la **única** forma de rotar — la ruta de arriba
+  nunca lo hace.
 - **El valor en claro se imprime una sola vez y no se guarda en ningún sitio**:
   solo su SHA-256 va a la base. Si se pierde, se vuelve a acuñar; no se puede
   recuperar.
 
-Ese valor se entrega al equipo de cuadrecaja, que lo guarda en la configuración
-**de ese negocio**, no en una variable global.
+Necesita `DATABASE_URL` de producción en la terminal de quien lo ejecuta, así
+que sigue siendo el camino más lento — pero es el único que puede **rotar**,
+y por eso no desaparece (R18 de `.agent/specs/F-034/spec.md`).
+
+Cualquiera de las dos vías: el valor en claro se entrega al equipo de
+cuadrecaja, que lo guarda en la configuración **de ese negocio**, no en una
+variable global.
 
 **Mientras ningún negocio tenga token acuñado, `/api/internal/*` responde 503**,
 nunca 200. Un token ausente jamás significa «deja pasar todo». Si al integrar
@@ -285,13 +353,18 @@ sincronización **cada 2 minutos** y el de reconciliación diario.
 Cada cambio en `sync-contract.md` se coordina con el otro equipo y **mueve la
 versión de su primera línea**, aunque sea una menor (§ «Versionado de este
 documento» del contrato): mayor si cambia lo que el POS envía o recibe, menor si
-solo aclara lo ya acordado. La versión vigente es la **v6** (F-031), y **no es
-aditiva en dos cosas**: `POST /orders/status` responde `409` al despachar un
-pedido con el envío sin cotizar —la primera guarda de transición del contrato, y
-retracta la línea de la v5 que decía que no había ninguna—, y todos los importes
-del payload del pull pasan a traer dos decimales, que es un arreglo de un formato
-que el documento llevaba mal desde la v2. La v5 tampoco fue aditiva, en el enum
-de estados de pedido: pasó de 6 a 9 valores.
+solo aclara lo ya acordado. La versión vigente es la **v10** (F-034): abre una
+octava ruta, `POST /api/provisioning/credential`, y por eso es mayor — pero es
+**aditiva**, ninguna de las siete rutas de sync cambia de forma ni de
+significado, y un token acuñado antes de la v10 sigue valiendo igual.
+
+No todas las mayores anteriores lo fueron. La v6 (F-031) **no fue aditiva en
+dos cosas**: `POST /orders/status` responde `409` al despachar un pedido con
+el envío sin cotizar —la primera guarda de transición del contrato, y
+retracta la línea de la v5 que decía que no había ninguna—, y todos los
+importes del payload del pull pasan a traer dos decimales, que es un arreglo
+de un formato que el documento llevaba mal desde la v2. La v5 tampoco fue
+aditiva, en el enum de estados de pedido: pasó de 6 a 9 valores.
 
 Las tres se publicaron sin periodo de convivencia porque no hay consumidor vivo
 todavía. **Cuando lo haya, esa vía se cierra**: una versión no aditiva pasará a
@@ -334,7 +407,8 @@ de Postgres; no se implementa mientras el dato real siga tan lejos del techo.
 
 ## 9. Poner una tienda en el aire ⟳
 
-1. El negocio existe (lo creó `mint:token`, §8.1).
+1. El negocio existe (lo creó `POST /api/provisioning/credential` o, como
+   vía de rescate, `mint:token` — §8.1).
 2. Las tiendas y el catálogo llegan **por el sync**, no se cargan a mano.
 3. La tienda tiene que estar publicada: es un opt-in del local
    (`publicarEnTienda` del lado de cuadrecaja) más el estado en este lado.
