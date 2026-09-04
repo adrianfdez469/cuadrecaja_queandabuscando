@@ -58,3 +58,6 @@ next-env.d.ts
 
 # ruta al repo de cuadrecaja: es de cada máquina, no del proyecto
 .agent/cuadrecaja.path
+
+# scripts de consulta a la base local, de usar y tirar: se quedan en la máquina
+_qa_*.js
