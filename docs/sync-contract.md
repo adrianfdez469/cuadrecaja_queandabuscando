@@ -1,6 +1,6 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 10** · 3 de septiembre de 2026
+**Versión 10.1** · 4 de septiembre de 2026
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
 existe y está verificado contra los casos de abajo, **con una excepción marcada
@@ -30,6 +30,46 @@ delante es lo que implementó.
 
 Una corrección de tipografía o de un enlace roto es una menor: cuesta un dígito
 y evita la pregunta «¿es este el documento que leí?».
+
+## Cambios respecto a la v10
+
+Sube como **menor**: no cambia ninguna ruta, ningún campo, ningún enum ni
+ninguna regla de validación. **Quien implementó la v10 sigue siendo un lector
+correcto y no tiene que tocar nada.**
+
+Lo que hace es cerrar un agujero de este documento. El enum de § Formato lista
+cinco entidades desde la v2 —`STORE`, `CATEGORY`, `PRODUCT`, `CURRENCY`,
+`EXCHANGE_RATE`— y solo dos tenían su `payload` escrito: `PRODUCT` desde el
+principio y `STORE` desde la v3, que ya lo documentó tarde y por el mismo
+motivo. Las otras tres se validan y se aplican en queandabuscando desde
+entonces, pero su forma solo existía en nuestro código: para emitirlas había
+que leerlo o preguntar. **Quedan documentadas abajo, con las reglas que ya se
+aplican hoy** — § «`payload` de `CATEGORY`», § «`payload` de `CURRENCY`» y
+§ «`payload` de `EXCHANGE_RATE`».
+
+Nada de lo que sigue es un cambio: es lo que el código ya hace. Se destaca
+aquí porque quien asumiera que las cinco entidades se comportan igual que
+`STORE` y `PRODUCT` se equivocaría en las cinco cosas:
+
+- **`CURRENCY` no lleva `businessId`** y su tabla es **global a la
+  plataforma**: lo que un negocio escribe ahí lo ven todos los demás.
+- **`CURRENCY` y `EXCHANGE_RATE` ignoran `operation`.** Un `DELETE` no borra
+  nada: en `CURRENCY` hace el mismo upsert que un `UPDATE` (para retirar una
+  moneda, `active: false`), y en `EXCHANGE_RATE` inserta una tasa más.
+- **`EXCHANGE_RATE` es append-only**, y la tasa vigente es la última que
+  **llegó**, no la de `updatedAt` más reciente. Corregir una tasa es enviar
+  otra.
+- **`updatedAt` solo es guarda anti-rancio en `STORE`, `PRODUCT` y
+  `CATEGORY`.** En `CURRENCY` y `EXCHANGE_RATE` se valida el formato y no se
+  compara con nada.
+- **El orden de emisión importa en dos sitios**, y los dos fallan en silencio:
+  `CATEGORY` antes que los `PRODUCT` que la referencian (si no, el producto se
+  publica sin categoría y se queda así), y `CURRENCY` antes que la primera
+  `EXCHANGE_RATE` de esa moneda (si no, queda una moneda provisional con el
+  código por nombre y por símbolo).
+
+Si alguna de esas reglas no es la que cuadrecaja necesita, la conversación es
+una v11 y no una corrección de redacción: decidlo y se coordina.
 
 ## Cambios respecto a la v9
 
@@ -1001,6 +1041,162 @@ está en la lista de cambios de abajo desde la v1. Lo único opcional es
 llamar a este endpoint desde la pantalla donde el POS edita el slug de una
 tienda, para mostrarle al comerciante qué dirección va a quedar antes de que
 la publique.
+
+#### `payload` de `CATEGORY`
+
+**Documentado aquí por primera vez** (v10.1). La forma es la que el lado
+receptor valida y aplica desde la v2: no cambia nada de lo implementado, solo
+deja de estar únicamente en nuestro código.
+
+```jsonc
+{
+  "categoryId": "uuid", // Categoria.id — la identidad, junto al negocio del token
+  "businessId": "uuid", // redundante y comprobado (§ Formato)
+  "name": "Bebidas",
+  "color": "#1E88E5", // null — y omitirlo TAMBIÉN borra, ver abajo
+  "updatedAt": "2026-09-04T14:03:00.000Z", // guarda anti-rancio
+}
+```
+
+| Campo        | Tipo     | Obligatorio | Notas                                                                                                                                                                                                            |
+| ------------ | -------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `categoryId` | `string` | **sí**      | `Categoria.id`. La identidad es el par `(negocio del token, categoryId)`, nunca el nombre                                                                                                                        |
+| `businessId` | `string` | **sí**      | Tiene que coincidir con el del token; si no, `403 BUSINESS_MISMATCH` del lote entero (§ Formato)                                                                                                                 |
+| `name`       | `string` | **sí**      | No vacío. Renombrar aquí **no** cambia la URL pública de la categoría                                                                                                                                            |
+| `color`      | `string` | no          | Sin validar como color: se guarda tal cual. **Omitirlo borra la columna**, igual que enviar `null` — misma semántica que los campos de contacto de `STORE`, no la de sus cinco campos de configuración de compra |
+| `updatedAt`  | ISO 8601 | **sí**      | Guarda anti-rancio: un evento con `updatedAt` **menor o igual** al guardado no escribe nada y responde `stale`                                                                                                   |
+
+**`LocalCategory`** — 8 columnas:
+
+| Campo              | Dueño      | Un evento `CATEGORY` que lo trae                                                                                                                                 |
+| ------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`               | plataforma | Nada                                                                                                                                                             |
+| `businessId`       | plataforma | Se fija al crear, desde el negocio del token                                                                                                                     |
+| `externalId`       | cuadrecaja | Se escribe al crear, con `categoryId`                                                                                                                            |
+| `name`             | cuadrecaja | Escribe el nuevo valor                                                                                                                                           |
+| `slug`             | plataforma | Se deriva **solo al crear**, del `name`, y se congela. No es un campo del `payload`: el POS no puede elegirlo ni cambiarlo, y renombrar la categoría no lo mueve |
+| `color`            | cuadrecaja | Escribe `color ?? null` — omitirlo borra                                                                                                                         |
+| `globalCategoryId` | **panel**  | **Nada: sobrevive.** La taxonomía del marketplace es nuestra                                                                                                     |
+| `sourceUpdatedAt`  | cuadrecaja | Escribe `payload.updatedAt` en todo evento aplicado                                                                                                              |
+
+`slug` es el identificador público en `/[slug]/c/[categorySlug]`, único por
+negocio. Congelarlo es deliberado: una categoría renombrada no rompe el enlace
+que alguien compartió. Un `DELETE` sí devuelve ese valor al pool del negocio —
+a diferencia de los slugs de primer nivel, que no vuelven nunca (§ ⑥).
+
+**Un `DELETE` borra la fila y deja sus productos publicados y sin categoría.**
+`StoreProduct.localCategoryId` pasa a `NULL` por la propia clave ajena; los
+productos no se reasignan ni se despublican. Un `DELETE` de una categoría que
+aquí no existe responde `processed`: no hay nada que hacer.
+
+**El orden importa, y su fallo es silencioso.** Un `PRODUCT` cuyo
+`localCategoryId` apunta a una categoría que todavía no llegó **no falla**: se
+guarda sin categoría, con `localCategoryId` a `NULL`, y se queda así hasta el
+siguiente evento de ese producto — el evento de la categoría, cuando llegue, no
+va a buscar quién la esperaba. Fallar el evento sería peor (bloquearía el
+producto por un dato accesorio), pero la consecuencia es la que es: **emitid la
+categoría antes que sus productos**, y si el orden ya se invirtió, reenviad los
+productos afectados.
+
+Las páginas de las sucursales que tengan productos en esa categoría se
+invalidan solas, sin que el POS pida nada.
+
+#### `payload` de `CURRENCY`
+
+**Documentado aquí por primera vez** (v10.1). Es la más asimétrica de las
+cinco: tiene tres particularidades, y las tres importan.
+
+```jsonc
+{
+  "code": "USD", // exactamente 3 caracteres — es la identidad
+  "name": "Dólar estadounidense",
+  "symbol": "$",
+  "active": true, // por defecto true si se omite
+  "updatedAt": "2026-09-04T14:03:00.000Z", // se valida, NO se usa
+}
+```
+
+| Campo       | Tipo      | Obligatorio | Notas                                                                                                        |
+| ----------- | --------- | ----------- | ------------------------------------------------------------------------------------------------------------ |
+| `code`      | `string`  | **sí**      | Longitud exacta 3. Es la clave primaria, y es **global** — ver abajo                                         |
+| `name`      | `string`  | **sí**      | No vacío                                                                                                     |
+| `symbol`    | `string`  | **sí**      | No vacío                                                                                                     |
+| `active`    | `boolean` | no          | `true` si se omite                                                                                           |
+| `updatedAt` | ISO 8601  | **sí**      | Se valida el formato y **no se compara con nada**: aquí no hay guarda anti-rancio (ver la tercera asimetría) |
+
+**① No lleva `businessId`, y no es un olvido: la tabla es global a la
+plataforma.** Hay una fila por `code`, compartida por todos los negocios. Un
+evento `CURRENCY` de un negocio reescribe el `name` y el `symbol` que ven los
+demás. Por eso es el único `payload` que la comprobación de identidad se salta
+(§ Formato): no hay campo que comprobar. En la práctica: **enviad el nombre y
+el símbolo internacionales de la moneda, nunca una denominación interna del
+comercio.**
+
+**② `operation` se ignora por completo.** `CREATE`, `UPDATE` y `DELETE` hacen
+exactamente el mismo upsert. **Un `DELETE` no borra ninguna moneda**; para
+retirar una, enviad `active: false`.
+
+**③ No hay guarda anti-rancio.** Gana el último evento que llegue, no el de
+`updatedAt` más reciente. Con reintentos, dos eventos del mismo `code` pueden
+aplicarse al revés y dejar el nombre viejo. Se convive con ello a propósito —
+el nombre de una moneda no cambia casi nunca—, pero conviene saberlo antes de
+que pase.
+
+Hoy ninguna página pública lee esta tabla: los importes se muestran con el
+código (`CUP`, `USD`), no con `symbol`. La fila existe para que la clave ajena
+de `ExchangeRate` resuelva y para el día que el marketplace formatee con
+símbolo. Enviar `CURRENCY` no cambia nada visible por sí solo.
+
+#### `payload` de `EXCHANGE_RATE`
+
+**Documentado aquí por primera vez** (v10.1). Es la única entidad de las cinco
+que **no** actualiza una fila: la añade.
+
+```jsonc
+{
+  "businessId": "uuid",
+  "currency": "USD", // exactamente 3 — "CUP" se descarta, ver abajo
+  "rate": 420, // > 0. CUP por 1 unidad de `currency`
+  "updatedAt": "2026-09-04T14:03:00.000Z", // se valida, NO se usa
+}
+```
+
+| Campo        | Tipo     | Obligatorio | Notas                                                                                                                  |
+| ------------ | -------- | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `businessId` | `string` | **sí**      | Tiene que coincidir con el del token; si no, `403 BUSINESS_MISMATCH` del lote entero. Las tasas **sí** son por negocio |
+| `currency`   | `string` | **sí**      | Longitud exacta 3. `"CUP"` responde `skipped_not_published` — ver abajo                                                |
+| `rate`       | `number` | **sí**      | Estrictamente mayor que cero. Se guarda como `Decimal(18,6)`: **6 decimales**, y a partir del séptimo se redondea      |
+| `updatedAt`  | ISO 8601 | **sí**      | Se valida el formato y no se compara con nada: al ser append-only no hay fila anterior con la que comparar             |
+
+**`rate` es «CUP por 1 unidad de `currency`», y CUP nunca viaja.** Es el ancla:
+una tasa de CUP contra sí mismo dejaría el ancla ambigua. Un evento con
+`currency: "CUP"` no es un error — responde `skipped_not_published`, que va en
+`ok` y no se reintenta (§ Respuesta).
+
+**Cada evento inserta una fila; no hay actualización ni deduplicación por
+valor.** La tabla es el histórico. Reenviar el **mismo** evento no duplica
+nada: lo para la idempotencia por `eventId` del inbox, que responde `duplicate`
+(§ Idempotencia). Dos eventos distintos con la misma tasa sí dejan dos filas, y
+está bien.
+
+**La tasa vigente es la última que LLEGÓ, no la de `updatedAt` más reciente.**
+Quien lee toma la fila más nueva por su instante de escritura. Un reenvío
+desordenado de una tasa vieja la convierte en la vigente. **Para corregir una
+tasa, enviad la correcta otra vez**: otro evento, otra fila, y esa pasa a ser
+la vigente. No hay forma de borrar una fila de tasas por este contrato — y
+`operation` también se ignora aquí, así que un `DELETE` inserta igual. No lo
+enviéis.
+
+**Si la moneda no existe todavía, se crea al vuelo con `name` y `symbol`
+iguales al código** (`USD` / `USD`). No falla, pero deja una fila provisional
+en la tabla global de monedas hasta que un evento `CURRENCY` la corrija:
+**enviad `CURRENCY` antes que su primera `EXCHANGE_RATE`.**
+
+**Ni `CURRENCY` ni `EXCHANGE_RATE` invalidan ninguna caché.** Una tasa nueva
+puede tardar hasta una hora en verse en el catálogo público —el suelo de
+revalidación de la vitrina, 3600 s—. El checkout, en cambio, las lee frescas
+en cada pedido: **un pedido nunca se cotiza con una tasa caducada**, aunque la
+vitrina todavía muestre la anterior.
 
 ### Transformación en queandabuscando
 
