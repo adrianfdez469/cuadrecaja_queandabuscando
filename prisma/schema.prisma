@@ -381,7 +381,8 @@ model CanonicalProduct {
   /// new alias appears — forgetting this silently degrades search.
   searchDocument String                   @default("")
   /// Populated by application code with to_tsvector('spanish', unaccent(...)).
-  /// GIN index is created in the SQL migration.
+  /// The GIN index was created by the SQL migration and is declared below
+  /// (F-036) so `prisma migrate diff` stops proposing to drop it.
   searchVector   Unsupported("tsvector")?
 
   createdAt DateTime @default(now())
@@ -394,6 +395,11 @@ model CanonicalProduct {
 
   @@index([globalCategoryId])
   @@index([isExclusive])
+  /// F-036: declared so Prisma stops proposing to DROP it in unrelated
+  /// diffs — the index itself was created by the init SQL migration.
+  @@index([searchVector], type: Gin)
+  /// Fuzzy matching for typo-tolerant search. Same reason as above.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "CanonicalProduct_name_trgm_idx")
 }
 
 /// Every valid barcode of a canonical product (F-024). ADDITIVE: rows are
@@ -470,7 +476,9 @@ model StoreProduct {
   /// That is what makes ADR 0007's ownership hold in both directions.
   searchDocument String                   @default("")
   /// Weighted tsvector: A = localName, B = aliases, C = description.
-  /// Unsupported: written with raw SQL (ADR 0019). GIN index in the migration.
+  /// Unsupported: written with raw SQL (ADR 0019). The GIN index was
+  /// created by the SQL migration and is declared below (F-036) so
+  /// `prisma migrate diff` stops proposing to drop it.
   searchVector   Unsupported("tsvector")?
 
   createdAt DateTime @default(now())
@@ -487,6 +495,14 @@ model StoreProduct {
   @@index([storeId, deletedAt, visible])
   @@index([canonicalProductId])
   @@index([localCategoryId])
+  /// F-036: declared so Prisma stops proposing to DROP it in unrelated
+  /// diffs — the index itself was created by the search SQL migration.
+  /// NOTE: `StoreProduct_visible_catalog_idx` (partial, WHERE deletedAt IS
+  /// NULL AND visible = true) is deliberately NOT declared here — Prisma
+  /// cannot express a partial index and does not propose dropping it either
+  /// (verified: it never shows up in `migrate diff`'s output).
+  @@index([searchVector], type: Gin, map: "StoreProduct_searchVector_idx")
+  @@index([searchDocument(ops: raw("gin_trgm_ops"))], type: Gin, map: "StoreProduct_searchDocument_trgm_idx")
 }
 
 /// F-021 (R4, R5): one row per search that reached the database. Three
@@ -521,17 +537,29 @@ model Currency {
 }
 
 /// Append-only. `rate` is CUP per 1 unit of `currencyCode`; CUP is never stored.
+/// F-036: which row is CURRENT is decided by the READ criterion below, never
+/// by insertion order. See docs/adr/0030.
 model ExchangeRate {
-  id           String   @id @default(uuid())
-  businessId   String
-  currencyCode String
-  rate         Decimal  @db.Decimal(18, 6)
-  createdAt    DateTime @default(now())
+  id              String    @id @default(uuid())
+  businessId      String
+  currencyCode    String
+  rate            Decimal   @db.Decimal(18, 6)
+  createdAt       DateTime  @default(now())
+  /// The POS payload's `updatedAt`. NULLABLE and WITHOUT `@default` on
+  /// purpose (human decision, F-036 plan.md PD1): Prisma cannot generate a
+  /// backfill migration from a schema change, and its own workaround for
+  /// that case is editing the generated migration file by hand, which is
+  /// exactly what this column's shape avoids. The ONE `ORDER BY` that reads
+  /// this column (`buildCurrentRatesSql`, src/features/catalog/server/rates.ts)
+  /// puts `NULLS LAST` on its first key, so a row without a mark sorts last
+  /// and never wins — that is what makes criterion 5 hold without a
+  /// backfill.
+  sourceUpdatedAt DateTime?
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   currency Currency @relation(fields: [currencyCode], references: [code])
 
-  @@index([businessId, currencyCode, createdAt])
+  @@index([businessId, currencyCode, sourceUpdatedAt(sort: Desc), createdAt(sort: Desc), id(sort: Desc), rate], map: "ExchangeRate_current_rate_idx")
 }
 
 /// Lives only in queandabuscando. The POS knows nothing about promotions.
