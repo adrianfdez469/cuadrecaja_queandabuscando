@@ -1,16 +1,26 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 10.1** · 4 de septiembre de 2026
+**Versión 12.1** · 6 de septiembre de 2026
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
 existe y está verificado contra los casos de abajo, **con una excepción marcada
-a propósito**: lo que la v6 introduce (§ «Cambios respecto a la v5.1») está
-acordado y publicado **antes** de estar implementado en queandabuscando, para
-que cuadrecaja pueda empezar en paralelo. Mientras eso dure, un pedido nunca
-llega con `deliveryFeePending`, `POST /orders/status` no devuelve todavía el
-`409` y los importes siguen saliendo sin los ceros de relleno. Se avisa cuando
-el lado receptor esté en pie; si algo de la v6 os hace falta antes para
-probar, pedidlo y se prioriza.
+a propósito**: lo que la v11 y la v12 introducen (§ «Cambios respecto a la v10.1»
+y § «Cambios respecto a la v11») está acordado y publicado **antes** de estar
+implementado en queandabuscando, para que cuadrecaja sepa a qué atenerse
+mientras tanto. De la v12: **un evento `BUSINESS` todavía responde
+`400 INVALID_BATCH`**, porque `entity` aún no admite ese valor — no lo emitáis
+hasta el aviso. Y mientras tanto siguen
+valiendo las reglas de la v10.1: una tasa nueva tarda hasta una hora en verse en
+el catálogo público, la vigente es la última que **llegó**, y un evento que
+dependía de otro que falló se aplica igual. Se avisa cuando cada una de las tres
+esté en pie, que es feature a feature y no de una vez.
+
+**Y el aviso que la v6 dejó pendiente, que se quedó escrito después de dejar de
+ser cierto: el lado receptor de la v6 está en pie.** Un pedido sí llega con
+`deliveryFeePending`, `POST /orders/status` sí devuelve el
+`409 ORDER_DELIVERY_NOT_QUOTED` y los importes sí salen con los ceros de
+relleno. Si algo de la v6 se dejó de usar por aquella advertencia, ya se puede
+usar.
 
 ## Versionado de este documento
 
@@ -30,6 +40,284 @@ delante es lo que implementó.
 
 Una corrección de tipografía o de un enlace roto es una menor: cuesta un dígito
 y evita la pregunta «¿es este el documento que leí?».
+
+## Cambios respecto a la v12
+
+Sube como **menor**: no cambia ninguna ruta, ningún campo, ningún enum ni ninguna
+regla de validación. **Quien implementó la v12 sigue siendo un lector correcto y
+no tiene que tocar nada.** Aclara tres cosas del `payload` de `BUSINESS` que el
+equipo de cuadrecaja señaló al leerlo, y la primera evitaba un fallo real.
+
+- **Qué instante es el `updatedAt` de un `BUSINESS`.** La v12 decía «el
+  `updatedAt` de la fila de origen», que es lo que dicen las otras cuatro
+  entidades con guarda — y aquí **no hay fila de origen**: la lista es un
+  conjunto, y ninguna de las filas que la componen es la que cambió. Es **el
+  instante en que cambió la lista**, fijado dentro de la transacción que la
+  escribe.
+- **Y no es el máximo de las marcas de esas filas**, que es la lectura tentadora
+  y es la mala: **retirar** una moneda haría **bajar** ese máximo, así que el
+  evento legítimo que sigue al cambio llegaría con una marca menor que la
+  guardada, se responderría `stale`, y la retirada no se aplicaría nunca sin que
+  nada fallara. Es el fallo que la v11 ② vino a cerrar, entrando por la puerta de
+  al lado. El aviso es del equipo de cuadrecaja.
+- **La moneda base va en la lista**, y la tabla de § Mapeo de nombres decía menos
+  de lo que cuadrecaja va a mandar: son los códigos activos **más**
+  `Negocio.monedaBase`, que no tiene garantizada su propia fila activa.
+
+## Cambios respecto a la v11
+
+Sube como **mayor** —una entidad nueva en el enum de `entity` es vocabulario
+nuevo del cable— pero es **aditiva**: quien implementó la v11 y no emita
+`BUSINESS` sigue siendo un lector correcto y no tiene que tocar nada. Las cinco
+entidades anteriores no cambian de forma ni de significado.
+
+Es la respuesta a **S-008**, y sale de una conversación entre los dos equipos
+que también cerró la forma de S-007 —las zonas— sin publicarla: eso es la v13, y
+la razón de partirlas está en § «Lo que NO entra en la v12».
+
+### La entidad `BUSINESS` y `displayCurrencies`
+
+**El problema.** El escaparate tiene los datos para enseñar un precio en varias
+monedas —la tabla global de monedas y las tasas por negocio— y le falta la
+única señal que no puede deducir: **cuáles de ellas quiere enseñar este
+negocio**. Esa señal existe en cuadrecaja (`NegocioMoneda`, con su bandera
+`activo`) y no tenía por dónde viajar: `CURRENCY` es global y no lleva
+`businessId`, y ningún otro evento habla del negocio.
+
+**Por qué no se deriva de las tasas.** Porque por este contrato **no hay forma
+de borrar una tasa** —`operation` se ignora en `EXCHANGE_RATE` y un `DELETE`
+inserta otra fila—, así que una moneda que el comercio desactiva conservaría
+sus tasas para siempre y seguiría apareciendo. Y hay una razón peor, que está
+en este mismo documento: la v10.1 recomienda «para retirar una moneda,
+`active: false`» sobre una tabla que ella misma declara **global a la
+plataforma**. Un negocio que retire el euro se lo retira a todos.
+`displayCurrencies` no es solo la señal que faltaba: es lo que evita que
+alguien siga esa recomendación.
+
+**Por qué una entidad nueva y no un campo en `STORE`.** El dato es del negocio
+y `STORE` es la sucursal, así que la lista viajaría repetida en N eventos, y
+**cualquiera de ellos puede fallar por separado**: dos sucursales de la misma
+marca acabarían enseñando listas distintas sin que nada estuviera roto. Y hay un
+camino concreto para que pase: desde la v9, un `openingHours` malformado
+**rechaza el evento `STORE` entero**, así que habilitar el euro se perdería
+justo en la sucursal que tiene el calendario mal puesto, con el único rastro en
+un `failed[]` de un evento que iba de otra cosa.
+
+`BUSINESS` **no añade ninguna dependencia de orden** — la lista de la v11 ③
+sigue teniendo dos y solo dos. No puede llegar antes de que el negocio exista,
+porque sin la fila no hay token que autentique el lote (§ Aprovisionamiento). Y
+una moneda de la lista que todavía no tiene su `CURRENCY` ni su `EXCHANGE_RATE`
+**no hace fallar el evento**: se guarda en la lista y no se pinta hasta que
+tenga tasa.
+
+### Lo que NO entra en la v12
+
+**Las zonas (S-007) van en la v13**, y la conversación ya está cerrada: hay
+forma acordada —`ZONE_BASED`, `ZONE_TARIFF` con `rule` y sin `DELETE`,
+`STORE.zoneCode`, `contact.zoneCode` y `contact.zoneName`, catálogo DPA y un
+vector de precedencia ejecutable— y quedan tres cosas por cerrar antes de
+publicarla: el formato del catálogo geográfico, cómo se versiona, y calcular el
+vector ejecutando.
+
+Se parten a propósito, y el criterio no es el que agrupó las cuatro de la v11.
+Allí las cuatro estaban **decididas** y publicar tres versiones seguidas solo
+repartía la misma lectura en tres. Aquí una está decidida y la otra tiene
+diseño abierto: agruparlas sería retener la decidida como rehén de la otra. Del
+lado de cuadrecaja eso se mide — el feature del escaparate multi-moneda se
+queda sin ninguna dependencia el día que se publique esta versión, mientras la
+rama de zonas arrastra cuatro features—, y la espera la pagaría quien no tiene
+por qué esperar.
+
+## Cambios respecto a la v10.1
+
+Sube como **mayor** por dos motivos, y conviene tenerlos separados: cambia lo
+que el POS **recibe** —un evento que hoy vuelve en `ok` puede volver en
+`failed[]`, con un código de error nuevo— y convierte en **decisivo** un campo
+que hasta ahora se validaba y se tiraba. Quien implementó la v10.1 no tiene
+ningún campo nuevo que emitir, pero sí tres reglas que dejan de ser las que leyó.
+
+Es la respuesta a cuatro solicitudes de `.agents/solicitudes-qab.md` —S-002,
+S-004, S-005 y S-006—, y van en una sola versión a propósito. La v10.1 cerró
+diciendo que cambiar cualquiera de sus cinco asimetrías era «una v11 y no una
+corrección de redacción»: **lo fue, y tres de las cinco cambian aquí**. Publicar
+tres versiones seguidas para que la cuarta las reagrupara habría sido peor para
+quien las implementa.
+
+### ① `EXCHANGE_RATE` y `CURRENCY` sí invalidan caché (S-004)
+
+Aplicar un evento `EXCHANGE_RATE` **expira las páginas cacheadas de las
+sucursales del negocio** al que pertenece la tasa. Un `CURRENCY` expira las del
+negocio que lo emite —su tabla es global y el evento no lleva `businessId`, así
+que el emisor es lo único que hay—, y basta: hoy ninguna página pública lee esa
+tabla.
+
+Las dos condiciones que pedía la solicitud quedan escritas porque son promesas,
+no casualidades de la implementación de hoy:
+
+- **Coalescido por lote y por negocio.** Las tres o cuatro monedas que registra
+  un clic de las tasas de referencia llegan en el mismo drenaje y producen
+  **una** invalidación por sucursal, no una por moneda. Un lote de 500 eventos
+  sobre tres tiendas expira esas tres sucursales, una vez cada una.
+- **Alcance por negocio, nunca global.** Que un comercio mueva su tasa del euro
+  no toca la vitrina de ningún otro.
+
+**Lo que no promete: instantaneidad.** Invalidar es expirar la marca, no
+repintar la página: la vitrina se rehace en la primera visita posterior. La
+ventana deja de ser de hasta una hora y pasa a ser la de una petición, que es lo
+que la solicitud pedía cerrar.
+
+El checkout no cambia en nada: seguía y sigue leyendo las tasas frescas en cada
+pedido. La frase de la v10.1 —«ni `CURRENCY` ni `EXCHANGE_RATE` invalidan
+ninguna caché»— **deja de ser cierta** y se corrige en § «`payload` de
+`EXCHANGE_RATE`».
+
+### ② La tasa vigente es la de `updatedAt` más reciente (S-005)
+
+Hasta la v10.1, «vigente» era **la última que llegó**, y por eso una tasa vieja
+reintentada después de una nueva se convertía en la vigente sin error, sin
+alerta y sin que ninguno de los dos lados lo detectara. A partir de la v11, la
+tasa vigente de un par `(negocio, moneda)` es **la de `updatedAt` mayor**. En
+un empate exacto gana la última que llegó.
+
+Lo que **no** cambia, y es la mitad de la decisión:
+
+- **Sigue siendo append-only.** Cada evento inserta su fila, no se borra nada y
+  el histórico queda completo. No hay hueco.
+- **No hay rechazo ni vocabulario nuevo.** Una tasa rancia se inserta igual y
+  responde `processed`, como siempre: simplemente no gana. No vuelve en
+  `failed[]`, así que **no gasta ninguno de los reintentos del outbox** — que es
+  justo lo que la variante de rechazo habría costado.
+- **Corregir una tasa sigue siendo enviar otra.** Con un `updatedAt` mayor, que
+  ahora es lo que decide.
+
+Lo que sí cambia para el emisor: **`updatedAt` deja de ser decorativo en
+`EXCHANGE_RATE`.** Tiene que ser el instante real en que el comercio registró
+esa tasa —no el del reenvío, no `now()` al drenar el outbox—, porque es el
+único árbitro cuando dos eventos de la misma moneda se aplican en desorden. El
+campo ya viajaba y ya se validaba: no hay nada nuevo que emitir, solo algo que
+ya no se puede rellenar de cualquier manera.
+
+`CURRENCY` **no cambia**: su tercera asimetría sigue en pie, gana el último que
+llegue, y se convive con ello porque el nombre de una moneda no cambia casi
+nunca.
+
+### ③ Un fallo arrastra a lo que dependía de él en el mismo lote (S-006)
+
+Si un evento falla, **los eventos posteriores del mismo lote que dependen de él
+no se aplican**: vuelven en `failed[]` con
+`error: "DEPENDENCY_FAILED_IN_BATCH"`. No se aplican a medias, no se aplican con
+la referencia a `NULL` y no dejan ninguna fila provisional.
+
+Las dependencias reconocidas son **dos, y solo dos**:
+
+| Falla      | Arrastra, dentro del mismo lote y solo hacia adelante                    |
+| ---------- | ------------------------------------------------------------------------ |
+| `CATEGORY` | los `PRODUCT` cuyo `localCategoryId` es el `categoryId` de esa categoría |
+| `CURRENCY` | las `EXCHANGE_RATE` cuyo `currency` es el `code` de esa moneda           |
+
+**`CURRENCY` no arrastra a `PRODUCT`, y no es un olvido.** Un `PRODUCT` no
+consulta la tabla de monedas ni depende de ella: guarda el código de moneda tal
+cual, sin clave ajena y sin comprobación. Un producto en una moneda que nadie
+declaró nunca se publica igual y correctamente. La fila provisional `USD / USD`
+la crea **solo** una `EXCHANGE_RATE`, que es la que sí arrastra.
+
+Tres límites que conviene leer antes de contar con esto:
+
+1. **Solo dentro del lote, y solo hacia adelante.** Una categoría que **nunca
+   llegó** —no está en este lote— sigue dejando el producto publicado con
+   `localCategoryId: NULL`, exactamente como en la v10.1. La cascada evita
+   aplicar mal; no repara lo ya aplicado mal.
+2. **El arrastrado nunca llegó a aplicarse, así que su `updatedAt` original
+   sigue sirviendo.** Reintentadlo tal cual, sin fabricar una marca nueva: la
+   guarda anti-rancio lo compara con lo guardado, que es más viejo, y entra. La
+   trampa de la marca nueva es de la reparación _a posteriori_, no de esto.
+3. **Mientras la dependencia siga fallando, el dependiente deja de existir en
+   vez de existir mal.** Es el precio de la regla y hay que decirlo entero: si
+   un `CATEGORY` agota los reintentos del outbox, sus `PRODUCT` los agotan
+   detrás y el comerciante no ve el producto en absoluto, donde antes lo veía
+   sin categoría. Se acepta porque un producto visible con datos falsos es peor
+   que un producto que llega una corrida más tarde, y porque la cascada solo se
+   dispara cuando algo **ya** había fallado.
+
+De las dos cosas que la v10.1 llamaba «el orden importa, y los dos fallan en
+silencio», la primera deja de fallar en silencio **cuando las dos van en el
+mismo lote**. Emitir la categoría antes que sus productos —y `CURRENCY` antes
+que su primera `EXCHANGE_RATE`— sigue siendo lo correcto: la cascada es una red,
+no un permiso para desordenar.
+
+### ④ El SQL espejo excluye los borrados en blando (S-002)
+
+Confirmado lo que preguntaba la solicitud: **el espejo del § ⑤ no cuenta las
+filas dadas de baja**, y la exclusión es responsabilidad del lado que tiene la
+columna. El SQL publicado gana las dos condiciones y la razón queda escrita ahí
+mismo, en la quinta decisión de esa sección.
+
+Es la única de las cuatro que por su letra habría sido una **menor**: no cambia
+lo que el POS envía ni recibe, solo escribe en el documento vinculante una regla
+que si cada lado deduce por su cuenta deja de detectar lo que existe para
+detectar. Va aquí porque la v11 se abría igualmente.
+
+### Lo que NO entra en la v11, y está en conversación
+
+S-007 (envío por zonas: `ZONE_BASED`, tarifario por zona, `contact.zoneCode`) y
+S-008 (`displayCurrencies`) **no se especifican en esta versión**. No hay campo,
+ni enum, ni entidad, ni ruta: nada de este bloque es implementable todavía. Está
+escrito aquí, y no solo en los dos ficheros de agentes, porque es el documento
+que los dos equipos leen.
+
+Lo que este lado ya puede afirmar:
+
+- **`ZONE_BASED` como tercer valor de `deliveryFeeMode` es el camino previsto**,
+  no una excepción: la ADR 0028 de queandabuscando dice que un modo de envío
+  nuevo es una versión del contrato y no un literal más, y su § «Reabrir cuando»
+  nombra exactamente esto.
+- **`ZONE_TARIFF` como sexta entidad del outbox, de acuerdo**, y no un array
+  anidado en el `payload` de `STORE`. Además del tamaño, que es el argumento de
+  la solicitud: el `payload` de `STORE` es un upsert de la fila entera con guarda
+  anti-rancio, así que cambiar una tarifa reenviaría la configuración del local y
+  competiría con la guarda por quién escribió el último.
+- **`contact.zoneCode` y `contact.lat`/`lng` opcionales, de acuerdo**, con el
+  `zoneCode` como lo que decide el precio y las coordenadas nunca. Es contrato
+  mayor —cambia la forma del pedido en el pull— y no tiene más misterio.
+- **Esto no arrastra PostGIS a queandabuscando.** La ADR 0011 se reabre con «una
+  consulta de tipo tiendas a menos de N km», y esta propuesta deja las
+  coordenadas fuera del precio a propósito. `Store.latitude`/`longitude` ya
+  viajan y ya se guardan: para el `zoneCode` no hace falta geometría.
+- **El mapa donde la persona toca su municipio lo pinta el checkout de
+  queandabuscando, no el POS.** «Los polígonos no viajan por el sync» resuelve el
+  cable, no la pantalla: dibujar ese mapa es servir geometría a un navegador, y
+  un GeoJSON municipal de Cuba, aun simplificado, son cientos de KB en la página
+  cuyo peso importa y para un público con conexión limitada. La propuesta de este
+  lado es un selector jerárquico —provincia → municipio— como camino primario,
+  sin geometría, y el mapa detrás de una carga diferida si se demuestra que hace
+  falta. Es el mismo argumento con el que la solicitud descarta el GPS: la zona la
+  elige la persona.
+- **Las cuatro preguntas abiertas, contestadas como propuesta:** una zona sin
+  tarifa es «no entregamos ahí» y la tienda declara las que sirve; los modos son
+  **excluyentes**, que es lo único consistente con lo anterior; un `zoneCode` que
+  este lado no conoce es un `400` con nombre propio y nunca una tarifa que nadie
+  puede seleccionar; y la versión del catálogo se publica **en este documento**,
+  que es donde los dos lados ya miran para saber si hablan de lo mismo. De
+  acuerdo también con sembrar desde OpenStreetMap y con no meter Google Maps.
+- **`displayCurrencies`: sí a la señal explícita, y el problema abierto es
+  dónde.** Derivarla de las tasas no vale, por lo que dice la solicitud —no hay
+  forma de borrar una tasa— y por algo peor que está en este mismo documento: la
+  v10.1 recomienda «para retirar una moneda, `active: false`» sobre una tabla que
+  ella misma declara **global a la plataforma**. Un negocio que retire el euro se
+  lo retira a todos. El dato es del negocio, y en el cable no hay entidad de
+  negocio: `STORE` es el único evento que lleva `businessId` y todo lo del
+  negocio viaja de rebote ahí (`businessName`, `baseCurrency`). Repetir ese
+  patrón —con su coste conocido: N sucursales repiten la lista y la escribe la
+  que llegue la última— o abrir una entidad `BUSINESS`. Con `ZONE_TARIFF`
+  entrando en la misma conversación, la propuesta de este lado es repetir el
+  patrón.
+- **El redondeo de los equivalentes ya cumple lo que pedía la solicitud.** La
+  conversión de queandabuscando va del importe al ancla CUP y de ahí al destino
+  en una sola división, con redondeo half-up alejándose del cero sobre enteros
+  escalados, y es la misma función que usa el checkout: dos monedas que no son
+  CUP pasan por CUP porque no hay otro camino. Con ① aceptada, además, los
+  equivalentes se pueden pintar en el servidor sin quedarse viejos, así que no
+  hace falta convertir en el cliente ni publicar un endpoint de tasas.
 
 ## Cambios respecto a la v10
 
@@ -70,6 +358,13 @@ aquí porque quien asumiera que las cinco entidades se comportan igual que
 
 Si alguna de esas reglas no es la que cuadrecaja necesita, la conversación es
 una v11 y no una corrección de redacción: decidlo y se coordina.
+
+**Lo dijeron, y la conversación fue.** Tres de esas cinco reglas cambian en la
+v11 —la caché, la tasa vigente y el arrastre de un fallo dentro del lote—, así
+que **lo que sigue en esta sección describe la v10.1 y no el contrato vigente**:
+se conserva como estaba porque es el registro de lo que se acordó entonces. Lo
+que manda está arriba, en § «Cambios respecto a la v10.1», y en las secciones
+normativas que esa versión corrige.
 
 ## Cambios respecto a la v9
 
@@ -568,8 +863,12 @@ existían con otro nombre de variable; los siguientes son de la v3; la fila de
 v6 (F-031), propia de `POST /api/internal/orders/status`; `400
 INVALID_QUERY` es de `GET /api/internal/orders` — la ruta lo emite desde su
 primera versión (F-007), pero esta tabla nunca lo había documentado hasta la
-v8 (F-033)—; y `STORE_OPENING_HOURS_INVALID`/`STORE_TIMEZONE_INVALID` son de
-la v9 (F-022), las dos como `207 failed[]`, nunca como `400` de lote.
+v8 (F-033)—; `STORE_OPENING_HOURS_INVALID`/`STORE_TIMEZONE_INVALID` son de
+la v9 (F-022), las dos como `207 failed[]`, nunca como `400` de lote; y
+`DEPENDENCY_FAILED_IN_BATCH` es de la v11, también como `207 failed[]`, y es el
+único de la tabla que **no** dice que el evento estuviera mal; y
+`BUSINESS_DISPLAY_CURRENCIES_INVALID` y `BUSINESS_DELETE_NOT_SUPPORTED` son de
+la v12, las dos como `207 failed[]` y las dos propias de la entidad `BUSINESS`.
 
 | Código | Cuerpo                                                                                  | Cuándo                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -589,6 +888,9 @@ la v9 (F-022), las dos como `207 failed[]`, nunca como `400` de lote.
 | `400`  | `{"error":"INVALID_QUERY","issues":[{"path":[...],"message":"..."}]}`                   | **Documentado en v8 (F-033), la ruta lo emite desde F-007.** Propia de `GET /api/internal/orders`. `path` nombra el parámetro con forma inválida (`status`, `ids`, `after`, `limit`, `since`); `path: []` cuando el problema es la COMBINACIÓN de parámetros, con `message` uno de `SINCE_WITH_LATERAL_READ`, `STATUS_WITH_IDS`, `AFTER_WITHOUT_STATUS`, `LIMIT_WITH_IDS` o `IDS_LIMIT_EXCEEDED` (este último con `path: ["ids"]`) — ver § ③④ Pedidos, «Las lecturas laterales» |
 | `207`  | `"failed":[{"id":"...","error":"STORE_OPENING_HOURS_INVALID"}]`                         | **Nuevo (v9, F-022).** Un `payload` de `STORE` cuyo `openingHours` no cumple el formato de § «`payload` de `STORE`». Rechaza **ese evento**, nunca el lote: `SyncEvent.status = "FAILED"`, ninguno de sus campos se aplica —tampoco un `name` o un `phone` que viajaran con él— y el resto del lote sí se aplica. Reintentadlo cuando el calendario sea válido                                                                                                                  |
 | `207`  | `"failed":[{"id":"...","error":"STORE_TIMEZONE_INVALID"}]`                              | **Nuevo (v9, F-022).** Al publicar o republicar una tienda (`publishToStore: true` cuando el opt-in cambia), su `timezone` no es un identificador IANA que queandabuscando reconozca. `timezone` es del panel — no lo dispara nada que el `payload` del POS envíe hoy —, y se corrige a mano en queandabuscando, nunca desde el POS                                                                                                                                             |
+| `207`  | `"failed":[{"id":"...","error":"BUSINESS_DISPLAY_CURRENCIES_INVALID"}]`                 | **Nuevo (v12).** Algún miembro de `displayCurrencies` no tiene la forma de un código de moneda. Rechaza **ese evento**, nunca el lote: el resto se aplica y la lista guardada queda como estaba. Corregidlo y reenviadlo — reintentarlo sin corregir falla otra vez                                                                                                                                                                                                             |
+| `207`  | `"failed":[{"id":"...","error":"BUSINESS_DELETE_NOT_SUPPORTED"}]`                       | **Nuevo (v12).** Un evento `BUSINESS` con `operation: "DELETE"`. No hay nada que borrar: la lista completa viaja en cada evento y vaciarla es enviar `[]`. Se rechaza en vez de ignorarse en silencio, a diferencia de `CURRENCY` y `EXCHANGE_RATE`                                                                                                                                                                                                                             |
+| `207`  | `"failed":[{"id":"...","error":"DEPENDENCY_FAILED_IN_BATCH"}]`                          | **Nuevo (v11).** El evento es correcto: falló **otro** evento anterior del mismo lote del que este depende (`CATEGORY` → sus `PRODUCT`, `CURRENCY` → sus `EXCHANGE_RATE`), así que no se aplica en absoluto en vez de aplicarse a medias. Reintentadlo **tal cual**, con su `updatedAt` original, cuando la dependencia entre — § «Cambios respecto a la v10.1» ③                                                                                                               |
 
 Un recurso de otro negocio nunca responde distinto de uno inexistente: ni
 `/orders/status`, ni `/reconciliation`, ni `/slug-availability` (que además
@@ -727,8 +1029,9 @@ La identidad del negocio sale del token (§ Autenticación); este campo se
 sigue enviando en el mismo formato de siempre, pero ahora solo se usa para
 comprobar que coincide con el del token autenticado. Si no coincide —en la
 raíz o en el `payload` de cualquier evento que lleve `businessId`
-(`STORE`, `CATEGORY`, `PRODUCT`, `EXCHANGE_RATE`; `CURRENCY` no lo lleva)—
-el lote entero se rechaza con `403 BUSINESS_MISMATCH` y no se escribe nada.
+(`STORE`, `CATEGORY`, `PRODUCT`, `EXCHANGE_RATE`, `BUSINESS`; `CURRENCY` no lo
+lleva)— el lote entero se rechaza con `403 BUSINESS_MISMATCH` y no se escribe
+nada.
 
 ```jsonc
 {
@@ -736,7 +1039,7 @@ el lote entero se rechaza con `403 BUSINESS_MISMATCH` y no se escribe nada.
   "events": [
     {
       "eventId": "<OutboxEvento.id>",
-      "entity": "PRODUCT", // STORE | CATEGORY | PRODUCT | CURRENCY | EXCHANGE_RATE
+      "entity": "PRODUCT", // STORE | CATEGORY | PRODUCT | CURRENCY | EXCHANGE_RATE | BUSINESS (v12)
       "operation": "UPDATE", // CREATE | UPDATE | DELETE
       "occurredAt": "2026-08-25T14:03:00.000Z",
       "payload": {},
@@ -747,19 +1050,20 @@ el lote entero se rechaza con `403 BUSINESS_MISMATCH` y no se escribe nada.
 
 #### Mapeo de nombres
 
-| Wire (inglés)        | cuadrecaja (español)                                        |
-| -------------------- | ----------------------------------------------------------- |
-| `storeProductId`     | `ProductoTienda.id`                                         |
-| `productId`          | `Producto.id`                                               |
-| `storeId`            | `Tienda.id`                                                 |
-| `businessId`         | `Negocio.id`                                                |
-| `localName`          | `Producto.nombre`                                           |
-| `barcodes`           | `CodigoProducto.codigo` de **todas** las filas del producto |
-| `price` / `currency` | `ProductoTienda.precio` / `monedaPrecioCode`                |
-| `canonicalProductId` | `Producto.productoCanonicoId`                               |
-| `publishToStore`     | `Producto.publicarEnTienda` / `Tienda.publicarEnTienda`     |
-| `availability`       | derivado de `existencia` y `umbralBajo`                     |
-| `updatedAt`          | `updatedAt` de la fila de origen                            |
+| Wire (inglés)        | cuadrecaja (español)                                                        |
+| -------------------- | --------------------------------------------------------------------------- |
+| `storeProductId`     | `ProductoTienda.id`                                                         |
+| `productId`          | `Producto.id`                                                               |
+| `storeId`            | `Tienda.id`                                                                 |
+| `businessId`         | `Negocio.id`                                                                |
+| `localName`          | `Producto.nombre`                                                           |
+| `barcodes`           | `CodigoProducto.codigo` de **todas** las filas del producto                 |
+| `price` / `currency` | `ProductoTienda.precio` / `monedaPrecioCode`                                |
+| `canonicalProductId` | `Producto.productoCanonicoId`                                               |
+| `publishToStore`     | `Producto.publicarEnTienda` / `Tienda.publicarEnTienda`                     |
+| `availability`       | derivado de `existencia` y `umbralBajo`                                     |
+| `updatedAt`          | `updatedAt` de la fila de origen                                            |
+| `displayCurrencies`  | los `NegocioMoneda.monedaCode` con `activo`, más `Negocio.monedaBase` (v12) |
 
 #### `payload` de `PRODUCT` (v4)
 
@@ -1089,17 +1393,101 @@ a diferencia de los slugs de primer nivel, que no vuelven nunca (§ ⑥).
 productos no se reasignan ni se despublican. Un `DELETE` de una categoría que
 aquí no existe responde `processed`: no hay nada que hacer.
 
-**El orden importa, y su fallo es silencioso.** Un `PRODUCT` cuyo
-`localCategoryId` apunta a una categoría que todavía no llegó **no falla**: se
-guarda sin categoría, con `localCategoryId` a `NULL`, y se queda así hasta el
-siguiente evento de ese producto — el evento de la categoría, cuando llegue, no
-va a buscar quién la esperaba. Fallar el evento sería peor (bloquearía el
-producto por un dato accesorio), pero la consecuencia es la que es: **emitid la
-categoría antes que sus productos**, y si el orden ya se invirtió, reenviad los
-productos afectados.
+**El orden importa, y su fallo es silencioso salvo en un caso.** Un `PRODUCT`
+cuyo `localCategoryId` apunta a una categoría que **todavía no llegó** —que no
+viene en este lote— **no falla**: se guarda sin categoría, con `localCategoryId`
+a `NULL`, y se queda así hasta el siguiente evento de ese producto; el evento de
+la categoría, cuando llegue, no va a buscar quién la esperaba. Fallar el evento
+sería peor: bloquearía el producto por un dato accesorio.
+
+**El caso que sí cambia en la v11**: si el `CATEGORY` viene en **este mismo
+lote** y vuelve en `failed[]`, los `PRODUCT` posteriores del lote que lo
+referencian no se aplican y vuelven también en `failed[]`, con
+`DEPENDENCY_FAILED_IN_BATCH` — § «Cambios respecto a la v10.1» ③. Ahí no queda
+ningún producto publicado sin su categoría.
+
+En los dos casos la regla de emisión no cambia: **emitid la categoría antes que
+sus productos**, y si el orden ya se invirtió, reenviad los productos
+afectados.
 
 Las páginas de las sucursales que tengan productos en esa categoría se
 invalidan solas, sin que el POS pida nada.
+
+#### `payload` de `BUSINESS` (v12)
+
+La sexta entidad, y la única que habla del **negocio** y no de una sucursal ni
+de un producto. Hoy lleva un solo dato.
+
+```jsonc
+{
+  "businessId": "uuid",
+  "displayCurrencies": ["CUP", "USD", "EUR"], // qué monedas enseña el escaparate
+  "updatedAt": "2026-09-06T14:03:00.000Z",
+}
+```
+
+| Campo               | Tipo       | Obligatorio | Notas                                                                                                                                                                                                                                             |
+| ------------------- | ---------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `businessId`        | `string`   | **sí**      | Tiene que coincidir con el del token; si no, `403 BUSINESS_MISMATCH` del lote entero                                                                                                                                                              |
+| `displayCurrencies` | `string[]` | **sí**      | Códigos de 3 caracteres. `[]` es válido y significa «solo la moneda base». Sin tope de longitud, a propósito — ver abajo                                                                                                                          |
+| `updatedAt`         | ISO 8601   | **sí**      | Guarda anti-rancio, como en `STORE`, `PRODUCT` y `CATEGORY`: un evento con `updatedAt` menor o igual al guardado no escribe y da `stale`. **Es el instante en que cambió la lista** (v12.1), no el de una fila ni el máximo de varias — ver abajo |
+
+**`operation`: `CREATE` y `UPDATE` hacen lo mismo** —el `payload` trae la lista
+**completa**, no un delta, así que no hay nada que distinguir—. **Un `DELETE`
+se rechaza** con `BUSINESS_DELETE_NOT_SUPPORTED` en `failed[]`: vaciar la lista
+es enviar `[]`, y no hay ninguna otra cosa que un borrado pudiera significar.
+Se rechaza en vez de ignorarse en silencio a propósito — la v10.1 ya tiene dos
+entidades que ignoran `operation` sin decir nada y eso solo se descubre
+leyendo este documento con lupa.
+
+**Un código malformado no mata el lote: falla ese evento.** Si algún miembro de
+la lista no tiene la forma de un código de moneda, el evento vuelve en
+`failed[]` con `BUSINESS_DISPLAY_CURRENCIES_INVALID` y **el resto del lote se
+aplica**. Es deliberado y sigue el camino que abrió `openingHours` en la v9: la
+lista se valida en el aplicador y no en el schema del sobre, porque declararla
+estricta ahí convertiría un código basura en un `400 INVALID_BATCH` que se
+lleva por delante los otros 499 eventos del lote. Ruido en el evento correcto,
+no en el lote entero.
+
+**Sin tope de longitud**, por la misma razón que `barcodes` no lo tiene desde
+la v4: un tope convierte un dato que el POS no puede cambiar en un `400`
+permanente. Los duplicados se descartan sin error.
+
+**El `updatedAt` es el instante en que cambió la lista** (v12.1), fijado dentro
+de la transacción que la escribe. Las otras cuatro entidades con guarda mapean
+una fila a un evento y ahí «la marca de la fila de origen» es una instrucción
+clara; aquí la lista es un **conjunto** y ninguna de sus filas es la que cambió.
+Y no es el **máximo** de las marcas de esas filas: retirar una moneda haría bajar
+ese máximo, así que el evento que sigue al cambio llegaría más viejo que el
+guardado, se responderría `stale`, y **la retirada no se aplicaría nunca sin que
+nada fallara**.
+
+**Cómo se usa, que es la mitad que importa.** La lista dice **qué monedas
+enseña el escaparate**, y el escaparate la respeta en el orden en que llega.
+Dos reglas que la acompañan y que conviene conocer antes de emitirla:
+
+1. **La lista no se poda por falta de tasa.** Es una declaración del
+   comerciante, no una lista derivada: ni el ancla, ni la moneda base, ni una
+   moneda sin tasa vigente se caen de ella. Lo que se omite es **el importe
+   concreto que no se puede calcular**, producto a producto y moneda a moneda —
+   nunca un cero, nunca un hueco y nunca un error que sube.
+2. **El importe en la moneda base es el primario y es el que se cobra.** Los
+   demás se muestran **junto a él** como aproximados, nunca en su lugar: un
+   comprador al que se le enseña el euro como número principal y se le cobra en
+   CUP es exactamente la confusión que esta entidad viene a evitar. Si la base
+   no viene en la lista, se enseña igual — es la moneda del cobro, no una
+   preferencia.
+
+**El redondeo es el mismo que el del checkout, y no es una coincidencia.** La
+conversión va del importe al ancla CUP y de ahí al destino **en una sola
+división**, con redondeo half-up alejándose del cero sobre enteros escalados, y
+la hace la misma función que cotiza un pedido. Dos monedas que no son CUP pasan
+por CUP porque no hay otro camino: el ancla es el único par que existe.
+
+**Nada de esto necesita una caché nueva ni un endpoint de tasas.** Los importes
+se calculan en el servidor y viajan en el HTML; la v11 ① ya expira la marca de
+la tienda cuando llega un `EXCHANGE_RATE`, así que una página cacheada no puede
+quedarse con una tasa vieja.
 
 #### `payload` de `CURRENCY`
 
@@ -1147,6 +1535,11 @@ código (`CUP`, `USD`), no con `symbol`. La fila existe para que la clave ajena
 de `ExchangeRate` resuelva y para el día que el marketplace formatee con
 símbolo. Enviar `CURRENCY` no cambia nada visible por sí solo.
 
+**Aun así invalida la caché de las sucursales del negocio que lo emite** (v11,
+§ «Cambios respecto a la v10.1» ①). Es preventivo —hoy no hay nada visible que
+refrescar—, y es el emisor porque el evento no lleva `businessId` y la tabla es
+de todos.
+
 #### `payload` de `EXCHANGE_RATE`
 
 **Documentado aquí por primera vez** (v10.1). Es la única entidad de las cinco
@@ -1157,16 +1550,16 @@ que **no** actualiza una fila: la añade.
   "businessId": "uuid",
   "currency": "USD", // exactamente 3 — "CUP" se descarta, ver abajo
   "rate": 420, // > 0. CUP por 1 unidad de `currency`
-  "updatedAt": "2026-09-04T14:03:00.000Z", // se valida, NO se usa
+  "updatedAt": "2026-09-04T14:03:00.000Z", // v11: decide cuál es la vigente
 }
 ```
 
-| Campo        | Tipo     | Obligatorio | Notas                                                                                                                  |
-| ------------ | -------- | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `businessId` | `string` | **sí**      | Tiene que coincidir con el del token; si no, `403 BUSINESS_MISMATCH` del lote entero. Las tasas **sí** son por negocio |
-| `currency`   | `string` | **sí**      | Longitud exacta 3. `"CUP"` responde `skipped_not_published` — ver abajo                                                |
-| `rate`       | `number` | **sí**      | Estrictamente mayor que cero. Se guarda como `Decimal(18,6)`: **6 decimales**, y a partir del séptimo se redondea      |
-| `updatedAt`  | ISO 8601 | **sí**      | Se valida el formato y no se compara con nada: al ser append-only no hay fila anterior con la que comparar             |
+| Campo        | Tipo     | Obligatorio | Notas                                                                                                                                                                     |
+| ------------ | -------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `businessId` | `string` | **sí**      | Tiene que coincidir con el del token; si no, `403 BUSINESS_MISMATCH` del lote entero. Las tasas **sí** son por negocio                                                    |
+| `currency`   | `string` | **sí**      | Longitud exacta 3. `"CUP"` responde `skipped_not_published` — ver abajo                                                                                                   |
+| `rate`       | `number` | **sí**      | Estrictamente mayor que cero. Se guarda como `Decimal(18,6)`: **6 decimales**, y a partir del séptimo se redondea                                                         |
+| `updatedAt`  | ISO 8601 | **sí**      | **Cambia en la v11.** Decide cuál de las filas de ese par `(negocio, moneda)` es la vigente. Tiene que ser el instante real en que se registró la tasa, no el del reenvío |
 
 **`rate` es «CUP por 1 unidad de `currency`», y CUP nunca viaja.** Es el ancla:
 una tasa de CUP contra sí mismo dejaría el ancla ambigua. Un evento con
@@ -1179,24 +1572,38 @@ nada: lo para la idempotencia por `eventId` del inbox, que responde `duplicate`
 (§ Idempotencia). Dos eventos distintos con la misma tasa sí dejan dos filas, y
 está bien.
 
-**La tasa vigente es la última que LLEGÓ, no la de `updatedAt` más reciente.**
-Quien lee toma la fila más nueva por su instante de escritura. Un reenvío
-desordenado de una tasa vieja la convierte en la vigente. **Para corregir una
-tasa, enviad la correcta otra vez**: otro evento, otra fila, y esa pasa a ser
-la vigente. No hay forma de borrar una fila de tasas por este contrato — y
-`operation` también se ignora aquí, así que un `DELETE` inserta igual. No lo
-enviéis.
+**La tasa vigente es la de `updatedAt` más reciente** (v11; hasta la v10.1 era
+la última que **llegó**). Quien lee toma, de ese par `(negocio, moneda)`, la
+fila de `updatedAt` mayor; en un empate exacto, la última que llegó. **Para
+corregir una tasa, enviad la correcta otra vez**: otro evento, otra fila con un
+`updatedAt` mayor, y esa pasa a ser la vigente.
+
+Una tasa que llega **desordenada** —un reintento de un evento viejo después de
+uno nuevo— se inserta igual y responde `processed`, pero **no gana**. No es un
+error, no vuelve en `failed[]` y no gasta reintentos: simplemente hay una fila
+más en el histórico que nadie lee. Esto es lo que hace que el orden de entrega
+deje de importar aquí, como ya no importaba en `STORE`, `PRODUCT` y `CATEGORY`.
+
+No hay forma de borrar una fila de tasas por este contrato — y `operation`
+también se ignora aquí, así que un `DELETE` inserta igual. No lo enviéis.
 
 **Si la moneda no existe todavía, se crea al vuelo con `name` y `symbol`
 iguales al código** (`USD` / `USD`). No falla, pero deja una fila provisional
 en la tabla global de monedas hasta que un evento `CURRENCY` la corrija:
 **enviad `CURRENCY` antes que su primera `EXCHANGE_RATE`.**
 
-**Ni `CURRENCY` ni `EXCHANGE_RATE` invalidan ninguna caché.** Una tasa nueva
-puede tardar hasta una hora en verse en el catálogo público —el suelo de
-revalidación de la vitrina, 3600 s—. El checkout, en cambio, las lee frescas
-en cada pedido: **un pedido nunca se cotiza con una tasa caducada**, aunque la
-vitrina todavía muestre la anterior.
+**`EXCHANGE_RATE` y `CURRENCY` invalidan la caché del negocio afectado** (v11;
+hasta la v10.1 no invalidaban nada y una tasa nueva podía tardar hasta una hora
+en verse). Aplicar la tasa expira las páginas cacheadas de las sucursales de ese
+negocio, **una vez por lote y por sucursal** —las cuatro monedas de un mismo
+drenaje no producen cuatro invalidaciones— y **nunca más allá de ese negocio**.
+Invalidar es expirar la marca, no repintar: la vitrina se rehace en la primera
+visita posterior.
+
+El checkout no depende de eso y no ha cambiado: lee las tasas frescas en cada
+pedido, así que **un pedido nunca se cotiza con una tasa caducada**. Lo que la
+v11 arregla es que la vitrina deje de enseñar un importe que el checkout ya no
+va a cobrar.
 
 ### Transformación en queandabuscando
 
@@ -1255,6 +1662,12 @@ terminales, reenviarlos no cambiaría nada.
 `skipped_not_published` **no es un error**: es lo que hace funcionar el opt-in
 por local sin que los dos sistemas tengan que coordinarse. Un evento de una
 tienda que aquí no existe se descarta limpiamente.
+
+**Un `failed` tampoco significa siempre que el evento estuviera mal** (v11). Con
+`error: "DEPENDENCY_FAILED_IN_BATCH"`, el evento es correcto y no se aplicó
+porque falló otro anterior del mismo lote del que dependía; se reintenta tal
+cual, sin tocarle nada, en cuanto la dependencia entre. Los demás `failed` sí
+piden mirar el evento antes de reenviarlo.
 
 Un `PRODUCT` con `operation: UPDATE` **nunca** toca `priceOverride`,
 `description`, `imageUrls`, `visible` ni `featured`: son del panel.
@@ -1910,10 +2323,12 @@ JOIN "Producto" p ON p.id = pt."productoId"
 WHERE pt."tiendaId" = $1
   AND p."publicarEnTienda" = true
   AND pt."precio" IS NOT NULL
-  AND pt."monedaPrecioCode" IS NOT NULL;
+  AND pt."monedaPrecioCode" IS NOT NULL
+  AND p."deletedAt" IS NULL
+  AND pt."deletedAt" IS NULL;
 ```
 
-Cuatro decisiones que este SQL lleva y que no se deducen del pseudocódigo:
+Cinco decisiones que este SQL lleva y que no se deducen del pseudocódigo:
 
 1. **`dispPublicada`, no el enum calculado desde `existencia`/`umbralBajo`.**
    El hash compara lo que ambos lados creen haber _publicado_, no el estado
@@ -1937,6 +2352,17 @@ Cuatro decisiones que este SQL lleva y que no se deducen del pseudocódigo:
    a existir aquí; contarlo del lado de cuadrecaja sería una diferencia
    permanente. El `IS NOT NULL` es además lo que evita el mismo `NULL || ':'`
    del punto 2.
+5. **Los dos `deletedAt IS NULL` (v11, S-002).** cuadrecaja no borra
+   productos: los marca. Una fila dada de baja conserva su precio y su moneda y
+   sigue colgando de un `Producto` con `publicarEnTienda = true`, así que sin
+   estas dos condiciones el espejo la cuenta — y de este lado ese producto ya no
+   está, porque su baja llegó como evento y lo despublicó. El hash divergiría y
+   **no volvería a converger nunca**, que es exactamente la señal con la que la
+   reconciliación concluye que el sync se rompió: alerta y recuperación, una y
+   otra vez, sobre datos correctos. La exclusión la hace el lado que tiene la
+   columna —`deletedAt` es de cuadrecaja— y queda escrita aquí, y no deducida
+   por cada lado, porque un espejo que cada uno ajusta por su cuenta para que le
+   cuadre deja de detectar lo que existe para detectar.
 
 **El orden es de bytes, no el de una colación.** `ORDER BY pt."id" COLLATE
 "C"` — no el `ORDER BY` que cada base use por defecto: dos colaciones
@@ -1996,6 +2422,52 @@ en ningún lado registre un error.
 ---
 
 ## Cambios requeridos en cuadrecaja
+
+### De la v12 — emitir `BUSINESS`, y no antes del aviso
+
+La v12 no pide ninguna columna nueva: `NegocioMoneda` con su `activo` ya
+existe. Pide **un evento nuevo**, `BUSINESS`, con los códigos activos de ese
+negocio, emitido cuando esa lista cambie. Tres cosas que van con él:
+
+1. **No lo emitáis hasta que se avise de que el lado receptor está en pie.**
+   `entity` todavía no admite `BUSINESS`, así que un evento así hoy responde
+   `400 INVALID_BATCH` y **se lleva el lote entero por delante**, incluidos los
+   `PRODUCT` que viajaran con él. Es la única parte de la v12 que puede hacer
+   daño antes de estar construida.
+2. **La lista completa en cada evento, no un delta.** Y con la moneda base
+   dentro: no es obligatorio —si falta, se enseña igual, porque es la moneda del
+   cobro— pero mandarla es lo que hace que las dos listas digan lo mismo. En la
+   práctica, «solo la base» llega como `["CUP"]` y no como `[]`; las dos formas
+   son válidas y significan lo mismo aquí.
+3. **`updatedAt` = el instante real en que cambió la lista** (v12.1), fijado
+   dentro de la transacción que la escribe. Aquí hay guarda anti-rancio: un
+   evento viejo que llegue tarde responde `stale` y no pisa la lista nueva. **No
+   es el máximo de los `updatedAt` de las filas** que componen la lista — retirar
+   una moneda bajaría ese máximo y la retirada no se aplicaría nunca.
+
+### De la v11 — dos cosas de código, ninguna columna
+
+La v11 no pide ni un campo nuevo en el schema de cuadrecaja ni ningún campo
+nuevo en el cable. Pide dos cosas del drenaje del outbox, y las dos son de
+código:
+
+1. **Que el `updatedAt` de un `EXCHANGE_RATE` sea el instante real en que se
+   registró la tasa.** No el del reenvío, no el `now()` del drenaje: a partir de
+   la v11 es lo que decide cuál es la vigente, y un evento reintentado con la
+   marca refrescada volvería a resucitar la tasa vieja — el fallo que la v11
+   viene a cerrar. Si el evento se encola con la marca de la fila de origen,
+   como en las otras entidades, ya está hecho.
+2. **Tratar `DEPENDENCY_FAILED_IN_BATCH` como «todavía no», no como «mal».** El
+   evento es correcto: se reintenta **tal cual**, sin fabricarle un `updatedAt`
+   nuevo, en cuanto entre la dependencia que falló. Conviene que no gaste el
+   contador de intentos como un fallo propio: si el corte del outbox lo trata
+   como los demás, un `CATEGORY` que tarde varias corridas se lleva por delante
+   a sus productos.
+
+Sigue siendo buena idea la mitigación que la propia solicitud describía:
+**cancelar los `EXCHANGE_RATE` pendientes del mismo par `(negocio, moneda)` al
+encolar uno nuevo**. La guarda de la v11 no la sustituye — cubren cosas
+distintas y son dos capas, no dos candidatas.
 
 ### De la v6 (F-031) — no hay migración, es código
 
@@ -2168,6 +2640,14 @@ node scripts/quote-delivery-order.mjs --quote     # cotizar reenviando las líne
 node scripts/quote-delivery-order.mjs --dispatch  # 409 ORDER_DELIVERY_NOT_QUOTED en READY, IN_TRANSIT y DELIVERED
 node scripts/quote-delivery-order.mjs --expire    # vence contado desde la creación, con su cancelReason propio
 ```
+
+**Ni la v11 ni la v12 tienen guion propio, y no lo tendrán hasta que estén
+construidas.** Las tres reglas de la v11 se verifican con los features que las
+implementan —F-035 (caché), F-036 (tasa vigente) y F-037 (arrastre en el
+lote)—, cada uno con sus criterios ejecutables; la v12 lo hará con el suyo
+cuando exista. Mientras tanto, `send-catalog-batch.mjs --stale`
+sigue verificando la guarda anti-rancio de las entidades que ya la tenían, que
+es lo que F-036 extiende a las tasas.
 
 El criterio 6 de F-024 —cuántos productos canónicos comparten códigos entre
 negocios distintos— se mide con `npm run count:barcodes`

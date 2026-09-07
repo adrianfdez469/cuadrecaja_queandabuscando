@@ -353,27 +353,49 @@ sincronización **cada 2 minutos** y el de reconciliación diario.
 Cada cambio en `sync-contract.md` se coordina con el otro equipo y **mueve la
 versión de su primera línea**, aunque sea una menor (§ «Versionado de este
 documento» del contrato): mayor si cambia lo que el POS envía o recibe, menor si
-solo aclara lo ya acordado. La versión vigente es la **v10** (F-034): abre una
-octava ruta, `POST /api/provisioning/credential`, y por eso es mayor — pero es
-**aditiva**, ninguna de las siete rutas de sync cambia de forma ni de
-significado, y un token acuñado antes de la v10 sigue valiendo igual.
+solo aclara lo ya acordado. La versión vigente es la **v12.1** (2026-09-06): la
+v12 abre la sexta entidad del outbox, `BUSINESS`, y **sí es aditiva** — quien
+implementó la v11 y no la emita sigue siendo un lector correcto. La v11, del
+mismo día, responde cuatro solicitudes de cuadrecaja y **no es aditiva** — ver
+abajo. La v10 (F-034) sí lo era: abre una octava ruta,
+`POST /api/provisioning/credential`, y por eso es mayor, pero ninguna de las
+siete rutas de sync cambia de forma ni de significado y un token acuñado antes
+de la v10 sigue valiendo igual.
 
-No todas las mayores anteriores lo fueron. La v6 (F-031) **no fue aditiva en
-dos cosas**: `POST /orders/status` responde `409` al despachar un pedido con
+No todas las mayores lo son. **La v11 no es aditiva en dos cosas**, y ninguna
+es un campo: el `updatedAt` de un `EXCHANGE_RATE` pasa de validarse y tirarse a
+decidir cuál es la tasa vigente —un emisor que lo rellenara con el instante del
+reenvío empieza a equivocarse—, y un evento correcto puede volver en `failed[]`
+con `DEPENDENCY_FAILED_IN_BATCH` porque falló otro del mismo lote del que
+dependía. La v6 (F-031) **no fue aditiva en dos cosas**: `POST /orders/status` responde `409` al despachar un pedido con
 el envío sin cotizar —la primera guarda de transición del contrato, y
 retracta la línea de la v5 que decía que no había ninguna—, y todos los
 importes del payload del pull pasan a traer dos decimales, que es un arreglo
 de un formato que el documento llevaba mal desde la v2. La v5 tampoco fue
 aditiva, en el enum de estados de pedido: pasó de 6 a 9 valores.
 
-Las tres se publicaron sin periodo de convivencia porque no hay consumidor vivo
-todavía. **Cuando lo haya, esa vía se cierra**: una versión no aditiva pasará a
+Esas cuatro se publicaron sin periodo de convivencia porque no hay consumidor
+vivo todavía. **Cuando lo haya, esa vía se cierra**: una versión no aditiva pasará a
 necesitar bandera por negocio y ventana de migración.
 
 La v6 se publicó además **antes** de estar implementada aquí, a propósito, para
-que cuadrecaja empezara en paralelo; su tercera línea lo dice y enumera qué no
-responde todavía. Si publicas otra así, mantén ese aviso al día: es lo único que
-impide que el otro equipo depure contra un endpoint que no existe. La lista corta
+que cuadrecaja empezara en paralelo; su tercera línea lo decía y enumeraba qué
+no respondía todavía. **Ese aviso se quedó puesto tres versiones después de
+dejar de ser cierto**, y se retiró al publicar la v11: si publicas una versión
+así, el aviso hay que quitarlo cuando el lado receptor entra en pie, no solo
+ponerlo — mientras está, es lo único que impide que el otro equipo depure contra
+un endpoint que no existe, y cuando sobra les esconde uno que sí existe. La v11 y la v12
+están publicadas de la misma forma: las tres reglas de la v11 esperan a F-035,
+F-036 y F-037, y la cabecera del contrato dice qué vale mientras tanto.
+
+**De la v12 hay que avisar en un orden concreto, y esta es la parte
+operativa.** `entity` no admite todavía `BUSINESS`, así que un evento así
+responde `400 INVALID_BATCH` y **se lleva el lote entero**, incluidos los
+`PRODUCT` que viajaran con él. La cabecera del contrato y § «Cambios requeridos
+en cuadrecaja» lo dicen las dos: **no emitir `BUSINESS` hasta el aviso**. El
+aviso se manda cuando el schema del sobre lo acepte, no cuando la lista se
+empiece a usar en el escaparate — aceptarlo y no pintarlo es inofensivo;
+pintarlo sin aceptarlo no existe. La lista corta
 de lo que les toca implementar está en
 [`traspaso-cuadrecaja-envio-cotizado.md`](traspaso-cuadrecaja-envio-cotizado.md).
 
