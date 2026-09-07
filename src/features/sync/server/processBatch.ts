@@ -16,6 +16,7 @@ import { markFailed, markProcessed, markSkipped, recordBatch } from "./inbox";
 import { handleProduct } from "./handlers/product";
 import { handleStore } from "./handlers/store";
 import { handleCategory, handleCurrency, handleExchangeRate } from "./handlers/misc";
+import { createRenderableBranchLookup, type RenderableBranchLookup } from "./businessBranches";
 import type { InternalCaller } from "./caller";
 
 /**
@@ -36,6 +37,12 @@ export async function processCatalogBatch(
   events: SyncEventInput[],
 ): Promise<CatalogBatchResponse> {
   const { fresh, duplicateIds } = await recordBatch(caller.externalId, events);
+
+  // F-035 (architecture.md § AD1): built ONCE per batch, never at module
+  // level — a `Map` in a closure that memoizes the renderable-branches
+  // query per business, lazily (a batch with no CURRENCY/EXCHANGE_RATE
+  // event never runs it at all).
+  const renderableBranches = createRenderableBranchLookup();
 
   const results: EventResult[] = duplicateIds.map((eventId) => ({
     eventId,
@@ -61,7 +68,7 @@ export async function processCatalogBatch(
 
   for (const event of fresh) {
     try {
-      const outcome = await applyEvent(event, caller.businessId);
+      const outcome = await applyEvent(event, caller.businessId, renderableBranches);
 
       if (outcome.touchedStoreSlug) touchedStores.add(outcome.touchedStoreSlug);
       if (outcome.touchedBrandSlug) touchedBrands.add(outcome.touchedBrandSlug);
@@ -118,7 +125,11 @@ export async function processCatalogBatch(
   return summarize(results);
 }
 
-function applyEvent(event: SyncEventInput, businessId: string) {
+function applyEvent(
+  event: SyncEventInput,
+  businessId: string,
+  renderableBranches: RenderableBranchLookup,
+) {
   switch (event.entity) {
     case "STORE":
       return handleStore(event.payload, event.operation, businessId);
@@ -127,8 +138,8 @@ function applyEvent(event: SyncEventInput, businessId: string) {
     case "CATEGORY":
       return handleCategory(event.payload, event.operation, businessId);
     case "CURRENCY":
-      return handleCurrency(event.payload);
+      return handleCurrency(event.payload, businessId, renderableBranches);
     case "EXCHANGE_RATE":
-      return handleExchangeRate(event.payload, businessId);
+      return handleExchangeRate(event.payload, businessId, renderableBranches);
   }
 }

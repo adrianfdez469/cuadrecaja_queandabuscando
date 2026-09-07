@@ -306,6 +306,12 @@ export type BrandRevalidationSet = {
  * special case, and `canonicalSlug()` throws if a member of a multi-branch
  * brand somehow lacks its own `slug` — the ADR 0018 invariant broken
  * upstream, not swallowed here.
+ *
+ * Second caller since F-035: `src/features/sync/server/businessBranches.ts`
+ * calls this once per `Storefront` row of a business to build the set a
+ * `CURRENCY`/`EXCHANGE_RATE` event has to invalidate, and reads only
+ * `.canonicalSlugs` — a rate never changes a brand's own resolution, so
+ * `.brandSlugs` stays unused there (R11 of that feature's spec).
  */
 export function expandBrandRevalidation(
   brandSlug: string,

@@ -4,6 +4,7 @@ import { canonicalSlug, type PublicSlug } from "@/lib/publicSlug";
 import { isUniqueViolation } from "@/features/orders/server/prismaErrors";
 import { CATEGORY_SLUG_FALLBACK } from "@/constants/catalog";
 import type { CategoryPayload, CurrencyPayload, ExchangeRatePayload } from "../../schemas";
+import type { RenderableBranchLookup } from "../businessBranches";
 import { PROCESSED, SKIPPED, STALE, type HandlerOutcome } from "./types";
 
 // Mirrors `MAX_SLUG_RETRIES` in `features/storefront/server/registry.ts`'s
@@ -162,7 +163,18 @@ export async function handleCategory(
   return outcomeOf(touchedStoreSlugs);
 }
 
-export async function handleCurrency(payload: CurrencyPayload): Promise<HandlerOutcome> {
+/**
+ * F-035 (architecture.md § Contratos): a `CURRENCY` write is global to the
+ * platform (`Currency` has no `businessId`), but what it invalidates is the
+ * CALLER's own renderable branches (R2) — the same set `handleExchangeRate`
+ * below resolves, through the SAME per-batch memo, never a fresh query of
+ * its own.
+ */
+export async function handleCurrency(
+  payload: CurrencyPayload,
+  businessId: string,
+  renderableBranches: RenderableBranchLookup,
+): Promise<HandlerOutcome> {
   await prisma.currency.upsert({
     where: { code: payload.code },
     create: {
@@ -173,16 +185,21 @@ export async function handleCurrency(payload: CurrencyPayload): Promise<HandlerO
     },
     update: { name: payload.name, symbol: payload.symbol, active: payload.active },
   });
-  return PROCESSED;
+  return outcomeOf(await renderableBranches(businessId));
 }
 
 /**
  * Rates are append-only, mirroring cuadrecaja. `rate` is CUP per 1 unit and CUP
  * itself never has a row — writing one would make the anchor ambiguous.
+ *
+ * F-035 (architecture.md § Contratos, R1/E8): the `CUP` guard above returns
+ * BEFORE any write and before `renderableBranches` is ever called, so a
+ * skipped event never invalidates anything it did not touch.
  */
 export async function handleExchangeRate(
   payload: ExchangeRatePayload,
   businessId: string,
+  renderableBranches: RenderableBranchLookup,
 ): Promise<HandlerOutcome> {
   if (payload.currency === "CUP") return SKIPPED;
 
@@ -200,5 +217,5 @@ export async function handleExchangeRate(
     },
   });
 
-  return PROCESSED;
+  return outcomeOf(await renderableBranches(businessId));
 }

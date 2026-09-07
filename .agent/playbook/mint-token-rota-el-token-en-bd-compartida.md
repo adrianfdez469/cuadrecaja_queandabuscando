@@ -3,7 +3,7 @@ slug: mint-token-rota-el-token-en-bd-compartida
 sintoma: un guion o un smoke que funcionaba responde 401 UNAUTHORIZED con un token que nadie cambió, en otro worktree
 firma: (UNAUTHORIZED|401).*(token|bearer)
 etapa: smoke
-visto_en: F-031
+visto_en: F-031 · F-035 (sdd-tester, acuñó a propósito porque .env no lo tenía; sin síntoma, anotado preventivamente)
 creado: 2026-09-01T17:12:57Z
 promovido_a_agents: no
 arreglo: reacuña el token de ese negocio, npm run mint:token -- seed-negocio-1, y expórtalo como QAB_BEARER_TOKEN; el valor viejo no se recupera

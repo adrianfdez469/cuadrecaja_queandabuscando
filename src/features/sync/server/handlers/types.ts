@@ -18,10 +18,15 @@ export type HandlerOutcome = {
    * must be invalidated because a `CATEGORY` event changed a category that
    * has (or, on a `DELETE`, had) at least one visible product in that
    * branch. Plural — unlike `touchedStoreSlug` above, a category belongs to
-   * the BUSINESS and its products can live in N branches (I10). Only
-   * `handleCategory` sets this today; `processBatch.ts` folds it into the
-   * SAME `Set` that already feeds `revalidateStores`, so this never adds a
-   * new invalidation call.
+   * the BUSINESS and its products can live in N branches (I10).
+   *
+   * Set by three handlers, all for the same reason — the entity they write
+   * belongs to the BUSINESS, not to one branch, so its readers live in N
+   * branches: `handleCategory` (F-026), and `handleCurrency` /
+   * `handleExchangeRate` (F-035, whose readers are the five pages that
+   * convert amounts through `getStoreRates`). `processBatch.ts` folds it
+   * into the SAME `Set` that already feeds `revalidateStores`, so this
+   * never adds a new invalidation call.
    */
   touchedStoreSlugs?: readonly PublicSlug[];
   /**
