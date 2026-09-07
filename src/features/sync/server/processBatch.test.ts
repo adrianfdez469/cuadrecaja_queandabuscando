@@ -76,6 +76,8 @@ function storeEvent(eventId: string) {
 beforeEach(() => {
   handleStore.mockReset();
   handleCategory.mockReset();
+  handleCurrency.mockReset();
+  handleExchangeRate.mockReset();
   recordBatch.mockReset();
   markProcessed.mockReset().mockResolvedValue(undefined);
   markSkipped.mockReset().mockResolvedValue(undefined);
@@ -294,5 +296,81 @@ describe("processCatalogBatch() — folds a CATEGORY handler's touchedStoreSlugs
 
     expect([...revalidateStores.mock.calls[0][0]]).toEqual([]);
     expect([...revalidateSlugs.mock.calls[0][0]]).toEqual([]);
+  });
+});
+
+/**
+ * F-035 (architecture.md § AD1, § Flujo de datos): `processCatalogBatch`
+ * creates the per-batch renderable-branch lookup ONCE and `applyEvent` hands
+ * the SAME closure to both `CURRENCY` and `EXCHANGE_RATE` — this file mocks
+ * `handlers/misc` entirely, so it only proves WHAT gets passed down, never
+ * how the lookup itself resolves branches (`businessBranches.test.ts`'s job)
+ * nor what a handler does with what it returns (`handlers/misc.test.ts`'s).
+ */
+function currencyEvent(eventId: string) {
+  return {
+    eventId,
+    entity: "CURRENCY" as const,
+    operation: "UPDATE" as const,
+    occurredAt: "2026-09-01T00:00:00.000Z",
+    payload: {
+      code: "USD",
+      name: "Dólar",
+      symbol: "$",
+      active: true,
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    },
+  };
+}
+
+function exchangeRateEvent(eventId: string) {
+  return {
+    eventId,
+    entity: "EXCHANGE_RATE" as const,
+    operation: "CREATE" as const,
+    occurredAt: "2026-09-01T00:00:00.000Z",
+    payload: {
+      businessId: "business-1",
+      currency: "USD",
+      rate: 440,
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    },
+  };
+}
+
+describe("processCatalogBatch() — the per-batch renderable-branch lookup (F-035, AD1)", () => {
+  it("passes a THIRD argument to handleCurrency and handleExchangeRate, the SAME function for both", async () => {
+    const events = [currencyEvent("evt-cur"), exchangeRateEvent("evt-rate")];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+    handleCurrency.mockResolvedValue({ status: "processed" });
+    handleExchangeRate.mockResolvedValue({ status: "processed" });
+
+    await processCatalogBatch(CALLER, events);
+
+    expect(handleCurrency).toHaveBeenCalledExactlyOnceWith(
+      events[0].payload,
+      "business-1",
+      expect.any(Function),
+    );
+    expect(handleExchangeRate).toHaveBeenCalledExactlyOnceWith(
+      events[1].payload,
+      "business-1",
+      expect.any(Function),
+    );
+    const currencyArg = handleCurrency.mock.calls[0][2];
+    const exchangeRateArg = handleExchangeRate.mock.calls[0][2];
+    expect(currencyArg).toBe(exchangeRateArg);
+  });
+
+  it("still creates the lookup (and reaches summarize) on a batch with no CURRENCY/EXCHANGE_RATE event", async () => {
+    const events = [storeEvent("evt-store")];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+    handleStore.mockResolvedValue({ status: "processed" });
+
+    const summary = await processCatalogBatch(CALLER, events);
+
+    expect(summary.results).toEqual([{ eventId: "evt-store", status: "processed" }]);
+    expect(handleCurrency).not.toHaveBeenCalled();
+    expect(handleExchangeRate).not.toHaveBeenCalled();
   });
 });

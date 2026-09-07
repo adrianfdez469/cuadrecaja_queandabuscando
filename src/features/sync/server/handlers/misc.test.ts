@@ -17,6 +17,8 @@ const localCategoryCreate = vi.fn();
 const localCategoryUpdate = vi.fn();
 const localCategoryDelete = vi.fn();
 const storeFindMany = vi.fn();
+const currencyUpsert = vi.fn();
+const exchangeRateCreate = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -30,10 +32,16 @@ vi.mock("@/lib/prisma", () => ({
     store: {
       findMany: (...a: unknown[]) => storeFindMany(...a),
     },
+    currency: {
+      upsert: (...a: unknown[]) => currencyUpsert(...a),
+    },
+    exchangeRate: {
+      create: (...a: unknown[]) => exchangeRateCreate(...a),
+    },
   },
 }));
 
-const { handleCategory } = await import("./misc");
+const { handleCategory, handleCurrency, handleExchangeRate } = await import("./misc");
 
 function payload(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -57,6 +65,8 @@ beforeEach(() => {
   localCategoryUpdate.mockReset();
   localCategoryDelete.mockReset();
   storeFindMany.mockReset().mockResolvedValue([]);
+  currencyUpsert.mockReset();
+  exchangeRateCreate.mockReset();
 });
 
 describe("handleCategory() — CREATE: slug without collision, scoped to the business", () => {
@@ -256,5 +266,152 @@ describe("handleCategory() — DELETE resolves affected stores BEFORE deleting",
     const outcome = await handleCategory(payload(), "DELETE", "business-1");
 
     expect(outcome).toEqual({ status: "processed", touchedStoreSlugs: ["sucursal-centro"] });
+  });
+});
+
+/**
+ * F-035 (spec.md § Datos y contrato, R1, R8, E8): both handlers now receive
+ * a THIRD argument, the per-batch `RenderableBranchLookup` — a plain
+ * `vi.fn()` here, since this file only proves what the HANDLER does with
+ * what it returns, never how the lookup itself resolves branches (that is
+ * `businessBranches.test.ts`'s job).
+ */
+function currencyPayload(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    code: "USD",
+    name: "Dólar",
+    symbol: "$",
+    active: true,
+    updatedAt: "2026-08-31T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function exchangeRatePayload(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    businessId: "seed-negocio-1",
+    currency: "USD",
+    rate: 440,
+    updatedAt: "2026-08-31T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("handleCurrency() — writes, then invalidates the caller's own renderable branches (R2)", () => {
+  it("upserts the currency and returns the resolved set as touchedStoreSlugs", async () => {
+    currencyUpsert.mockResolvedValue({});
+    const renderableBranches = vi.fn().mockResolvedValue(["tienda-demo", "tienda-dos"]);
+
+    const outcome = await handleCurrency(currencyPayload(), "business-1", renderableBranches);
+
+    expect(currencyUpsert).toHaveBeenCalledExactlyOnceWith({
+      where: { code: "USD" },
+      create: { code: "USD", name: "Dólar", symbol: "$", active: true },
+      update: { name: "Dólar", symbol: "$", active: true },
+    });
+    expect(renderableBranches).toHaveBeenCalledExactlyOnceWith("business-1");
+    expect(outcome).toEqual({
+      status: "processed",
+      touchedStoreSlugs: ["tienda-demo", "tienda-dos"],
+    });
+  });
+
+  it("a business with no renderable branch is processed with no touchedStoreSlugs (E5)", async () => {
+    currencyUpsert.mockResolvedValue({});
+    const renderableBranches = vi.fn().mockResolvedValue([]);
+
+    const outcome = await handleCurrency(currencyPayload(), "business-1", renderableBranches);
+
+    expect(outcome).toEqual({ status: "processed" });
+  });
+
+  it("resolves the lookup AFTER writing, never before (R1)", async () => {
+    const callOrder: string[] = [];
+    currencyUpsert.mockImplementation(async () => {
+      callOrder.push("upsert");
+      return {};
+    });
+    const renderableBranches = vi.fn().mockImplementation(async () => {
+      callOrder.push("lookup");
+      return [];
+    });
+
+    await handleCurrency(currencyPayload(), "business-1", renderableBranches);
+
+    expect(callOrder).toEqual(["upsert", "lookup"]);
+  });
+});
+
+describe("handleExchangeRate() — a CUP rate is skipped BEFORE writing or resolving anything (R1, E8)", () => {
+  it("returns skipped_not_published without writing Currency, ExchangeRate, or calling the lookup", async () => {
+    const renderableBranches = vi.fn();
+
+    const outcome = await handleExchangeRate(
+      exchangeRatePayload({ currency: "CUP" }),
+      "business-1",
+      renderableBranches,
+    );
+
+    expect(outcome).toEqual({ status: "skipped_not_published" });
+    expect(currencyUpsert).not.toHaveBeenCalled();
+    expect(exchangeRateCreate).not.toHaveBeenCalled();
+    expect(renderableBranches).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleExchangeRate() — a non-CUP rate writes, then invalidates the caller's own renderable branches (R2)", () => {
+  it("creates the exchange rate row and returns the resolved set as touchedStoreSlugs", async () => {
+    currencyUpsert.mockResolvedValue({});
+    exchangeRateCreate.mockResolvedValue({});
+    const renderableBranches = vi.fn().mockResolvedValue(["tienda-demo", "tienda-dos"]);
+
+    const outcome = await handleExchangeRate(
+      exchangeRatePayload(),
+      "business-1",
+      renderableBranches,
+    );
+
+    expect(exchangeRateCreate).toHaveBeenCalledExactlyOnceWith({
+      data: { businessId: "business-1", currencyCode: "USD", rate: "440.000000" },
+    });
+    expect(renderableBranches).toHaveBeenCalledExactlyOnceWith("business-1");
+    expect(outcome).toEqual({
+      status: "processed",
+      touchedStoreSlugs: ["tienda-demo", "tienda-dos"],
+    });
+  });
+
+  it("a business with no renderable branch is processed with no touchedStoreSlugs (E5)", async () => {
+    currencyUpsert.mockResolvedValue({});
+    exchangeRateCreate.mockResolvedValue({});
+    const renderableBranches = vi.fn().mockResolvedValue([]);
+
+    const outcome = await handleExchangeRate(
+      exchangeRatePayload(),
+      "business-1",
+      renderableBranches,
+    );
+
+    expect(outcome).toEqual({ status: "processed" });
+  });
+
+  it("resolves the lookup AFTER both writes, never before (R1)", async () => {
+    const callOrder: string[] = [];
+    currencyUpsert.mockImplementation(async () => {
+      callOrder.push("currency.upsert");
+      return {};
+    });
+    exchangeRateCreate.mockImplementation(async () => {
+      callOrder.push("exchangeRate.create");
+      return {};
+    });
+    const renderableBranches = vi.fn().mockImplementation(async () => {
+      callOrder.push("lookup");
+      return [];
+    });
+
+    await handleExchangeRate(exchangeRatePayload(), "business-1", renderableBranches);
+
+    expect(callOrder).toEqual(["currency.upsert", "exchangeRate.create", "lookup"]);
   });
 });
