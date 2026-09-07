@@ -39,6 +39,7 @@ function storefrontRow(overrides: Partial<Record<string, unknown>> = {}) {
     id: "storefront-1",
     slug: "la-rampa",
     name: "La Rampa",
+    businessId: "business-1",
     stores: [
       {
         id: "store-1",
@@ -83,6 +84,10 @@ describe("resolvePublicSlug() — E1..E6, criterio 3", () => {
       kind: "branch",
       storeId: "store-1",
       canonicalSlug: "la-rampa",
+      // F-036 (AD4): the resolution carries the business id straight from
+      // the same `select` — no second query, and it is what lets
+      // `getStoreRates` and `quoteCart` run the SAME rates statement.
+      businessId: "business-1",
       brandSlug: "la-rampa",
       branchCount: 1,
       isAlias: false,

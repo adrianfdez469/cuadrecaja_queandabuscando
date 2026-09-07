@@ -372,7 +372,12 @@ describe("handleExchangeRate() — a non-CUP rate writes, then invalidates the c
     );
 
     expect(exchangeRateCreate).toHaveBeenCalledExactlyOnceWith({
-      data: { businessId: "business-1", currencyCode: "USD", rate: "440.000000" },
+      data: {
+        businessId: "business-1",
+        currencyCode: "USD",
+        rate: "440.000000",
+        sourceUpdatedAt: new Date("2026-08-31T12:00:00.000Z"),
+      },
     });
     expect(renderableBranches).toHaveBeenCalledExactlyOnceWith("business-1");
     expect(outcome).toEqual({
@@ -413,5 +418,51 @@ describe("handleExchangeRate() — a non-CUP rate writes, then invalidates the c
     await handleExchangeRate(exchangeRatePayload(), "business-1", renderableBranches);
 
     expect(callOrder).toEqual(["currency.upsert", "exchangeRate.create", "lookup"]);
+  });
+
+  it("writes sourceUpdatedAt straight from payload.updatedAt, unmodified (R1)", async () => {
+    currencyUpsert.mockResolvedValue({});
+    exchangeRateCreate.mockResolvedValue({});
+    const renderableBranches = vi.fn().mockResolvedValue([]);
+
+    await handleExchangeRate(
+      exchangeRatePayload({ updatedAt: "2026-05-01T10:00:00.000Z" }),
+      "business-1",
+      renderableBranches,
+    );
+
+    expect(exchangeRateCreate).toHaveBeenCalledExactlyOnceWith({
+      data: {
+        businessId: "business-1",
+        currencyCode: "USD",
+        rate: "440.000000",
+        sourceUpdatedAt: new Date("2026-05-01T10:00:00.000Z"),
+      },
+    });
+  });
+
+  it("a stale delivery (an older updatedAt arriving after a newer one) is written and returns processed too — there is no STALE branch here (R2, R3)", async () => {
+    currencyUpsert.mockResolvedValue({});
+    exchangeRateCreate.mockResolvedValue({});
+    const renderableBranches = vi.fn().mockResolvedValue(["tienda-demo"]);
+
+    // T2 already applied; this is T1 < T2 arriving second — the scenario
+    // E1/E2 describe. handleExchangeRate never compares against a prior row:
+    // it has no read of its own, unlike handleCategory's stale-write guard.
+    const outcome = await handleExchangeRate(
+      exchangeRatePayload({ rate: 440, updatedAt: "2026-08-31T10:00:00.000Z" }),
+      "business-1",
+      renderableBranches,
+    );
+
+    expect(exchangeRateCreate).toHaveBeenCalledExactlyOnceWith({
+      data: {
+        businessId: "business-1",
+        currencyCode: "USD",
+        rate: "440.000000",
+        sourceUpdatedAt: new Date("2026-08-31T10:00:00.000Z"),
+      },
+    });
+    expect(outcome).toEqual({ status: "processed", touchedStoreSlugs: ["tienda-demo"] });
   });
 });

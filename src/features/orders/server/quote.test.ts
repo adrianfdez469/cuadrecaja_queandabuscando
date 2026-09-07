@@ -3,7 +3,7 @@ import { asPublicSlug } from "@/lib/publicSlug";
 
 const storeFindUnique = vi.fn();
 const storeProductFindMany = vi.fn();
-const exchangeRateFindMany = vi.fn();
+const queryRaw = vi.fn();
 const promotionFindMany = vi.fn();
 const resolvePublicSlug = vi.fn();
 
@@ -11,7 +11,9 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     store: { findUnique: (...args: unknown[]) => storeFindUnique(...args) },
     storeProduct: { findMany: (...args: unknown[]) => storeProductFindMany(...args) },
-    exchangeRate: { findMany: (...args: unknown[]) => exchangeRateFindMany(...args) },
+    // F-036: rates now go through `loadCurrentRates`'s `$queryRaw`, not
+    // `exchangeRate.findMany` — same statement the storefront reads.
+    $queryRaw: (...args: unknown[]) => queryRaw(...args),
     promotion: { findMany: (...args: unknown[]) => promotionFindMany(...args) },
   },
 }));
@@ -28,6 +30,7 @@ function branchResolution(overrides: Partial<Record<string, unknown>> = {}) {
     storeId: "store-1",
     canonicalSlug: asPublicSlug("tienda-demo"),
     storefrontId: "storefront-1",
+    businessId: "biz-1",
     brandSlug: asPublicSlug("tienda-demo"),
     brandName: "La Rampa",
     branchCount: 1,
@@ -39,7 +42,7 @@ function branchResolution(overrides: Partial<Record<string, unknown>> = {}) {
 beforeEach(() => {
   storeFindUnique.mockReset();
   storeProductFindMany.mockReset();
-  exchangeRateFindMany.mockReset().mockResolvedValue([]);
+  queryRaw.mockReset().mockResolvedValue([]);
   promotionFindMany.mockReset().mockResolvedValue([]);
   resolvePublicSlug.mockReset().mockResolvedValue(branchResolution());
 });
@@ -161,9 +164,7 @@ describe("quoteCart()", () => {
     storeProductFindMany.mockResolvedValue([
       product({ syncedPrice: "2", syncedPriceCurrency: "USD" }),
     ]);
-    exchangeRateFindMany.mockResolvedValue([
-      { currencyCode: "USD", rate: { toString: () => "440.000000" } },
-    ]);
+    queryRaw.mockResolvedValue([{ currencyCode: "USD", rate: { toString: () => "440.000000" } }]);
     const quote = await quoteCart(store, [{ storeProductId: "sp-1", qty: 1 }]);
     const line = quote.lines[0];
     expect(line.orderable).toBe(true);

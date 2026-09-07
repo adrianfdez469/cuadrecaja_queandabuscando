@@ -299,6 +299,16 @@ if [ -n "$TOKEN" ]; then
       WHERE NOT EXISTS (SELECT 1 FROM \"StoreProduct\" sp WHERE sp.\"canonicalProductId\" = cp.id)
         AND cp.name = '$PRODNAME1';
   " >/dev/null
+  # Las tasas sintéticas de esta corrida, y la moneda que las sostiene. Sin
+  # esto la tabla acumula cuatro filas de QAB POR CORRIDA en una base que
+  # comparten todos los worktrees: el primer ciclo de F-035 dejó 19, y el
+  # lector de tasas acabó trayendo 23 filas para devolver 4. La tabla es
+  # append-only en el PRODUCTO (no hay camino de borrado en el contrato ni en
+  # ningún handler), lo cual no obliga a que un guion de prueba deje su
+  # basura en una base de desarrollo. El orden importa: las tasas antes que
+  # la moneda, que es a quien apuntan por clave ajena.
+  psql_val "DELETE FROM \"ExchangeRate\" WHERE \"currencyCode\"='$QAB_CURRENCY'" >/dev/null
+  psql_val "DELETE FROM \"Currency\" WHERE code='$QAB_CURRENCY'" >/dev/null
   sync_catalog "[$(product_event "evt-f035-cleanup-revalidate-$SUFFIX" "seed-tienda-1-p0" "seed-producto-0" "seed-tienda-1" "Refresco de cola 1.5 L" 450 "CUP")]" >/dev/null
 fi
 

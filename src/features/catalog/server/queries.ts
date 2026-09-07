@@ -6,6 +6,7 @@ import { canonicalSlug, asPublicSlug, type PublicSlug } from "@/lib/publicSlug";
 import { presentationContact } from "@/lib/storeContact";
 import { indexPromotions, type AppliedPromotion, type PromotionRow } from "@/lib/promotions";
 import type { BranchResolution, SelectorResolution } from "@/features/storefront/server/resolve";
+import { loadCurrentRates } from "./rates";
 import {
   deriveStoreCategories,
   productsOfCategory,
@@ -21,6 +22,12 @@ import {
 /** Only what these reads actually need: a `BranchResolution` satisfies it,
  *  and so does a lighter object built once for `generateStaticParams`. */
 type StoreRef = Pick<BranchResolution, "storeId" | "canonicalSlug">;
+
+/** F-036 (architecture.md AD4): the rates read keys off `businessId`, not
+ *  `storeId` — a Pick of its own, never grafted onto `StoreRef` (that type
+ *  is shared by readers, like `getPublishedBranchesForParams`, that have no
+ *  business reading a business id at all). */
+type RateRef = Pick<BranchResolution, "businessId" | "canonicalSlug">;
 
 /**
  * Read side of the public storefront.
@@ -386,26 +393,32 @@ export const getFilteredStoreCatalog = cache(
   },
 );
 
-async function loadRates(storeId: string): Promise<Record<string, string>> {
-  const rates = await prisma.exchangeRate.findMany({
-    where: { business: { stores: { some: { id: storeId } } } },
-    orderBy: { createdAt: "desc" },
-    select: { currencyCode: true, rate: true },
-  });
-
-  // Append-only table: the first row per currency is the current rate.
-  const latest: Record<string, string> = {};
-  for (const rate of rates) {
-    if (!(rate.currencyCode in latest)) latest[rate.currencyCode] = rate.rate.toString();
-  }
-  return latest;
-}
-
-export function getStoreRates(branch: StoreRef): Promise<Record<string, string>> {
-  return cached(loadRates, {
+/**
+ * F-036 (architecture.md AD1, AD3, AD4; docs/adr/0030): the SAME statement
+ * and the SAME loader the checkout uses (`quoteCart`,
+ * `src/features/orders/server/quote.ts`) — `loadCurrentRates`
+ * (`src/features/catalog/server/rates.ts`), keyed by `businessId`.
+ *
+ * The cache key is `businessId`, not `storeId` (PD3, decision of the
+ * human: the architect's option, taken over the orchestrator's own
+ * recommendation to keep today's cardinality): rates entries went
+ * from one per RENDERABLE BRANCH to one per BUSINESS. This is safe only
+ * because the entry stays tagged with the `storeTag` of whichever branch
+ * happened to create it, and F-035's `revalidateStores` expires the
+ * `storeTag` of EVERY renderable branch of a business on any rate write —
+ * so the shared entry always gets expired along with the branch-specific
+ * ones. That invariant is NOT enforced by the schema: it holds today
+ * because nothing in this repo ever writes `DRAFT` over a branch that was
+ * renderable (the sync only ever demotes to `SUSPENDED`, the panel only
+ * ever writes `PUBLISHED`/`SUSPENDED`). The day something does, a business
+ * can end up with a rates entry tagged by a branch that no longer
+ * invalidates it, and this cache goes stale silently. See AP2.
+ */
+export function getStoreRates(branch: RateRef): Promise<Record<string, string>> {
+  return cached(loadCurrentRates, {
     keyParts: ["store-rates"],
     tags: [storeTag(branch.canonicalSlug)],
-  })(branch.storeId);
+  })(branch.businessId);
 }
 
 type PublishedBranch = { storeId: string; canonical: PublicSlug; alias: PublicSlug | null };

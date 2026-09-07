@@ -195,6 +195,12 @@ export async function handleCurrency(
  * F-035 (architecture.md § Contratos, R1/E8): the `CUP` guard above returns
  * BEFORE any write and before `renderableBranches` is ever called, so a
  * skipped event never invalidates anything it did not touch.
+ *
+ * F-036 (R2, R3, R11): a stale delivery (an older `updatedAt` arriving after
+ * a newer one) is written and answered `processed` too, exactly like any
+ * other event — there is no `STALE` branch here, unlike `handleCategory`.
+ * Which row is CURRENT is decided at read time by
+ * `src/features/catalog/server/rates.ts`, never here.
  */
 export async function handleExchangeRate(
   payload: ExchangeRatePayload,
@@ -214,6 +220,7 @@ export async function handleExchangeRate(
       businessId,
       currencyCode: payload.currency,
       rate: payload.rate.toFixed(6),
+      sourceUpdatedAt: new Date(payload.updatedAt),
     },
   });
 

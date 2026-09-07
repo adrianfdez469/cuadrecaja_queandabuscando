@@ -67,10 +67,27 @@ const CURRENCIES = [
   { code: "MLC", name: "Moneda libremente convertible", symbol: "MLC" },
 ];
 
-/** rate = CUP per 1 unit. CUP is the anchor and never gets a row. */
+/**
+ * rate = CUP per 1 unit. CUP is the anchor and never gets a row.
+ *
+ * F-036 (R15): `sourceUpdatedAt` is an explicit, deterministic ISO literal —
+ * NEVER `new Date()`. The column is nullable (plan.md PD1), so the compiler
+ * no longer forces this; what forces it is that an unmarked fixture would
+ * sort last in `buildCurrentRatesSql`'s `NULLS LAST` order and never win,
+ * silently, the next time a test or a smoke script reads it. Two seed runs
+ * on two different databases must produce the identical fixture.
+ */
 const RATES = [
-  { currencyCode: "USD", rate: "440.000000" },
-  { currencyCode: "MLC", rate: "210.500000" },
+  {
+    currencyCode: "USD",
+    rate: "440.000000",
+    sourceUpdatedAt: new Date("2026-08-01T00:00:00.000Z"),
+  },
+  {
+    currencyCode: "MLC",
+    rate: "210.500000",
+    sourceUpdatedAt: new Date("2026-08-01T00:00:00.000Z"),
+  },
 ];
 
 type SeedProduct = {
