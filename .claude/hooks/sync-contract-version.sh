@@ -4,7 +4,30 @@
 # contrato, § «Versionado de este documento».
 set -uo pipefail
 
-file=$(jq -r '.tool_response.filePath // .tool_input.file_path // empty' 2>/dev/null)
+# Es un hook de PostToolUse: el JSON de la herramienta llega por stdin. Fuera de
+# ese contexto no llega nunca, y esperarlo colgaba el guion para siempre —le pasó
+# a una sesión que lo ejecutó a mano para verificar una edición del contrato—.
+# Dos redes, porque la primera no cubre el caso que muerde:
+#   · terminal interactiva: se dice cómo hacer la comprobación y se sale;
+#   · cualquier otro stdin sin datos (una herramienta que no lo cierra): la
+#     lectura está acotada en el tiempo en vez de ser indefinida.
+if [ -t 0 ]; then
+  cat >&2 <<'AYUDA'
+Este guion es un hook de PostToolUse, no un comando: espera por stdin el JSON de
+la herramienta. Para comprobar a mano si la versión se movió:
+
+  sed -n 3p docs/sync-contract.md
+  git show HEAD:docs/sync-contract.md | sed -n 3p
+AYUDA
+  exit 0
+fi
+
+# `-d ''` lee hasta NUL, o sea todo el cuerpo; `-t 2` es el techo. Un hook real
+# recibe su JSON de inmediato y sale por EOF sin esperar nada.
+IFS= read -r -d '' -t 2 entrada || true
+[ -n "${entrada:-}" ] || exit 0
+
+file=$(printf '%s' "$entrada" | jq -r '.tool_response.filePath // .tool_input.file_path // empty' 2>/dev/null)
 [ -n "$file" ] || exit 0
 
 case "$file" in
