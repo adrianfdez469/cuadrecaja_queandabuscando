@@ -180,7 +180,13 @@ nada conocido.
 
 **Todo lo que el sync escribe es idempotente y va guardado contra escrituras
 rancias** (`sourceUpdatedAt`). Gracias a eso el orden de entrega no importa. Si
-agregas un handler, mantén ambas propiedades o el reintento corrompe datos.
+agregas un handler, mantén ambas propiedades o el reintento corrompe datos. Hay
+**dos** formas de la guarda, y no son intercambiables: la que **rechaza** y
+devuelve `STALE` (`STORE`, `CATEGORY`, `PRODUCT`) y la de **orden**, de
+`EXCHANGE_RATE` (F-036) — que escribe siempre y decide al leer, porque su tabla
+es append-only y el histórico es el producto. Copiar la forma de una entidad
+esperando el mecanismo de la otra es el error: ver
+[`docs/adr/0030-la-tasa-vigente-la-decide-la-lectura.md`](docs/adr/0030-la-tasa-vigente-la-decide-la-lectura.md).
 
 **Un archivo que todavía no existe no se cita entre comillas invertidas.**
 `npm run check:harness` recorre la prosa del arnés y
