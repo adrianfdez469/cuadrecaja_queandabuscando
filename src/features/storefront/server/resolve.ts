@@ -43,6 +43,11 @@ export type BranchResolution = {
   storeId: string;
   canonicalSlug: PublicSlug;
   storefrontId: string;
+  /** F-036 (AD4): the business the brand belongs to, taken from the
+   *  `select` of `Storefront` this resolution already runs. Lets the
+   *  storefront and the checkout run the SAME `loadCurrentRates` statement
+   *  (R4) instead of the storefront filtering by relation. */
+  businessId: string;
   brandSlug: PublicSlug;
   brandName: string;
   /** Renderable branches of the brand. 1 unless the brand was grouped (etapa 2). */
@@ -62,6 +67,10 @@ export type BranchResolution = {
 export type SelectorResolution = {
   kind: "selector";
   storefrontId: string;
+  /** F-036 (AD4): same field as `BranchResolution`'s — the selector does
+   *  not read rates today, but leaving it off ONE branch of the union
+   *  invites a `kind === "branch"` check in the next rates reader. */
+  businessId: string;
   brandSlug: PublicSlug;
   brandName: string;
   branches: BranchRef[];
@@ -95,6 +104,7 @@ async function loadResolution(requested: string): Promise<PublicResolution | nul
       id: true,
       slug: true,
       name: true,
+      businessId: true,
       stores: {
         where: { status: { not: "DRAFT" } },
         select: {
@@ -146,6 +156,7 @@ async function loadResolution(requested: string): Promise<PublicResolution | nul
       storeId: store.id,
       canonicalSlug: canonicalSlug({ storeSlug: store.slug, brandSlug, brandBranchCount: 1 }),
       storefrontId: storefront.id,
+      businessId: storefront.businessId,
       brandSlug,
       brandName: storefront.name,
       branchCount,
@@ -170,6 +181,7 @@ async function loadResolution(requested: string): Promise<PublicResolution | nul
         brandBranchCount: branchCount,
       }),
       storefrontId: storefront.id,
+      businessId: storefront.businessId,
       brandSlug,
       brandName: storefront.name,
       branchCount,
@@ -181,6 +193,7 @@ async function loadResolution(requested: string): Promise<PublicResolution | nul
   return {
     kind: "selector",
     storefrontId: storefront.id,
+    businessId: storefront.businessId,
     brandSlug,
     brandName: storefront.name,
     branches,

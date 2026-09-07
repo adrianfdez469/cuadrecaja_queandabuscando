@@ -13,6 +13,7 @@ import type { DeliveryFeeModeName } from "../deliveryOffer";
 import { resolvePublicSlug } from "@/features/storefront/server/resolve";
 import { routingWhatsappNumber } from "@/lib/storeContact";
 import type { PublicSlug } from "@/lib/publicSlug";
+import { loadCurrentRates } from "@/features/catalog/server/rates";
 
 /**
  * Cotización.
@@ -145,21 +146,6 @@ export async function loadStoreForOrder(requestedSlug: string): Promise<OrderSto
     disabledMessage: store.disabledMessage,
     disabledAt: store.disabledAt,
   };
-}
-
-/** Fresh read of the latest rate per currency for a business — never cached. */
-async function loadFreshRates(businessId: string): Promise<Record<string, string>> {
-  const rows = await prisma.exchangeRate.findMany({
-    where: { businessId },
-    orderBy: { createdAt: "desc" },
-    select: { currencyCode: true, rate: true },
-  });
-
-  const latest: Record<string, string> = {};
-  for (const row of rows) {
-    if (!(row.currencyCode in latest)) latest[row.currencyCode] = row.rate.toString();
-  }
-  return latest;
 }
 
 /**
@@ -309,7 +295,7 @@ export async function quoteCart(store: OrderStore, items: RequestedItem[]): Prom
             localCategoryId: true,
           },
         }),
-    loadFreshRates(store.businessId),
+    loadCurrentRates(store.businessId),
     loadFreshPromotions(store.id),
   ]);
 
