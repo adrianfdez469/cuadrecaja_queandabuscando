@@ -53,6 +53,10 @@ const store = {
   slug: asPublicSlug("tienda-demo"),
   name: "La Rampa",
   currencyCode: "CUP",
+  // F-039 (architecture.md AD3): unpruned, same as `Business.displayCurrencies`
+  // — empty here because no test in this file exercises equivalents; that is
+  // covered by `src/lib/priceEquivalents.test.ts` and `CheckoutForm.test.tsx`.
+  displayCurrencies: [] as readonly string[],
   checkoutMode: "WHATSAPP" as const,
   deliveryEnabled: false,
   deliveryFee: null,
@@ -107,16 +111,25 @@ describe("loadStoreForOrder()", () => {
       disabledReasonCode: null,
       disabledMessage: null,
       disabledAt: null,
-      business: { id: "biz-1", baseCurrencyCode: "CUP" },
+      business: { id: "biz-1", baseCurrencyCode: "CUP", displayCurrencies: ["CUP", "USD"] },
     });
     const result = await loadStoreForOrder("bodega-central-vedado");
     expect(resolvePublicSlug).toHaveBeenCalledWith("bodega-central-vedado");
     expect(storeFindUnique.mock.calls[0][0]).toMatchObject({ where: { id: "store-1" } });
+    // AD3: the select gains ONE column of the same `business` relation —
+    // still a single `findUnique`, still zero new round-trips.
+    expect(storeFindUnique.mock.calls[0][0]).toMatchObject({
+      select: {
+        business: { select: { id: true, baseCurrencyCode: true, displayCurrencies: true } },
+      },
+    });
     // R15/routingWhatsappNumber: falls back to phone when whatsapp is null.
     expect(result?.whatsappNumber).toBe("+5350000009");
     // The response slug is always the CANONICAL one, not the requested URL.
     expect(result?.slug).toBe("tienda-demo");
     expect(result?.deliveryFee).toBe("500.00");
+    // AD3: published as declared (R1), unpruned.
+    expect(result?.displayCurrencies).toEqual(["CUP", "USD"]);
   });
 
   it("F-031 DA2: carries deliveryFeeMode through, explicit (R20)", async () => {
@@ -287,6 +300,23 @@ describe("toQuoteResponse()", () => {
       currencyCode: "CUP",
       deliveryFeeMode: "FLAT_RATE",
     });
+  });
+
+  it("publishes the SAME rate table the quote used for subtotal, and the declared list unpruned (AD3, DH8)", async () => {
+    storeProductFindMany.mockResolvedValue([
+      product({ syncedPrice: "2", syncedPriceCurrency: "USD" }),
+    ]);
+    queryRaw.mockResolvedValue([{ currencyCode: "USD", rate: { toString: () => "440.000000" } }]);
+    const storeWithDisplayCurrencies = { ...store, displayCurrencies: ["CUP", "USD", "EUR"] };
+    const quote = await quoteCart(storeWithDisplayCurrencies, [{ storeProductId: "sp-1", qty: 1 }]);
+    const response = toQuoteResponse(quote);
+    // The FULL table, not filtered to what was actually used by a line —
+    // exactly what `quoteCart` read, so a client-side `priceEquivalents` call
+    // can never see a different table than the one that produced `subtotal`.
+    expect(response.rates).toEqual({ USD: "440.000000" });
+    // R1: unpruned, as declared — not filtered to what has a rate (EUR has
+    // none here and stays in the list).
+    expect(response.store.displayCurrencies).toEqual(["CUP", "USD", "EUR"]);
   });
 
   it("shapes an unorderable line with null amounts and a reason", async () => {

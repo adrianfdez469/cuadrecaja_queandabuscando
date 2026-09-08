@@ -5,6 +5,12 @@ import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { formatMoney, money } from "@/lib/money";
+import { priceEquivalents, selectableCurrencies } from "@/lib/priceEquivalents";
+import { REFERENCE_CURRENCY_NONE } from "@/constants/currency";
+import {
+  REFERENCE_CURRENCY_NOT_HYDRATED,
+  useReferenceCurrencyPreference,
+} from "@/features/currency/referenceCurrencyStore";
 import { CART_QUOTE_DEBOUNCE_MS, CART_QUOTE_SLOW_MS } from "@/constants/cart";
 import type { QuoteResponse } from "@/features/orders/types";
 import { useCart, useHydrated } from "../cartStore";
@@ -105,6 +111,17 @@ export function CartView({ storeId, storeSlug }: { storeId: string; storeSlug: s
     };
   }, [status]);
 
+  // F-039 (architecture.md AD3, spec.md R12 § excepción acotada): the SAME
+  // rate table and declared list `quote` carries — never a second server
+  // read — so the equivalent below can never disagree with the subtotal it
+  // sits under. The preference itself is read, never written, from here:
+  // `referenceCurrencyStore.ts` is the single store the header selector
+  // already writes to (`src/features/currency/referenceCurrencyStore.ts`).
+  const offeredCurrencies = quote
+    ? selectableCurrencies(quote.store.displayCurrencies, quote.store.currencyCode, quote.rates)
+    : [];
+  const [referenceCurrency] = useReferenceCurrencyPreference(offeredCurrencies);
+
   if (!hydrated) {
     return (
       <div>
@@ -171,8 +188,28 @@ export function CartView({ storeId, storeSlug }: { storeId: string; storeSlug: s
   const firstLoad = status === "loading" && !hasQuote;
   const showContinueAnyway = status === "error" && errorStreak >= 2;
 
-  const subtotalLabel =
-    quote && !firstLoad ? formatMoney(money(quote.subtotal, quote.store.currencyCode)) : null;
+  const subtotalMoney =
+    quote && !firstLoad ? money(quote.subtotal, quote.store.currencyCode) : null;
+  const subtotalLabel = subtotalMoney ? formatMoney(subtotalMoney) : null;
+  // DH3: the client-computed equivalent of the subtotal, in whatever currency
+  // the shopper chose in the header (D8). `undefined` while there is nothing
+  // firm to show (loading) or nothing chosen ("solo <base>", not hydrated
+  // yet): R12's excepción acotada is `priceEquivalents` calling `convert`
+  // here, with `quote.rates` — the exact table `quote.subtotal` was computed
+  // with, never a second lookup (R10).
+  const subtotalEquivalent =
+    quote &&
+    subtotalMoney &&
+    referenceCurrency !== REFERENCE_CURRENCY_NOT_HYDRATED &&
+    referenceCurrency !== REFERENCE_CURRENCY_NONE
+      ? priceEquivalents(
+          subtotalMoney,
+          quote.store.displayCurrencies,
+          quote.store.currencyCode,
+          quote.rates,
+        ).find((equivalent) => equivalent.currency === referenceCurrency)
+      : undefined;
+  const subtotalEquivalentLabel = subtotalEquivalent ? formatMoney(subtotalEquivalent) : null;
 
   return (
     <div className="pb-28 lg:grid lg:grid-cols-[1fr_20rem] lg:items-start lg:gap-8 lg:pb-0">
@@ -296,20 +333,40 @@ export function CartView({ storeId, storeSlug }: { storeId: string; storeSlug: s
       </div>
 
       <div className="bg-surface shadow-card border-border fixed bottom-0 left-0 z-10 w-full border-t p-4 lg:sticky lg:top-6 lg:rounded-lg lg:border">
-        <div
-          aria-live="polite"
-          aria-busy={status === "loading"}
-          className="flex items-baseline justify-between"
-        >
-          <span className="text-fg-muted text-sm">Subtotal</span>
-          <span
-            className={subtotalLabel ? "text-fg text-lg font-semibold" : "text-fg-muted text-sm"}
-          >
-            {subtotalLabel ?? "Calculando…"}
-          </span>
-          {subtotalLabel && <span className="sr-only">Subtotal actualizado: {subtotalLabel}.</span>}
+        <div aria-live="polite" aria-busy={status === "loading"}>
+          <div className="flex items-baseline justify-between">
+            <span className="text-fg-muted text-sm">Subtotal</span>
+            <span
+              className={subtotalLabel ? "text-fg text-lg font-semibold" : "text-fg-muted text-sm"}
+            >
+              {subtotalLabel ?? "Calculando…"}
+            </span>
+          </div>
+          {/* DH3/D1/D2: same "≈" + sr-only "aproximadamente" split ProductCard
+              uses, so the mark's accessible name never depends on where it
+              is painted. */}
+          {subtotalEquivalentLabel && (
+            <p className="text-fg-muted text-right text-sm">
+              <span aria-hidden>≈</span> <span className="sr-only">aproximadamente </span>
+              {subtotalEquivalentLabel}
+            </p>
+          )}
+          {subtotalLabel && (
+            <span className="sr-only">
+              Subtotal actualizado: {subtotalLabel}
+              {subtotalEquivalentLabel ? `, aproximadamente ${subtotalEquivalentLabel}.` : "."}
+            </span>
+          )}
         </div>
-        <p className="text-fg-muted mt-1 text-xs">El envío se calcula en el siguiente paso.</p>
+        <p className="text-fg-muted mt-1 text-xs">
+          El envío se calcula en el siguiente paso.
+          {/* D8: the phrase joins the one that already exists instead of a
+              second paragraph — only when there is an equivalent to explain
+              (R16 exigencia literal, DH3). */}
+          {subtotalEquivalentLabel && quote && (
+            <> Cobramos en {quote.store.currencyCode}; el equivalente es aproximado.</>
+          )}
+        </p>
 
         <Link href={`/${storeSlug}/checkout`} className="mt-4 block">
           <Button

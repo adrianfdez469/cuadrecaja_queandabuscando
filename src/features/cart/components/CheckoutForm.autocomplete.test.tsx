@@ -31,11 +31,14 @@ function quote(): QuoteResponse {
       // no assertion here exercises the mode, so FLAT_RATE preserves today's
       // behavior unchanged.
       deliveryFeeMode: "FLAT_RATE",
+      // F-039 (architecture.md AD3): no assertion here exercises equivalents.
+      displayCurrencies: [],
     },
     lines: [],
     subtotal: "0.00",
     discountTotal: "0.00",
     capturedAt: new Date("2026-08-26T10:00:00Z").toISOString(),
+    rates: {},
   };
 }
 

@@ -37,6 +37,10 @@ export type OrderStore = {
   name: string;
   /** `Business.baseCurrencyCode`, read at the same moment as everything else. */
   currencyCode: string;
+  /** F-039 (architecture.md AD3): `Business.displayCurrencies` as declared
+   *  (R1), unpruned, read from the SAME `business` select as `currencyCode`
+   *  — no second query. Published as-is in `QuoteStore.displayCurrencies`. */
+  displayCurrencies: readonly string[];
   checkoutMode: CheckoutMode;
   deliveryEnabled: boolean;
   deliveryFee: string | null;
@@ -125,7 +129,7 @@ export async function loadStoreForOrder(requestedSlug: string): Promise<OrderSto
       disabledReasonCode: true,
       disabledMessage: true,
       disabledAt: true,
-      business: { select: { id: true, baseCurrencyCode: true } },
+      business: { select: { id: true, baseCurrencyCode: true, displayCurrencies: true } },
     },
   });
   if (!store || store.status === "DRAFT") return null;
@@ -136,6 +140,7 @@ export async function loadStoreForOrder(requestedSlug: string): Promise<OrderSto
     slug: resolution.canonicalSlug,
     name: store.name,
     currencyCode: store.business.baseCurrencyCode,
+    displayCurrencies: store.business.displayCurrencies,
     checkoutMode: store.checkoutMode,
     deliveryEnabled: store.deliveryEnabled,
     deliveryFee: store.deliveryFee?.toString() ?? null,
@@ -356,6 +361,7 @@ export function toQuoteResponse(quote: CartQuote): QuoteResponse {
       deliveryEnabled: quote.store.deliveryEnabled,
       deliveryFee: quote.store.deliveryFee,
       deliveryFeeMode: quote.store.deliveryFeeMode,
+      displayCurrencies: quote.store.displayCurrencies,
     },
     lines: quote.lines.map((line) =>
       line.orderable
@@ -390,5 +396,10 @@ export function toQuoteResponse(quote: CartQuote): QuoteResponse {
     subtotal: quote.subtotal.amount,
     discountTotal: quote.discountTotal.amount,
     capturedAt: quote.capturedAt,
+    // AD3/DH8: the FULL rate table this CartQuote read, unfiltered — the
+    // same table `subtotal` above was computed with, so the cart and the
+    // checkout can convert it client-side without a second, independent
+    // lookup (spec.md R12 § excepción acotada).
+    rates: quote.rates,
   };
 }

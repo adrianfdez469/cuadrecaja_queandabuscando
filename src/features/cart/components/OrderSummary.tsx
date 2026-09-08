@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 /**
  * Subtotal · envío · total. Presentational — no `"use client"`: it is used
  * from inside `CartView` and `CheckoutForm`, which already carry the
@@ -14,6 +16,7 @@ export function OrderSummary({
   totalLabel,
   totalCaption = "Total",
   partialNotice,
+  equivalentLabel,
   busy = false,
   announcement,
   note,
@@ -32,6 +35,15 @@ export function OrderSummary({
    *  `note`: `note` is `text-fg-muted text-xs` — the small, easy-to-miss
    *  letter design.md rejected for exactly this sentence. */
   partialNotice?: string;
+  /** F-039 (design.md § Componentes de UI, DH3): the total's (or partial
+   *  total's) approximate equivalent — a sibling of `partialNotice`, not
+   *  squeezed into `note`: an amount and a sentence pasted into the same
+   *  string is exactly what design.md warns against. `ReactNode`, not
+   *  `string`, so the caller can carry the `aria-hidden`/`sr-only` split
+   *  that gives the mark its accessible name (D1/D2, R16) — the same
+   *  markup `ProductCard` already uses. `undefined` when there is nothing
+   *  to show (no reference currency chosen, or still loading). */
+  equivalentLabel?: ReactNode;
   busy?: boolean;
   /** Announced once via aria-live when the amounts settle. */
   announcement?: string;
@@ -70,6 +82,9 @@ export function OrderSummary({
           </span>
         </div>
         {partialNotice && <p className="text-fg mt-0.5 text-right text-sm">{partialNotice}</p>}
+        {equivalentLabel && (
+          <p className="text-fg-muted mt-0.5 text-right text-sm">{equivalentLabel}</p>
+        )}
       </div>
 
       {note && <p className="text-fg-muted text-xs">{note}</p>}

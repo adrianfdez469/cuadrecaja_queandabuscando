@@ -7,6 +7,12 @@ import { Alert } from "@/components/ui/Alert";
 import { Field } from "@/components/ui/Field";
 import { RadioCard } from "@/components/ui/RadioCard";
 import { add, formatMoney, money, subtract } from "@/lib/money";
+import { priceEquivalents, selectableCurrencies } from "@/lib/priceEquivalents";
+import { REFERENCE_CURRENCY_NONE } from "@/constants/currency";
+import {
+  REFERENCE_CURRENCY_NOT_HYDRATED,
+  useReferenceCurrencyPreference,
+} from "@/features/currency/referenceCurrencyStore";
 import { getAccountProfile } from "@/features/account/accountStore";
 import {
   CONTACT_NAME_MAX_LENGTH,
@@ -234,6 +240,17 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
     summaryRef.current?.focus();
   }, [attempted, fieldErrors]);
 
+  // F-039 (architecture.md AD3, spec.md R12 § excepción acotada): the SAME
+  // rate table and declared list `quote` carries — never a second server
+  // read — so the total's equivalent below can never disagree with the
+  // total it sits under. The preference is read, never written, from here:
+  // `referenceCurrencyStore.ts` is the single store the header selector
+  // already writes to.
+  const offeredCurrencies = quote
+    ? selectableCurrencies(quote.store.displayCurrencies, quote.store.currencyCode, quote.rates)
+    : [];
+  const [referenceCurrency] = useReferenceCurrencyPreference(offeredCurrencies);
+
   function getOrCreateIdempotencyKey(): string {
     if (idempotencyKeyRef.current) return idempotencyKeyRef.current;
     try {
@@ -441,18 +458,35 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
       ? money(quote.discountTotal, quote.store.currencyCode)
       : null;
   const discountLabel = discountMoney ? `−${formatMoney(discountMoney)}` : undefined;
-  const totalLabel =
+  const totalMoney =
     quote && quoteState === "ready"
-      ? formatMoney(
-          add(
-            subtract(
-              money(quote.subtotal, quote.store.currencyCode),
-              discountMoney ?? money("0", quote.store.currencyCode),
-            ),
-            deliveryFeeMoney ?? money("0", quote.store.currencyCode),
+      ? add(
+          subtract(
+            money(quote.subtotal, quote.store.currencyCode),
+            discountMoney ?? money("0", quote.store.currencyCode),
           ),
+          deliveryFeeMoney ?? money("0", quote.store.currencyCode),
         )
       : null;
+  const totalLabel = totalMoney ? formatMoney(totalMoney) : null;
+  // DH3: the equivalent of whatever total is being shown right now — final
+  // or partial (design.md § 4: "un total parcial también lleva su
+  // equivalente"), never the subtotal, the discount or the delivery fee
+  // (DH4/SP3(a) applied inside this screen too). `undefined` while there is
+  // nothing firm (still loading) or nothing chosen.
+  const totalEquivalent =
+    quote &&
+    totalMoney &&
+    referenceCurrency !== REFERENCE_CURRENCY_NOT_HYDRATED &&
+    referenceCurrency !== REFERENCE_CURRENCY_NONE
+      ? priceEquivalents(
+          totalMoney,
+          quote.store.displayCurrencies,
+          quote.store.currencyCode,
+          quote.rates,
+        ).find((equivalent) => equivalent.currency === referenceCurrency)
+      : undefined;
+  const totalEquivalentLabel = totalEquivalent ? formatMoney(totalEquivalent) : null;
 
   const submitting = outcome.kind === "submitting";
   const canSubmit =
@@ -845,6 +879,23 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
           totalLabel={totalLabel}
           totalCaption={deliveryQuotePending ? "Total parcial" : undefined}
           partialNotice={deliveryQuotePending ? "más el envío por confirmar" : undefined}
+          // DH3/D1/D2/D9: same "≈" + sr-only "aproximadamente" split
+          // ProductCard uses, and the note only appears alongside it — never
+          // on its own, so "Cobramos en CUP" without a number to explain
+          // never shows up here.
+          equivalentLabel={
+            totalEquivalentLabel && (
+              <>
+                <span aria-hidden>≈</span> <span className="sr-only">aproximadamente </span>
+                {totalEquivalentLabel}
+              </>
+            )
+          }
+          note={
+            totalEquivalentLabel && quote
+              ? `Cobramos en ${quote.store.currencyCode}; el equivalente es aproximado.`
+              : undefined
+          }
           busy={quoteState === "loading"}
         />
 
