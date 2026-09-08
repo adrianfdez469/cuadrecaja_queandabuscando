@@ -25,6 +25,20 @@ function storeEvent(businessId: string): SyncEventInput {
   };
 }
 
+function businessEvent(businessId: string): SyncEventInput {
+  return {
+    eventId: "evt-3",
+    entity: "BUSINESS",
+    operation: "UPDATE",
+    occurredAt: "2026-08-27T00:00:00.000Z",
+    payload: {
+      businessId,
+      displayCurrencies: ["CUP", "USD"],
+      updatedAt: "2026-08-27T00:00:00.000Z",
+    },
+  };
+}
+
 function currencyEvent(): SyncEventInput {
   return {
     eventId: "evt-2",
@@ -70,6 +84,25 @@ describe("findCatalogMismatch()", () => {
     const result = findCatalogMismatch("seed-negocio-1", {
       businessId: "seed-negocio-1",
       events: [currencyEvent()],
+    });
+    expect(result).toBeNull();
+  });
+
+  // F-038 R18/I6/E11: sale gratis de la condición `"businessId" in
+  // event.payload` — sin tocar identity.ts, BUSINESS entra en la
+  // comprobación el mismo día que entra en el union.
+  it("flags a BUSINESS event whose payload.businessId differs from the caller, by index", () => {
+    const result = findCatalogMismatch("seed-negocio-1", {
+      businessId: "seed-negocio-1",
+      events: [storeEvent("seed-negocio-1"), businessEvent("seed-negocio-2")],
+    });
+    expect(result).toBe("events[1].payload.businessId");
+  });
+
+  it("a BUSINESS event whose payload.businessId matches the caller does not mismatch", () => {
+    const result = findCatalogMismatch("seed-negocio-1", {
+      businessId: "seed-negocio-1",
+      events: [businessEvent("seed-negocio-1")],
     });
     expect(result).toBeNull();
   });
