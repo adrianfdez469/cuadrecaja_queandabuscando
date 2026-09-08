@@ -199,6 +199,7 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
                   product={product}
                   storeSlug={store.canonicalSlug}
                   displayCurrency={store.baseCurrencyCode}
+                  displayCurrencies={store.displayCurrencies}
                   rates={rates}
                   eager={index < CATALOG_EAGER_IMAGE_COUNT}
                   priority={index === 0}

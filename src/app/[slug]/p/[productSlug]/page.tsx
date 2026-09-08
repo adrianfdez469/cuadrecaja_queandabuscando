@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { AVAILABILITY_LABEL, AVAILABILITY_TONE, isOrderable } from "@/lib/availability";
 import { resolvePrice, type ResolvedPrice } from "@/lib/pricing";
 import { formatMoney } from "@/lib/money";
+import { priceEquivalents } from "@/lib/priceEquivalents";
+import { EQUIVALENT_CURRENCY_ATTR } from "@/constants/currency";
 import { deriveImageVariants, socialImageUrl } from "@/lib/imageVariants";
 import { IMAGE_VARIANT_WIDTH_DETAIL } from "@/constants/media";
 import {
@@ -159,6 +161,11 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
     resolved = null;
   }
   const price = resolved ? formatMoney(resolved.price) : null;
+  // F-039 (architecture.md AD1, R8): the SAME compositor `ProductCard` calls,
+  // over the CHARGED amount — never `resolved.beforeConversion`.
+  const equivalents = resolved
+    ? priceEquivalents(resolved.price, store.displayCurrencies, store.baseCurrencyCode, rates)
+    : [];
   const canOrder = isOrderable(product.availability) && resolved !== null;
   const winningPromotion = product.promotions.find((p) => p.id === resolved?.promotionId) ?? null;
 
@@ -200,7 +207,29 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
           <h1 className="text-2xl font-semibold">{product.name}</h1>
 
           <p className="text-brand mt-4 text-3xl font-semibold">
-            {price ?? <span className="text-fg-muted">Consultar precio</span>}
+            {price === null ? (
+              <span className="text-fg-muted">Consultar precio</span>
+            ) : equivalents.length === 0 ? (
+              price
+            ) : (
+              // design.md § 2: same technique as the card, one size up
+              // (14 px equivalents, `text-sm`) — a flex group of siblings so
+              // hiding N-1 of them at hydration never orphans a gap or a
+              // separator (architecture.md § Restricciones, punto 2).
+              <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                <span>{price}</span>
+                {equivalents.map((equivalent) => (
+                  <span
+                    key={equivalent.currency}
+                    {...{ [EQUIVALENT_CURRENCY_ATTR]: equivalent.currency }}
+                    className="text-fg-muted text-sm font-normal whitespace-nowrap"
+                  >
+                    <span aria-hidden>≈</span> <span className="sr-only">aproximadamente </span>
+                    {formatMoney(equivalent)}
+                  </span>
+                ))}
+              </span>
+            )}
           </p>
           {resolved?.listPrice && (
             <p className="text-fg-muted text-sm">

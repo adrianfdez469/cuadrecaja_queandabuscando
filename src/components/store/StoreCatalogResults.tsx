@@ -39,6 +39,7 @@ export function StoreCatalogResults({
   storeSlug,
   storeName,
   displayCurrency,
+  displayCurrencies,
   rates,
   basePath,
 }: {
@@ -46,6 +47,8 @@ export function StoreCatalogResults({
   storeSlug: PublicSlug;
   storeName: string;
   displayCurrency: string;
+  /** F-039 (AD5): threaded straight to `ProductCard`, same as `rates`. */
+  displayCurrencies: readonly string[];
   rates: Record<string, string>;
   basePath: string;
 }) {
@@ -69,6 +72,7 @@ export function StoreCatalogResults({
               product={item}
               storeSlug={storeSlug}
               displayCurrency={displayCurrency}
+              displayCurrencies={displayCurrencies}
               rates={rates}
               eager={index < CATALOG_EAGER_IMAGE_COUNT}
               priority={index === 0}

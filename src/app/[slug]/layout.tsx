@@ -1,7 +1,21 @@
 import Link from "next/link";
-import { getStorefrontBranding, requireStore } from "@/features/catalog/server/queries";
+import {
+  getStorefrontBranding,
+  getStoreRates,
+  requireStore,
+} from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
 import { renderStoreTheme } from "@/features/theming/storeTheme";
+import { selectableCurrencies } from "@/lib/priceEquivalents";
+import {
+  REFERENCE_CURRENCY_BOOT_SCRIPT,
+  renderReferenceCurrencyCss,
+} from "@/features/currency/reveal";
+import { ReferenceCurrencySelect } from "@/features/currency/components/ReferenceCurrencySelect";
+import {
+  REFERENCE_CURRENCY_CHOICES_ATTR,
+  REFERENCE_CURRENCY_DEFAULT_ATTR,
+} from "@/constants/currency";
 import { Container } from "@/components/ui/Container";
 import { CartBadge } from "@/features/cart/components/CartBadge";
 import { AccountBadge } from "@/features/account/components/AccountBadge";
@@ -69,9 +83,45 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[s
   // name is text, not a link: there is nowhere else on this page to go to.
   const closed = store.status !== "PUBLISHED";
 
+  // F-039 (architecture.md AD4 § "Lo que este atributo obliga"): the OFFERED
+  // set (DH5) needs the rates, which this layout did not read before this
+  // feature. Same cache key and tag `getStoreCatalog`/`getStoreRates` already
+  // pay for elsewhere in this store — zero new round-trips. Skipped for a
+  // closed store: it never shows a price at all (design.md § Inventario,
+  // "Tienda cerrada"), so the ternary's untaken branch never awaits.
+  const offeredCurrencies = closed
+    ? []
+    : selectableCurrencies(
+        store.displayCurrencies,
+        store.baseCurrencyCode,
+        await getStoreRates(resolution),
+      );
+  const hasReferenceCurrency = offeredCurrencies.length > 0;
+  const referenceCss = renderReferenceCurrencyCss(offeredCurrencies);
+
   return (
-    <div data-store={store.canonicalSlug} className="flex min-h-full flex-col">
+    <div
+      data-store={store.canonicalSlug}
+      // AD4: only when the selector offers something — with an empty set
+      // this div is BYTE FOR BYTE what it was before this feature (C9).
+      {...(hasReferenceCurrency
+        ? {
+            [REFERENCE_CURRENCY_CHOICES_ATTR]: offeredCurrencies.join(" "),
+            [REFERENCE_CURRENCY_DEFAULT_ATTR]: offeredCurrencies[0],
+          }
+        : {})}
+      className="flex min-h-full flex-col"
+    >
+      {/* AD4: the FIRST child of this div, so it runs while the browser is
+          still reading the HTML — before a single product card exists
+          (EX1, design.md § El destello). A literal constant: nothing of
+          this store's data is interpolated into it, only read back off the
+          two attributes above via `getAttribute`. */}
+      {hasReferenceCurrency && (
+        <script dangerouslySetInnerHTML={{ __html: REFERENCE_CURRENCY_BOOT_SCRIPT }} />
+      )}
       {themeCss && <style dangerouslySetInnerHTML={{ __html: themeCss }} />}
+      {referenceCss && <style dangerouslySetInnerHTML={{ __html: referenceCss }} />}
 
       {/* The brand colour has to land somewhere the shopper actually looks, or
           per-store theming is a mechanism with no visible effect. */}
@@ -95,6 +145,22 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[s
           {!closed && <CartBadge storeId={store.id} storeSlug={store.canonicalSlug} />}
           <AccountBadge storeSlug={store.canonicalSlug} authConfigured={authConfigured} />
         </Container>
+
+        {/* design.md § El selector: a second header row, only when this
+            business declares at least one calculable equivalent (DH5). D3:
+            one phrase, true on every page under this store, including
+            /[slug]/pedido/[code] (I6) — it never mentions equivalents. */}
+        {hasReferenceCurrency && (
+          <div className="border-brand-contrast/25 border-t">
+            <Container className="flex min-h-11 items-center justify-between gap-3 py-1">
+              <p className="text-sm">Cobramos en {store.baseCurrencyCode}.</p>
+              <ReferenceCurrencySelect
+                baseCurrency={store.baseCurrencyCode}
+                offeredCurrencies={offeredCurrencies}
+              />
+            </Container>
+          </div>
+        )}
       </header>
 
       <main className="flex-1">{children}</main>

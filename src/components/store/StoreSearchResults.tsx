@@ -23,11 +23,14 @@ export function StoreSearchResults({
   result,
   storeSlug,
   displayCurrency,
+  displayCurrencies,
   rates,
 }: {
   result: StoreSearchResult;
   storeSlug: PublicSlug;
   displayCurrency: string;
+  /** F-039 (AD5): threaded straight to `ProductCard`, same as `rates`. */
+  displayCurrencies: readonly string[];
   rates: Record<string, string>;
 }) {
   const matched = result.items.filter((item) => item.layer !== 3);
@@ -53,6 +56,7 @@ export function StoreSearchResults({
                   product={item}
                   storeSlug={storeSlug}
                   displayCurrency={displayCurrency}
+                  displayCurrencies={displayCurrencies}
                   rates={rates}
                   eager={index < CATALOG_EAGER_IMAGE_COUNT}
                   priority={index === 0}
@@ -81,6 +85,7 @@ export function StoreSearchResults({
                   product={item}
                   storeSlug={storeSlug}
                   displayCurrency={displayCurrency}
+                  displayCurrencies={displayCurrencies}
                   rates={rates}
                 />
               </li>

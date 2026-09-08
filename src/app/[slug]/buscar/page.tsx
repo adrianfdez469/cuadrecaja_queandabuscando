@@ -366,6 +366,7 @@ export default async function StoreSearchPage({
                 storeSlug={store.canonicalSlug}
                 storeName={store.name}
                 displayCurrency={store.baseCurrencyCode}
+                displayCurrencies={store.displayCurrencies}
                 rates={rates}
                 basePath={basePath}
               />
@@ -374,6 +375,7 @@ export default async function StoreSearchPage({
                 result={view.result}
                 storeSlug={store.canonicalSlug}
                 displayCurrency={store.baseCurrencyCode}
+                displayCurrencies={store.displayCurrencies}
                 rates={rates}
               />
             )}
