@@ -63,6 +63,11 @@ export type StoreSummary = {
   address: string | null;
   city: string | null;
   baseCurrencyCode: string;
+  /** F-039 (architecture.md AD5): `Business.displayCurrencies` tal cual
+   *  (R1) — no podado por falta de tasa ni por el ancla. `[]` es el defecto
+   *  de la columna y es indistinguible de "nunca llegó un `BUSINESS`"
+   *  (`.agent/specs/F-038/architecture.md` AD1). */
+  displayCurrencies: readonly string[];
   /** HD10-HD15: DRAFT never renders in public (`requireStore` 404s it);
    *  SUSPENDED renders as the closed notice, never as a 404 (HD11). */
   status: "DRAFT" | "PUBLISHED" | "SUSPENDED";
@@ -136,7 +141,7 @@ async function loadStore(storeId: string): Promise<StoreSummaryWithoutCanonical 
       disabledAt: true,
       timezone: true,
       openingHours: true,
-      business: { select: { baseCurrencyCode: true } },
+      business: { select: { baseCurrencyCode: true, displayCurrencies: true } },
       storefront: {
         select: {
           id: true,
@@ -176,6 +181,7 @@ async function loadStore(storeId: string): Promise<StoreSummaryWithoutCanonical 
     address: store.address,
     city: store.city,
     baseCurrencyCode: store.business.baseCurrencyCode,
+    displayCurrencies: store.business.displayCurrencies,
     status: store.status,
     disabledReasonCode: store.disabledReasonCode,
     disabledMessage: store.disabledMessage,
@@ -185,13 +191,32 @@ async function loadStore(storeId: string): Promise<StoreSummaryWithoutCanonical 
   };
 }
 
+/**
+ * R22 (architecture.md AD10): an `unstable_cache` entry written before
+ * F-039 does not carry `displayCurrencies` — cache entries are indexed by
+ * `keyParts` and arguments, not by code version, so the first render after
+ * deploying can read one straight through the 3600s floor
+ * (`src/app/[slug]/layout.tsx:19`). Typed, not a `??` guard over something
+ * the compiler swears is non-null: that is the class of line someone deletes
+ * in a cleanup.
+ */
+type CachedStore = Omit<StoreSummaryWithoutCanonical, "displayCurrencies"> & {
+  displayCurrencies?: readonly string[];
+};
+
 export function getStoreBySlug(branch: StoreRef): Promise<StoreSummary | null> {
   return cached(loadStore, {
     keyParts: ["store-by-slug"],
     tags: [storeTag(branch.canonicalSlug)],
-  })(branch.storeId).then((store) =>
-    store ? { ...store, canonicalSlug: branch.canonicalSlug } : null,
-  );
+  })(branch.storeId).then((store) => {
+    if (!store) return null;
+    const cachedStore = store as CachedStore;
+    return {
+      ...cachedStore,
+      displayCurrencies: cachedStore.displayCurrencies ?? [],
+      canonicalSlug: branch.canonicalSlug,
+    };
+  });
 }
 
 /**

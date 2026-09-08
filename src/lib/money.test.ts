@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   add,
   compare,
@@ -147,6 +147,52 @@ describe("percentageOff()", () => {
     // 50% of 10.03 is exactly 5.015; the DISCOUNT rounds up to 5.02, so the
     // remaining price is 5.01, not 5.02 or a truncated 5.00.
     expect(percentageOff(money("10.03", "CUP"), "50").amount).toBe("5.01");
+  });
+});
+
+describe("Intl.NumberFormat memoization (F-039 AD6, R21)", () => {
+  // `vi.spyOn` on a built-in constructor does not call through with correct
+  // `new` semantics by itself, so the mock implementation reconstructs a
+  // REAL `Intl.NumberFormat` via `Reflect.construct` against the original,
+  // captured before spying replaces the property.
+  const OriginalNumberFormat = Intl.NumberFormat;
+  function spyOnNumberFormat() {
+    // Vitest requires the mock implementation itself to be a `function` (not
+    // an arrow function) to be invocable with `new` — see
+    // https://vitest.dev/api/vi#vi-spyon.
+    return vi.spyOn(Intl, "NumberFormat").mockImplementation(function (
+      ...args: ConstructorParameters<typeof Intl.NumberFormat>
+    ) {
+      return Reflect.construct(OriginalNumberFormat, args) as Intl.NumberFormat;
+    });
+  }
+
+  it("builds exactly one formatter across 100 calls with the same (locale, currency, digits)", () => {
+    const spy = spyOnNumberFormat();
+    const value = money("12.34", "GBP");
+    const outputs = Array.from({ length: 100 }, () => formatMoney(value, { locale: "es-CU" }));
+    // Not a single character differs between the first call and the 100th.
+    expect(new Set(outputs).size).toBe(1);
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  it("memoizes the fallback branch too, for a currency Intl rejects outright", () => {
+    const spy = spyOnNumberFormat();
+    // A well-formed but fictional 3-letter code (e.g. "ZZZ") does NOT throw —
+    // `Intl.NumberFormat` only validates the currency option's SHAPE, and
+    // prints the code itself as the symbol. Only a code that fails that
+    // shape check (here, two letters) actually takes the catch branch.
+    const value = money("10", "ZZ");
+    const outputs = Array.from({ length: 100 }, () =>
+      formatMoney(value, { locale: "es-CU", symbol: "¤" }),
+    );
+    expect(new Set(outputs).size).toBe(1);
+    // One failed `style: "currency"` attempt plus one plain fallback
+    // formatter, memoized so 100 calls cost two constructions total, never
+    // two PER formatted amount.
+    expect(spy).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
   });
 });
 

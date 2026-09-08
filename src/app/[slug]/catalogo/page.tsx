@@ -259,6 +259,7 @@ export default async function StoreCatalogPage({
             storeSlug={store.canonicalSlug}
             storeName={store.name}
             displayCurrency={store.baseCurrencyCode}
+            displayCurrencies={store.displayCurrencies}
             rates={rates}
             basePath={basePath}
           />

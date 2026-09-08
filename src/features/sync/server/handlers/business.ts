@@ -5,7 +5,8 @@ import {
 } from "@/constants/sync";
 import { dedupeDisplayCurrencies, findInvalidDisplayCurrency } from "../../displayCurrencies";
 import type { BusinessPayload } from "../../schemas";
-import { PROCESSED, STALE, SyncEventFailure, type HandlerOutcome } from "./types";
+import type { RenderableBranchLookup } from "../businessBranches";
+import { outcomeOf, STALE, SyncEventFailure, type HandlerOutcome } from "./types";
 
 /**
  * F-038: `displayCurrencies` — what the merchant wants the storefront to
@@ -40,14 +41,22 @@ import { PROCESSED, STALE, SyncEventFailure, type HandlerOutcome } from "./types
  * an error. Never touches `name`/`baseCurrencyCode`/`active`/`syncTokenHash`
  * (R10) — those stay `handleStore`'s. Writes against `businessId`, the
  * caller's internal uuid, never the `businessId` field the payload itself
- * carries (R11). Returns
- * `PROCESSED` pelado: no `touched*` field, because nothing reads this list
- * yet (R13/D4) — no cache to invalidate.
+ * carries (R11).
+ *
+ * F-039 (R18/R19, architecture.md AD7): the fourth and last parameter, in
+ * the same position `handleCurrency`/`handleExchangeRate` already carry it
+ * (`handlers/misc.ts`). Called ONLY on the branch that wrote — a `stale`
+ * write, a `DELETE`, or an invalid member throws/returns before it, so
+ * nothing not just-written is ever invalidated (R18). Its result feeds
+ * `outcomeOf`, shared with those same two handlers (AD8) — an empty
+ * renderable set (a business with no branch, or every branch still
+ * `DRAFT`) collapses to `PROCESSED` pelado, exactly like before.
  */
 export async function handleBusiness(
   payload: BusinessPayload,
   operation: "CREATE" | "UPDATE" | "DELETE",
   businessId: string,
+  renderableBranches: RenderableBranchLookup,
 ): Promise<HandlerOutcome> {
   // 1. R5(1) — puro, cero round-trips. Before the guard on purpose (E6): a
   //    DELETE is not an operation of this entity in ANY instant.
@@ -85,5 +94,9 @@ export async function handleBusiness(
     },
   });
 
-  return written.count === 0 ? STALE : PROCESSED;
+  // R18: se invalida lo que se ESCRIBIÓ. Un `stale` vuelve aquí sin haber
+  // llamado nunca a la clausura -> cero consultas y cero invalidación, igual
+  // que el `return SKIPPED` del CUP de handleExchangeRate
+  // (handlers/misc.ts:197-198). Los dos `throw` de arriba salen antes todavía.
+  return written.count === 0 ? STALE : outcomeOf(await renderableBranches(businessId));
 }

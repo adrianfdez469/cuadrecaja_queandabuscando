@@ -242,11 +242,13 @@ permiso de los dos humanos, y lo acordado está abajo en § «El catálogo, cerr
 y § «El vector, cruzado». Ya no bloquean la v13. **SP5 lo cerró el humano el
 mismo día.** Queda una sola cosa, y necesita una decisión suya nueva:
 
-- **SP-H · La lista de códigos DPA/ONEI.** Decisión del humano el 2026-09-06:
-  **la unión la hace el agente y el humano revisa solo las filas dudosas**, no
-  las 184. Para poder proponer esas filas hace falta la lista oficial de códigos,
-  y **no se puede conseguir desde esta máquina** — § «Lo verificado el
-  2026-09-06». Es lo único que bloquea generar el catálogo, y con él F-041.
+- **SP-H · La lista de códigos DPA/ONEI. CERRADO el 2026-09-08: la lista
+  apareció.** Es el «Codificador de la División Político-Administrativa», Edición
+  Enero 2011, recuperado del Internet Archive — § «El DPA, recuperado del
+  Internet Archive». No hay que inventar ningún código y **ya no bloquea generar
+  el catálogo**. La decisión del 2026-09-06 sigue en pie tal cual: la unión la
+  hace el agente y el humano revisa solo las filas dudosas, que de momento son
+  las nueve de Santiago de Cuba por una errata de la fuente.
 
 - **SP4** resuelto por el orquestador: son **dos** features, F-041 y F-042.
 - **SP5 · El peso del mapa, cerrado por el humano el 2026-09-06**, con estas
@@ -298,6 +300,85 @@ Si esa lista no aparece, la alternativa es nombrar los códigos nosotros, y
 entonces se pierde lo que hacía preferible el DPA frente a los nombres libres: la
 autoridad compartida y la comparabilidad entre negocios. No es la recomendación;
 queda escrito para que la decisión sea consciente.
+
+## El DPA, recuperado del Internet Archive (2026-09-08)
+
+**SP-H se cierra con la lista real: no hay que inventar ningún código.** El humano
+pidió agotar el Internet Archive antes de aceptar otra identidad, y preguntó
+además si existía una lista **vieja y completa** sobre la que aplicar los cambios
+de la reforma. Esa pregunta es la que lo encontró: buscando la vieja apareció,
+en el mismo rincón del sitio, **la nueva y completa**.
+
+**La fuente, y es la autoridad que el § «El catálogo, cerrado» pedía:**
+
+- **«Codificador de la División Político-Administrativa», República de Cuba,
+  Edición Enero 2011**, ONEI, 9 páginas, en
+  `web.archive.org/web/20110125204824id_/http://www.one.cu/publicaciones/08informacion/mapasdecuba/DPA.pdf`.
+  Trae los códigos de **las 16 divisiones de primer nivel y los 168 municipios**,
+  con la forma `PP.MM` — provincia de dos dígitos, municipio de dos dígitos.
+- **Los códigos de primer nivel:** 21 Pinar del Río, 22 Artemisa, 23 La Habana,
+  24 Mayabeque, 25 Matanzas, 26 Villa Clara, 27 Cienfuegos, 28 Sancti Spíritus,
+  29 Ciego de Ávila, 30 Camagüey, 31 Las Tunas, 32 Holguín, 33 Granma, 34
+  Santiago de Cuba, 35 Guantánamo, y **40 para el Municipio Especial Isla de la
+  Juventud**, cuyo único municipio es el `40.01`.
+
+**Las tres fuentes cuadran, y esto es la comprobación de la procedencia hecha
+antes de generar nada:** el codificador da 15 provincias y 168 municipios
+contando la Isla; el capítulo Territorio del AEC 2012 dice «15 provincias, 168
+municipios»; y Overpass devuelve 16 relaciones de nivel 4 y 167 de nivel 6, que
+son las 15 provincias más la Isla al nivel de una provincia, y sus 167 municipios
+más la Isla contada como municipio. **168 = 167 + 1**, por el mismo caso especial
+que ya obligaba a declarar el nivel.
+
+**Y la Isla lo confirma una tercera vez, con un cambio de código:** en la lista
+pre-reforma de 2006 era `9901`, y en el codificador de 2011 es `40.01`. El código
+de una zona no es estable entre ediciones de la DPA, así que la edición usada va
+en la procedencia y **el id de OSM sigue siendo lo que une las regeneraciones**.
+
+**UNA ERRATA EN LA FUENTE, y es del propio PDF de ONEI, no de la extracción.** El
+bloque encabezado `PROVINCIA: 34 SANTIAGO DE CUBA` imprime sus nueve municipios
+como `32.01 Contramaestre` … `32.09 Guamá`, repitiendo el prefijo de Holguín, que
+en la misma página gasta `32.01`–`32.14`. Los códigos correctos han de ser
+`34.01`–`34.09`, pero **eso no se arregla en silencio**: son nueve municipios con
+dos códigos posibles y entran en el informe de filas dudosas que revisa el
+humano, con la errata citada. Si se corrigiera sin decirlo, el catálogo tendría
+nueve códigos que ninguna fuente respalda, y sería indistinguible de haberlos
+inventado. Es, de paso, la mejor defensa de por qué la revisión humana de la
+unión no era ceremonia: el fallo estaba en la fuente oficial y lo caza contar.
+
+**Material de apoyo recuperado, que sirve para el contraste:**
+
+- **«Codificación de la DPA en provincias y municipios que sufren
+  modificaciones»**, ONEI, 2010-08-04, en
+  `web.archive.org/web/20101221055419id_/http://www.one.cu/publicaciones/cepde/Nueva%20DPA/Territorios%20DPA.doc`
+  — los municipios de las seis provincias que la reforma tocó (Pinar del Río,
+  Artemisa, La Habana, Mayabeque, Matanzas, Guantánamo).
+- **La DPA completa pre-reforma**, en
+  `web.archive.org/web/20060708194124id_/http://www.one.cu/dpa.htm`
+  — 14 provincias `01`–`14` y la Isla como `9901`, 169 municipios. Es lo que
+  cierra la aritmética de la reforma: Pinar del Río 14 → 11, la antigua provincia
+  de La Habana 19 → Artemisa 11 + Mayabeque 11 (los tres que faltaban salen de
+  Pinar del Río: Bahía Honda, Candelaria y San Cristóbal), Matanzas 14 → 13, las
+  nueve provincias no tocadas mantienen sus 96, y 169 → 168.
+- **Los anuarios estadísticos municipales de ONEI**, cuyos nombres de fichero
+  llevan el código: `2101_anuario_estadistico_sandino_2019.pdf`,
+  `anuario_2020_edicion_2021_-_municipio_bahia_honda_2201.pdf`. Confirman el
+  codificador desde una publicación distinta y **coincidieron 11 de 11 en
+  Artemisa**.
+
+**Lo que NO se pudo conseguir, y ya no bloquea:** `onei.gob.cu` sigue sin
+responder desde esta máquina el 2026-09-08, y Wikidata no tiene propiedad para el
+código DPA. La lista entró por el Archive, no por la web viva, así que **la
+edición usada queda congelada en la procedencia**: Codificador, Edición Enero 2011. Si ONEI publicó una edición posterior, este catálogo no la refleja, y eso
+se sabrá porque está escrito.
+
+**El QID de Wikidata se queda, pero como herramienta de unión, no como `code`.**
+Verificado el 2026-09-08: las 183 relaciones de Overpass traen QID, sin
+duplicados y sin ninguna sin nombre. Sirve para unir el codificador con la
+geometría sin depender del nombre, que es justo donde la unión falla: entre las
+183 hay **12 nombres repetidos** —cada provincia con su municipio capital
+homónimo, y `San Luis`, que son dos municipios en dos provincias distintas—. El
+`code` que viaja por el cable sigue siendo el DPA, como decía el acuerdo.
 
 ## El catálogo, cerrado (SP1 y SP2)
 

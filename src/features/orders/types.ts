@@ -24,6 +24,12 @@ export type QuoteStore = {
   /** F-031 R20: travels EXPLICIT so the checkout island never has to deduce
    *  a mode from `deliveryFee === null`, which today means "no delivery". */
   deliveryFeeMode: "FLAT_RATE" | "QUOTED_PER_ORDER";
+  /** F-039 (architecture.md AD3): `Business.displayCurrencies` as declared
+   *  (R1), unpruned — the same list `priceEquivalents`/`selectableCurrencies`
+   *  read elsewhere. Obligatory, not optional: an opt-out here would leave a
+   *  screen without equivalents in silence (architecture.md § Qué rompe en
+   *  compilación). */
+  displayCurrencies: readonly string[];
 };
 
 /**
@@ -56,6 +62,13 @@ export type QuoteResponse = {
   /** ORDER-scope discount (R29). "0" when none applies. */
   discountTotal: string;
   capturedAt: string;
+  /** F-039 (architecture.md AD3): every rate `CartQuote` read for this
+   *  business, the SAME table `subtotal` (and the checkout's total) were
+   *  computed with — never a second, independently-fetched table, which is
+   *  what would let an equivalent disagree with the amount it is next to
+   *  (spec.md R12 § excepción, DH8). Obligatory for the same reason as
+   *  `QuoteStore.displayCurrencies`. */
+  rates: Record<string, string>;
 };
 
 export type Fulfillment = "PICKUP" | "DELIVERY";

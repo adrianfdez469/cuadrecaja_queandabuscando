@@ -31,6 +31,10 @@ function quote(): QuoteResponse {
       // no assertion here exercises the mode, so FLAT_RATE preserves today's
       // behavior unchanged.
       deliveryFeeMode: "FLAT_RATE",
+      // F-039 (architecture.md AD3): no assertion in this describe exercises
+      // equivalents, so an empty declared list keeps today's behavior
+      // (no sub-line under the total).
+      displayCurrencies: [],
     },
     lines: [
       {
@@ -50,6 +54,7 @@ function quote(): QuoteResponse {
     subtotal: "180.00",
     discountTotal: "0.00",
     capturedAt: new Date("2026-08-26T10:00:00Z").toISOString(),
+    rates: {},
   };
 }
 
@@ -157,6 +162,7 @@ describe("CheckoutForm — envío cotizado (F-031)", () => {
         deliveryEnabled: true,
         deliveryFee: null,
         deliveryFeeMode: "QUOTED_PER_ORDER",
+        displayCurrencies: [],
       },
       lines: [
         {
@@ -176,6 +182,7 @@ describe("CheckoutForm — envío cotizado (F-031)", () => {
       subtotal: "1234.56",
       discountTotal: "0.00",
       capturedAt: new Date("2026-09-01T10:00:00Z").toISOString(),
+      rates: {},
     };
   }
 
@@ -241,5 +248,127 @@ describe("CheckoutForm — envío cotizado (F-031)", () => {
     expect(screen.queryByText("Por confirmar")).not.toBeInTheDocument();
     expect(screen.queryByText("más el envío por confirmar")).not.toBeInTheDocument();
     expect(screen.getByText("$0.00")).toBeInTheDocument();
+  });
+});
+
+/**
+ * F-039 (plan.md paso 6, criterio 13): el límite duro del feature —
+ * "no se cambia lo que se cobra"— comprobado como aserto, no solo como
+ * prosa. Con una moneda de referencia elegida (USD, con tasa), el resumen
+ * enseña el equivalente (DH3), pero el `POST /api/orders` que sale es
+ * BYTE A BYTE el mismo que sin ningún equivalente en pantalla: mismo
+ * `expectedTotal`, en la base, y ninguna mención de la moneda de referencia
+ * en el cuerpo.
+ */
+describe("CheckoutForm — el equivalente no toca lo que se cobra (C13)", () => {
+  const STORE_ID_EQUIVALENT = "store-checkout-equivalent-test";
+
+  function quoteWithEquivalent(): QuoteResponse {
+    return {
+      store: {
+        slug: "tienda-demo",
+        name: "La Rampa · Vedado",
+        currencyCode: "CUP",
+        checkoutMode: "WHATSAPP",
+        deliveryEnabled: false,
+        deliveryFee: null,
+        deliveryFeeMode: "FLAT_RATE",
+        // AD3/DH8: the FULL table, unfiltered — exactly what `toQuoteResponse`
+        // publishes.
+        displayCurrencies: ["CUP", "USD"],
+      },
+      lines: [
+        {
+          storeProductId: "sp-1",
+          slug: "pan-suave",
+          name: "Pan suave",
+          qty: 2,
+          unitPrice: "2200.00",
+          currencyCode: "CUP",
+          lineTotal: "4400.00",
+          originalUnitPrice: "2200.00",
+          originalCurrencyCode: "CUP",
+          listUnitPrice: null,
+          orderable: true,
+        },
+      ],
+      // 4400.00 CUP / 440.000000 (CUP per USD) = US$10.00, the same round
+      // number design.md's own worked example uses (§ 4).
+      subtotal: "4400.00",
+      discountTotal: "0.00",
+      capturedAt: new Date("2026-09-08T10:00:00Z").toISOString(),
+      rates: { USD: "440.000000" },
+    };
+  }
+
+  let ordersRequestBody: Record<string, unknown> | null;
+
+  beforeEach(() => {
+    ordersRequestBody = null;
+    window.localStorage.clear();
+    // The SAME key the header selector writes (AD9) — reused, not a second
+    // preference store, so this is exactly what a shopper who already chose
+    // USD elsewhere in the site would have saved.
+    window.localStorage.setItem("qab.reference-currency.v1", "USD");
+    writeCart({
+      storeId: STORE_ID_EQUIVALENT,
+      items: [
+        {
+          storeProductId: "sp-1",
+          slug: "pan-suave",
+          qty: 2,
+          display: { name: "Pan suave", unitPrice: "2200.00", currency: "CUP" },
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/orders/quote")) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          return new Response(JSON.stringify(quoteWithEquivalent()), { status: 200 });
+        }
+        if (url.includes("/api/orders")) {
+          ordersRequestBody = JSON.parse(String(init?.body));
+          return new Response(
+            JSON.stringify({
+              code: "PED-0001",
+              orderUrl: "/tienda-demo/pedido/PED-0001",
+              whatsappUrl: null,
+            }),
+            { status: 201 },
+          );
+        }
+        return new Response("{}", { status: 200 });
+      }),
+    );
+  });
+
+  it("pinta el equivalente en USD y aun así envía el expectedTotal de siempre, en CUP", async () => {
+    render(<CheckoutForm storeId={STORE_ID_EQUIVALENT} storeSlug="tienda-demo" />);
+    const enviar = await enviarActivado();
+
+    // DH3: el equivalente aproximado del total se ve antes de enviar nada.
+    expect(await screen.findByText("US$10.00")).toBeInTheDocument();
+    expect(screen.getByText("Cobramos en CUP; el equivalente es aproximado.")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Nombre y apellidos"), {
+      target: { value: "Ana Pérez" },
+    });
+    fireEvent.change(screen.getByLabelText("Teléfono"), {
+      target: { value: "+53 5555 5555" },
+    });
+
+    fireEvent.click(enviar);
+
+    await waitFor(() => expect(ordersRequestBody).not.toBeNull());
+    // § Qué queda fuera 3 del plan: `expectedTotal` viaja igual que antes de
+    // este feature — en la base, idéntico al subtotal sin descuento ni envío.
+    expect(ordersRequestBody).toMatchObject({ expectedTotal: "4400.00" });
+    // Ninguna mención de la moneda de referencia en el cuerpo: el equivalente
+    // es solo lectura, nunca algo que se envía o se cobra.
+    expect(JSON.stringify(ordersRequestBody)).not.toContain("USD");
   });
 });
