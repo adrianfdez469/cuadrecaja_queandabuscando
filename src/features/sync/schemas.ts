@@ -125,6 +125,19 @@ export const exchangeRatePayloadSchema = z.object({
   updatedAt: isoDate,
 });
 
+export const businessPayloadSchema = z.object({
+  businessId: z.string().min(1),
+  /** F-038 v12 (R2, SP2(a)): LAX on purpose, calcado de `barcodes` (line 95).
+   *  The MEMBERS are checked in the applier, never here — declaring
+   *  `z.string().length(3)` would turn one junk code into a
+   *  `400 INVALID_BATCH` that takes the other 499 events of the batch down
+   *  with it. No `.max()` either (R17). */
+  displayCurrencies: z.array(z.string()),
+  /** The instant the LIST changed (contract v12.1), never the max of its
+   *  rows' marks — see spec.md R7. Only stored and compared here. */
+  updatedAt: isoDate,
+});
+
 // --- envelope --------------------------------------------------------------
 
 export const syncOperationSchema = z.enum(["CREATE", "UPDATE", "DELETE"]);
@@ -168,6 +181,13 @@ export const syncEventSchema = z.discriminatedUnion("entity", [
     operation: syncOperationSchema,
     occurredAt: isoDate,
     payload: exchangeRatePayloadSchema,
+  }),
+  z.object({
+    eventId: z.string().min(1),
+    entity: z.literal("BUSINESS"),
+    operation: syncOperationSchema,
+    occurredAt: isoDate,
+    payload: businessPayloadSchema,
   }),
 ]);
 
@@ -226,6 +246,7 @@ export type StorePayload = z.infer<typeof storePayloadSchema>;
 export type CategoryPayload = z.infer<typeof categoryPayloadSchema>;
 export type CurrencyPayload = z.infer<typeof currencyPayloadSchema>;
 export type ExchangeRatePayload = z.infer<typeof exchangeRatePayloadSchema>;
+export type BusinessPayload = z.infer<typeof businessPayloadSchema>;
 
 // --- provisioning (F-034) ---------------------------------------------------
 

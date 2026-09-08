@@ -28,11 +28,12 @@ export type DependencyRole = {
 /**
  * Translates one event into the two dependency roles it can play (R3): the
  * table below, and no other pair. Exhaustive `switch` with a `never` guard —
- * if a future entity (e.g. `BUSINESS`) is added to `SyncEventInput` without a
- * case here, `npm run typecheck` fails on THIS line, naming the entity
- * (AD3). `applyEvent`'s own `switch` (`processBatch.ts`) has no `default`
- * and would instead fail on a different line, with a message that does not
- * name it — that one is a safety net, not a guard.
+ * if a future entity is added to `SyncEventInput` without a case here,
+ * `npm run typecheck` fails on THIS line, naming the entity (AD3, the
+ * signal F-038's `case "BUSINESS"` below already fired once). `applyEvent`'s
+ * own `switch` (`processBatch.ts`) has no `default` and would instead fail on
+ * a different line, with a message that does not name it — that one is a
+ * safety net, not a guard.
  *
  * | `entity`        | `provides`                           | `requires`                                                         |
  * | --------------- | ------------------------------------- | ------------------------------------------------------------------ |
@@ -41,6 +42,7 @@ export type DependencyRole = {
  * | `PRODUCT`       | `null`                                | `CATEGORY:` + `payload.localCategoryId`; `null` if falsy (R5)      |
  * | `EXCHANGE_RATE` | `null`                                | `CURRENCY:` + `payload.currency`                                   |
  * | `STORE`         | `null`                                | `null`                                                              |
+ * | `BUSINESS`      | `null`                                | `null` (F-038 R12)                                                  |
  *
  * No row has both columns filled (R11): neither `PRODUCT` nor
  * `EXCHANGE_RATE` is ever a `provides`, so a dependent never itself blocks
@@ -61,6 +63,13 @@ export function dependencyRoleOf(event: SyncEventInput): DependencyRole {
     case "EXCHANGE_RATE":
       return { provides: null, requires: `CURRENCY:${event.payload.currency}` };
     case "STORE":
+      return { provides: null, requires: null };
+    case "BUSINESS":
+      // F-038 R12: no order dependency of any kind — `displayCurrencies` is
+      // a single column of a single row, unrelated to the CATEGORY/CURRENCY
+      // cascade. This `case` exists so the exhaustive `never` guard below
+      // does not have to name BUSINESS, even though the role it plays is
+      // exactly the same as STORE's.
       return { provides: null, requires: null };
     default: {
       const exhaustive: never = event;
