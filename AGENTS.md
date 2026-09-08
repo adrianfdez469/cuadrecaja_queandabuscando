@@ -188,7 +188,7 @@ con `DEPENDENCY_FAILED_IN_BATCH` en vez de aplicarse a medias — ver
 `src/features/sync/dependencies.ts`. Si agregas un handler, mantén ambas
 propiedades o el reintento corrompe datos. Hay
 **dos** formas de la guarda, y no son intercambiables: la que **rechaza** y
-devuelve `STALE` (`STORE`, `CATEGORY`, `PRODUCT`) y la de **orden**, de
+devuelve `STALE` (`STORE`, `CATEGORY`, `PRODUCT`, `BUSINESS`) y la de **orden**, de
 `EXCHANGE_RATE` (F-036) — que escribe siempre y decide al leer, porque su tabla
 es append-only y el histórico es el producto. Copiar la forma de una entidad
 esperando el mecanismo de la otra es el error: ver

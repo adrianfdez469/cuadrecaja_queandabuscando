@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { provisionCredentialSchema, storePayloadSchema, syncEventSchema } from "./schemas";
+import {
+  businessPayloadSchema,
+  provisionCredentialSchema,
+  storePayloadSchema,
+  syncEventSchema,
+} from "./schemas";
 import { STORE_DELIVERY_CONFIG_INCONSISTENT } from "@/constants/sync";
 
 /**
@@ -218,5 +223,91 @@ describe("provisionCredentialSchema — F-034 spec.md § Datos y contrato", () =
   it("the typo `external_id` still 400s — the unknown key is dropped, but `externalId` is then missing", () => {
     const result = provisionCredentialSchema.safeParse({ external_id: "neg-1" });
     expect(result.success).toBe(false);
+  });
+});
+
+/**
+ * F-038 R1/R2: the sixth branch of the envelope. `businessPayloadSchema` is
+ * laxo a propósito — the MEMBERS of `displayCurrencies` are checked in the
+ * applier (`findInvalidDisplayCurrency`), never here.
+ */
+function businessBasePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    businessId: "b1",
+    displayCurrencies: ["CUP", "USD", "EUR"],
+    updatedAt: "2026-09-06T14:03:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("businessPayloadSchema / syncEventSchema — the sixth branch (R1, E1)", () => {
+  it("accepts a full syncEventSchema BUSINESS event", () => {
+    const result = syncEventSchema.safeParse({
+      eventId: "evt-1",
+      entity: "BUSINESS",
+      operation: "UPDATE",
+      occurredAt: "2026-09-06T14:03:00.000Z",
+      payload: businessBasePayload(),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an entity the contract does not define (ZONE_TARIFF, v13 vocabulary — I3): accepting BUSINESS does not open the envelope to anything (E2)", () => {
+    const result = syncEventSchema.safeParse({
+      eventId: "evt-1",
+      entity: "ZONE_TARIFF",
+      operation: "UPDATE",
+      occurredAt: "2026-09-06T14:03:00.000Z",
+      payload: {},
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a payload missing displayCurrencies", () => {
+    const { displayCurrencies: _displayCurrencies, ...rest } = businessBasePayload();
+    expect(businessPayloadSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it("rejects a payload missing businessId", () => {
+    const { businessId: _businessId, ...rest } = businessBasePayload();
+    expect(businessPayloadSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it("rejects displayCurrencies that is not a list", () => {
+    expect(
+      businessPayloadSchema.safeParse(businessBasePayload({ displayCurrencies: "USD" })).success,
+    ).toBe(false);
+  });
+
+  it("rejects an updatedAt that is not ISO 8601", () => {
+    expect(
+      businessPayloadSchema.safeParse(businessBasePayload({ updatedAt: "not-a-date" })).success,
+    ).toBe(false);
+  });
+
+  it("PASSES malformed members at this layer (R2/I2) — a code is checked by the applier, not the envelope", () => {
+    expect(
+      businessPayloadSchema.safeParse(businessBasePayload({ displayCurrencies: ["usd"] })).success,
+    ).toBe(true);
+    expect(
+      businessPayloadSchema.safeParse(businessBasePayload({ displayCurrencies: ["US1"] })).success,
+    ).toBe(true);
+  });
+
+  it("accepts 40 codes with no length cap (R17)", () => {
+    const codes = Array.from({ length: 40 }, (_, i) => {
+      const a = String.fromCharCode(65 + Math.floor(i / 26));
+      const b = String.fromCharCode(65 + (i % 26));
+      return `A${a}${b}`;
+    });
+    expect(
+      businessPayloadSchema.safeParse(businessBasePayload({ displayCurrencies: codes })).success,
+    ).toBe(true);
+  });
+
+  it("accepts an empty displayCurrencies list (E10)", () => {
+    expect(
+      businessPayloadSchema.safeParse(businessBasePayload({ displayCurrencies: [] })).success,
+    ).toBe(true);
   });
 });

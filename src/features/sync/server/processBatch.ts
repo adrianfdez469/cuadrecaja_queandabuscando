@@ -17,6 +17,7 @@ import { markFailed, markProcessed, markSkipped, recordBatch } from "./inbox";
 import { handleProduct } from "./handlers/product";
 import { handleStore } from "./handlers/store";
 import { handleCategory, handleCurrency, handleExchangeRate } from "./handlers/misc";
+import { handleBusiness } from "./handlers/business";
 import { createRenderableBranchLookup, type RenderableBranchLookup } from "./businessBranches";
 import { createBatchDependencies } from "../dependencies";
 import { SyncEventFailure } from "./handlers/types";
@@ -172,5 +173,7 @@ function applyEvent(
       return handleCurrency(event.payload, businessId, renderableBranches);
     case "EXCHANGE_RATE":
       return handleExchangeRate(event.payload, businessId, renderableBranches);
+    case "BUSINESS":
+      return handleBusiness(event.payload, event.operation, businessId);
   }
 }

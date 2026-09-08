@@ -92,6 +92,7 @@ enum SyncEntity {
   PRODUCT
   CURRENCY
   EXCHANGE_RATE
+  BUSINESS
 }
 
 enum SyncOperation {
@@ -137,6 +138,19 @@ model Business {
   /// SHA-256 of the bearer token this business uses on /api/internal/*.
   syncTokenHash    String?  @unique
   active           Boolean  @default(true)
+  /// F-038 (R8): what the merchant wants the storefront to show, in the order
+  /// the POS sent it. Plain text, no `@relation` to `Currency` on purpose
+  /// (R9): a code the merchant declares before its `CURRENCY` arrives is a
+  /// normal, transient state, not an error. `@default([])` and "never
+  /// received a BUSINESS event" are indistinguishable, and they mean the same
+  /// thing to whoever reads it (F-039).
+  displayCurrencies                String[]  @default([])
+  /// The `updatedAt` of the BUSINESS payload that last wrote the list above —
+  /// the instant the LIST changed (contract v12.1), not this row's own
+  /// `updatedAt`. NULLABLE and WITHOUT `@default`, exactly like
+  /// `ExchangeRate.sourceUpdatedAt` and `Store.sourceUpdatedAt`: no backfill,
+  /// and the first delivery after the migration lands whatever its mark (E16).
+  displayCurrenciesSourceUpdatedAt DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

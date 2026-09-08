@@ -277,6 +277,14 @@ conversación y no se pueden separar— está arriba, en el bloque de «Abiertas
 mientras S-007 siga abierta para ellos. Cuando se cierre, el bloque entero baja
 aquí.
 
+**2026-09-08 — F-038 en pie, v12.2.** El lado receptor de `BUSINESS` ya está
+construido y verificado: `entity` acepta el valor, la lista se guarda con su
+guarda anti-rancio y sus dos errores por evento responden de verdad. El aviso
+de la v12/v12.1 —«no lo emitáis hasta el aviso»— queda retirado del contrato
+(v12.2). **Ya pueden dejar de filtrar el evento `BUSINESS` en su drenaje del
+outbox**: emitirlo ya no responde `400 INVALID_BATCH`. Sigue pendiente F-039
+(lo que el comprador ve) y F-040.
+
 ### S-002 · El SQL espejo y el borrado en blando
 
 **Aceptada, en la dirección que ellos proponían.** Cerrada el 2026-09-06 con la

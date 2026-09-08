@@ -14,6 +14,11 @@
  *   node scripts/send-catalog-batch.mjs --store-config=partial     # F-032: E3
  *   node scripts/send-catalog-batch.mjs --store-config=<caso>      # F-032: see scripts/store-event.mjs
  *   node scripts/send-catalog-batch.mjs --stale --store-config     # F-032: E9, criterion 6
+ *   node scripts/send-catalog-batch.mjs --business             # F-038: expect processed
+ *   node scripts/send-catalog-batch.mjs --business=invalid     # F-038: expect failed BUSINESS_DISPLAY_CURRENCIES_INVALID
+ *   node scripts/send-catalog-batch.mjs --business=delete      # F-038: expect failed BUSINESS_DELETE_NOT_SUPPORTED
+ *   node scripts/send-catalog-batch.mjs --business --stale     # F-038: expect stale
+ *   node scripts/send-catalog-batch.mjs --business --repeat    # F-038: run twice, second is duplicate
  *
  * F-018: the token is per business — `QAB_BEARER_TOKEN` (or `--token=`) has to
  * be the token of `businessId` below (`seed-negocio-1`), minted with
@@ -35,6 +40,16 @@
  * `skipped_not_published` case F-005 already verifies. The STORE payload's
  * contact fields and the thirteen `--store-config` presets live in
  * scripts/store-event.mjs, shared with send-store-batch.mjs (R21).
+ *
+ * F-038 (R22): `--business` adds a BUSINESS event to the SAME batch, composing
+ * with every flag above — `--business --stale` is a stale BUSINESS in a
+ * batch that may also carry a stale/fresh PRODUCT/STORE, and
+ * `--business --repeat` reuses the fixed suffix `--repeat` already gives the
+ * other two events. `BUSINESS_CASES` lives HERE, not in a shared module like
+ * `store-event.mjs`'s: this script is the only consumer today (architecture.md
+ * § Componentes). `ok` (the default, bare `--business`) sends the seed's own
+ * three real currencies (`CUP`, `USD`, `MLC`) so the residue this script
+ * leaves on `seed-negocio-1` is truthful.
  */
 import "dotenv/config";
 import { buildStoreEvent } from "./store-event.mjs";
@@ -69,6 +84,37 @@ const explicitStoreConfigCase = process.argv
   ?.split("=")[1];
 const storeConfigCase = explicitStoreConfigCase ?? (args.has("--store-config") ? "all" : "none");
 
+// F-038 (R22): six presets, DATA only — `ok` is the default of a bare
+// `--business` and sends the seed's own three real currencies so the
+// residue this script leaves is truthful (architecture.md § AD7(4)).
+// `delete` is the only one that also changes `operation`.
+const BUSINESS_CASES = {
+  ok: { displayCurrencies: ["CUP", "USD", "MLC"] },
+  invalid: { displayCurrencies: ["CUP", "usd"] },
+  delete: { displayCurrencies: ["CUP"], operation: "DELETE" },
+  empty: { displayCurrencies: [] },
+  dup: { displayCurrencies: ["CUP", "USD", "CUP"] },
+  forty: {
+    displayCurrencies: Array.from({ length: 40 }, (_, i) => {
+      const a = String.fromCharCode(65 + Math.floor(i / 26));
+      const b = String.fromCharCode(65 + (i % 26));
+      return `A${a}${b}`;
+    }),
+  },
+};
+
+const explicitBusinessCase = process.argv
+  .slice(2)
+  .find((arg) => arg.startsWith("--business="))
+  ?.split("=")[1];
+const businessCase = explicitBusinessCase ?? (args.has("--business") ? "ok" : null);
+
+if (businessCase !== null && !Object.prototype.hasOwnProperty.call(BUSINESS_CASES, businessCase)) {
+  console.error(`Unknown --business case "${businessCase}". Valid cases:`);
+  for (const key of Object.keys(BUSINESS_CASES)) console.error(`  ${key}`);
+  process.exit(2);
+}
+
 const productPayload = {
   storeProductId: "seed-tienda-1-p0",
   productId: "seed-producto-0",
@@ -96,6 +142,24 @@ const storeEvent = args.has("--unknown-store")
   ? null
   : buildStoreEvent(`evt-store-${suffix}`, { businessId, updatedAt, configCase: storeConfigCase });
 
+// F-038 (R22): `businessCase === null` means no `--business` flag at all —
+// this run does not touch BUSINESS. `delete` overrides `operation`; every
+// other case is `UPDATE`/`CREATE`-equivalent (E18).
+const businessEvent =
+  businessCase === null
+    ? null
+    : {
+        eventId: `evt-business-${suffix}`,
+        entity: "BUSINESS",
+        operation: BUSINESS_CASES[businessCase].operation ?? "UPDATE",
+        occurredAt: new Date().toISOString(),
+        payload: {
+          businessId,
+          displayCurrencies: BUSINESS_CASES[businessCase].displayCurrencies,
+          updatedAt,
+        },
+      };
+
 const body = {
   businessId,
   events: [
@@ -107,6 +171,7 @@ const body = {
       payload: productPayload,
     },
     ...(storeEvent ? [storeEvent] : []),
+    ...(businessEvent ? [businessEvent] : []),
   ],
 };
 

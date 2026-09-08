@@ -353,7 +353,7 @@ sincronización **cada 2 minutos** y el de reconciliación diario.
 Cada cambio en `sync-contract.md` se coordina con el otro equipo y **mueve la
 versión de su primera línea**, aunque sea una menor (§ «Versionado de este
 documento» del contrato): mayor si cambia lo que el POS envía o recibe, menor si
-solo aclara lo ya acordado. La versión vigente es la **v12.1** (2026-09-06): la
+solo aclara lo ya acordado. La versión vigente es la **v12.2** (2026-09-08): la
 v12 abre la sexta entidad del outbox, `BUSINESS`, y **sí es aditiva** — quien
 implementó la v11 y no la emita sigue siendo un lector correcto. La v11, del
 mismo día, responde cuatro solicitudes de cuadrecaja y **no es aditiva** — ver
@@ -388,15 +388,15 @@ un endpoint que no existe, y cuando sobra les esconde uno que sí existe. La v11
 están publicadas de la misma forma: las tres reglas de la v11 esperan a F-035,
 F-036 y F-037, y la cabecera del contrato dice qué vale mientras tanto.
 
-**De la v12 hay que avisar en un orden concreto, y esta es la parte
-operativa.** `entity` no admite todavía `BUSINESS`, así que un evento así
-responde `400 INVALID_BATCH` y **se lleva el lote entero**, incluidos los
-`PRODUCT` que viajaran con él. La cabecera del contrato y § «Cambios requeridos
-en cuadrecaja» lo dicen las dos: **no emitir `BUSINESS` hasta el aviso**. El
-aviso se manda cuando el schema del sobre lo acepte, no cuando la lista se
-empiece a usar en el escaparate — aceptarlo y no pintarlo es inofensivo;
-pintarlo sin aceptarlo no existe. La lista corta
-de lo que les toca implementar está en
+**De la v12 hubo que avisar en un orden concreto, y esta es la parte
+operativa, ya hecha (F-038, 2026-09-08).** Mientras `entity` no admitía
+`BUSINESS`, un evento así respondía `400 INVALID_BATCH` y **se llevaba el lote
+entero**, incluidos los `PRODUCT` que viajaran con él — la cabecera del
+contrato y § «Cambios requeridos en cuadrecaja» avisaban las dos de no emitirlo
+hasta el aviso. El aviso se mandó al aceptar el schema del sobre (v12.2), no
+cuando la lista se empiece a usar en el escaparate — aceptarlo y no pintarlo es
+inofensivo; pintarlo sin aceptarlo no existe, y sigue sin pintarse (F-039). La
+lista corta de lo que les toca implementar está en
 [`traspaso-cuadrecaja-envio-cotizado.md`](traspaso-cuadrecaja-envio-cotizado.md).
 
 ### 8.4 SSO del administrador

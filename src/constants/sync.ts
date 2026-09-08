@@ -59,3 +59,20 @@ export const PROVISIONING_MAX_BODY_BYTES = 4096;
  * `docs/sync-contract.md` § Vocabulario de errores.
  */
 export const DEPENDENCY_FAILED_IN_BATCH = "DEPENDENCY_FAILED_IN_BATCH";
+
+/**
+ * F-038 R3/R14 (contract v12): a `BUSINESS` event whose `displayCurrencies`
+ * contains a member that is not exactly three uppercase A-Z letters
+ * (`/^[A-Z]{3}$/`, never case-folded, never trimmed). Fails that event alone
+ * (`207 failed[]`); the batch's other events still apply.
+ */
+export const BUSINESS_DISPLAY_CURRENCIES_INVALID = "BUSINESS_DISPLAY_CURRENCIES_INVALID";
+
+/**
+ * F-038 R5/R14 (contract v12): a `BUSINESS` event with `operation: "DELETE"`.
+ * `DELETE` is not an operation this entity supports — there is no per-item
+ * row to remove, only a whole-list replace — so it is rejected as malformed
+ * rather than applied, BEFORE the anti-stale guard (R5/E6): to send an empty
+ * list, emit `displayCurrencies: []` instead.
+ */
+export const BUSINESS_DELETE_NOT_SUPPORTED = "BUSINESS_DELETE_NOT_SUPPORTED";

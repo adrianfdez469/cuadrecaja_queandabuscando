@@ -19,6 +19,7 @@ const handleProduct = vi.fn();
 const handleCategory = vi.fn();
 const handleCurrency = vi.fn();
 const handleExchangeRate = vi.fn();
+const handleBusiness = vi.fn();
 const recordBatch = vi.fn();
 const markProcessed = vi.fn();
 const markSkipped = vi.fn();
@@ -35,6 +36,11 @@ vi.mock("./handlers/misc", () => ({
   handleCategory: (...a: unknown[]) => handleCategory(...a),
   handleCurrency: (...a: unknown[]) => handleCurrency(...a),
   handleExchangeRate: (...a: unknown[]) => handleExchangeRate(...a),
+}));
+// F-038 AD6(3): if this stays unmocked, the twelve pre-existing cases below
+// load the REAL module and with it `@/lib/prisma`.
+vi.mock("./handlers/business", () => ({
+  handleBusiness: (...a: unknown[]) => handleBusiness(...a),
 }));
 vi.mock("./inbox", () => ({
   recordBatch: (...a: unknown[]) => recordBatch(...a),
@@ -83,6 +89,7 @@ beforeEach(() => {
   handleCategory.mockReset();
   handleCurrency.mockReset();
   handleExchangeRate.mockReset();
+  handleBusiness.mockReset();
   recordBatch.mockReset();
   markProcessed.mockReset().mockResolvedValue(undefined);
   markSkipped.mockReset().mockResolvedValue(undefined);
@@ -735,5 +742,79 @@ describe("processCatalogBatch() — F-037 dependency cascade (unit, handlers moc
     // never for p-dragged, which is exactly what makes the two runs' touched
     // sets identical: the dragged event never contributed anything.
     expect(withDraggedCalls).toEqual(withoutDraggedCalls);
+  });
+});
+
+function businessEvent(eventId: string, businessId = "seed-negocio-1") {
+  return {
+    eventId,
+    entity: "BUSINESS" as const,
+    operation: "UPDATE" as const,
+    occurredAt: "2026-09-06T00:00:00.000Z",
+    payload: {
+      businessId,
+      displayCurrencies: ["CUP", "USD", "EUR"],
+      updatedAt: "2026-09-06T00:00:00.000Z",
+    },
+  };
+}
+
+describe("processCatalogBatch() — routes BUSINESS to handleBusiness and to nobody else (paso 8)", () => {
+  it("calls handleBusiness(payload, operation, caller.businessId) for a BUSINESS event, and no other handler", async () => {
+    const events = [businessEvent("evt-biz")];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+    handleBusiness.mockResolvedValue({ status: "processed" });
+
+    const summary = await processCatalogBatch(CALLER, events);
+
+    expect(handleBusiness).toHaveBeenCalledExactlyOnceWith(
+      events[0].payload,
+      "UPDATE",
+      "business-1",
+    );
+    expect(handleStore).not.toHaveBeenCalled();
+    expect(handleProduct).not.toHaveBeenCalled();
+    expect(handleCategory).not.toHaveBeenCalled();
+    expect(handleCurrency).not.toHaveBeenCalled();
+    expect(handleExchangeRate).not.toHaveBeenCalled();
+    expect(summary.ok).toContain("evt-biz");
+  });
+
+  // F-038 E14/R12 (unit half): BUSINESS neither drags nor is dragged — it
+  // has no entry in dependencyRoleOf's table, so createBatchDependencies
+  // never blocks it and it never blocks anything after it.
+  it("a failed CATEGORY does not drag a later BUSINESS (E14)", async () => {
+    const events = [depCategoryEvent("evt-cat", "cat-1"), businessEvent("evt-biz")];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+    handleCategory.mockRejectedValue(DEP_ERROR);
+    handleBusiness.mockResolvedValue({ status: "processed" });
+
+    const summary = await processCatalogBatch(CALLER, events);
+
+    expect(handleBusiness).toHaveBeenCalledExactlyOnceWith(
+      events[1].payload,
+      "UPDATE",
+      "business-1",
+    );
+    expect(summary.ok).toContain("evt-biz");
+    expect(summary.failed.map((f) => f.id)).toEqual(["evt-cat"]);
+  });
+
+  it("a failed BUSINESS does not drag a later PRODUCT/EXCHANGE_RATE (E14)", async () => {
+    const events = [
+      businessEvent("evt-biz"),
+      depProductEvent("p-after", null),
+      depExchangeRateEvent("er-after", "USD"),
+    ];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+    handleBusiness.mockRejectedValue(DEP_ERROR);
+    handleProduct.mockResolvedValue({ status: "processed" });
+    handleExchangeRate.mockResolvedValue({ status: "processed" });
+
+    const summary = await processCatalogBatch(CALLER, events);
+
+    expect(summary.failed.map((f) => f.id)).toEqual(["evt-biz"]);
+    expect(summary.ok).toContain("p-after");
+    expect(summary.ok).toContain("er-after");
   });
 });

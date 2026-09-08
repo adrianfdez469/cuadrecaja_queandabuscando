@@ -106,6 +106,20 @@ function storeEvent(eventId = "evt-store"): SyncEventInput {
   };
 }
 
+function businessEvent(eventId = "evt-business"): SyncEventInput {
+  return {
+    eventId,
+    entity: "BUSINESS",
+    operation: "UPDATE",
+    occurredAt: "2026-08-27T00:00:00.000Z",
+    payload: {
+      businessId: "business-1",
+      displayCurrencies: ["CUP", "USD"],
+      updatedAt: "2026-08-27T00:00:00.000Z",
+    },
+  };
+}
+
 describe("dependencyRoleOf()", () => {
   it("a CATEGORY provides its externalId and requires nothing", () => {
     expect(dependencyRoleOf(categoryEvent("cat-1"))).toEqual({
@@ -139,6 +153,12 @@ describe("dependencyRoleOf()", () => {
     expect(dependencyRoleOf(storeEvent())).toEqual({ provides: null, requires: null });
   });
 
+  // F-038 R12/E14: BUSINESS adds no order dependency of any kind, so the
+  // list of dependencies from the contract's v11 ③ still has exactly two.
+  it("a BUSINESS neither provides nor requires anything", () => {
+    expect(dependencyRoleOf(businessEvent())).toEqual({ provides: null, requires: null });
+  });
+
   // R11: no row has both columns filled — a dependent is never itself an
   // origin, so there is no chain (E13).
   it("no entity plays both roles at once", () => {
@@ -148,6 +168,7 @@ describe("dependencyRoleOf()", () => {
       productEvent("cat-1"),
       exchangeRateEvent("USD"),
       storeEvent(),
+      businessEvent(),
     ]) {
       const role = dependencyRoleOf(event);
       expect(role.provides === null || role.requires === null).toBe(true);
