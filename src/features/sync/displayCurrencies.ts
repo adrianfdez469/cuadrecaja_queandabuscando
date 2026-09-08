@@ -6,22 +6,20 @@
  * without mocking Prisma at all.
  */
 
-/**
- * R3 (D3, humano 2026-09-07): exactly three uppercase A-Z letters. Never
- * case-folded, never trimmed — a code that matches no `Currency` row is
- * never painted and nobody notices, and the silent failure is what this
- * entity exists to prevent.
- */
-export const DISPLAY_CURRENCY_CODE = /^[A-Z]{3}$/;
+import { CURRENCY_CODE_PATTERN } from "@/constants/currency";
 
 /**
  * The FIRST member that is not a valid code, or `null` when every one is.
  * Returns the value (not a boolean) so the caller can name it in its
  * `console.warn` — the wire error carries no detail at all (R14).
+ *
+ * F-039 (architecture.md AD2): the pattern itself moved to
+ * `src/constants/currency.ts` (`CURRENCY_CODE_PATTERN`) so the storefront
+ * reader shares it instead of declaring a second `/^[A-Z]{3}$/`.
  */
 export function findInvalidDisplayCurrency(codes: readonly string[]): string | null {
   for (const code of codes) {
-    if (!DISPLAY_CURRENCY_CODE.test(code)) return code;
+    if (!CURRENCY_CODE_PATTERN.test(code)) return code;
   }
   return null;
 }

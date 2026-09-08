@@ -13,6 +13,8 @@
  * has a stored rate.
  */
 
+import { CURRENCY_FORMATTER_CACHE_MAX } from "@/constants/currency";
+
 export const ANCHOR_CURRENCY = "CUP";
 
 /** Anything Decimal-like. Prisma's Decimal satisfies this structurally. */
@@ -164,6 +166,47 @@ export function convert(value: Money, toCurrency: string, rates: RateTable): Mon
 export type FormatMoneyOptions = { locale?: string; symbol?: string };
 
 /**
+ * F-039 (architecture.md AD6): ONE `Intl.NumberFormat` per (locale, currency,
+ * min digits, max digits), capped at `CURRENCY_FORMATTER_CACHE_MAX` entries so
+ * a long-lived process never grows this map without bound — currency codes
+ * arrive through the sync validated only as three uppercase letters (17,576
+ * possible). `null` means the runtime does not know that currency; caching
+ * the failure is what keeps an unknown currency from costing two
+ * constructions PER formatted amount, only twice ever (once per branch).
+ */
+const FORMATTERS = new Map<string, Intl.NumberFormat | null>();
+
+function formatterFor(
+  locale: string,
+  currency: string,
+  minimumFractionDigits: number,
+  maximumFractionDigits: number,
+): Intl.NumberFormat | null {
+  const key = `${locale}|${currency}|${minimumFractionDigits}|${maximumFractionDigits}`;
+  const cached = FORMATTERS.get(key);
+  if (cached !== undefined) return cached;
+
+  let formatter: Intl.NumberFormat | null;
+  try {
+    // An empty `currency` is the fallback branch's own plain formatter
+    // (below), not a real currency lookup.
+    formatter = currency
+      ? new Intl.NumberFormat(locale, {
+          style: "currency",
+          currency,
+          minimumFractionDigits,
+          maximumFractionDigits,
+        })
+      : new Intl.NumberFormat(locale, { minimumFractionDigits, maximumFractionDigits });
+  } catch {
+    formatter = null;
+  }
+
+  if (FORMATTERS.size < CURRENCY_FORMATTER_CACHE_MAX) FORMATTERS.set(key, formatter);
+  return formatter;
+}
+
+/**
  * F-027 (design.md RD4, architecture.md § El importe entero de la UI): the
  * ONE place that builds the `Intl.NumberFormat` for a shown amount and its
  * fallback branch, so `formatMoney` and `formatWholeMoney` can never
@@ -176,19 +219,22 @@ function formatWithIntl(
   options: FormatMoneyOptions,
 ): string {
   const { locale = "es-CU", symbol } = options;
-  try {
-    return new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency: value.currency,
-      ...digits,
-    }).format(Number(value.amount));
-  } catch {
-    const formatted = new Intl.NumberFormat(locale, {
-      minimumFractionDigits: digits.minimumFractionDigits,
-      maximumFractionDigits: digits.maximumFractionDigits ?? digits.minimumFractionDigits,
-    }).format(Number(value.amount));
-    return `${symbol ?? value.currency} ${formatted}`;
-  }
+  const minimumFractionDigits = digits.minimumFractionDigits;
+  const maximumFractionDigits = digits.maximumFractionDigits ?? digits.minimumFractionDigits;
+
+  const primary = formatterFor(
+    locale,
+    value.currency,
+    minimumFractionDigits,
+    maximumFractionDigits,
+  );
+  if (primary) return primary.format(Number(value.amount));
+
+  // AD6: the runtime does not know `value.currency` — the fallback branch,
+  // memoized too, under a key with an empty currency.
+  const fallback = formatterFor(locale, "", minimumFractionDigits, maximumFractionDigits);
+  const formatted = fallback!.format(Number(value.amount));
+  return `${symbol ?? value.currency} ${formatted}`;
 }
 
 /**
