@@ -688,7 +688,7 @@
         "La ruta, su cuerpo, sus codigos y el procedimiento de alta estan en docs/sync-contract.md con la version movida, y el secreto nuevo esta en docs/despliegue.md.",
         "bash .agent/verify.sh F-034 --full termina con codigo 0."
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Entrada escrita por el agente por indicacion expresa del humano (2026-09-03): «modifica la propuesta, crea el feature y arranca con el». Recorta .agent/specs/propuestas/credenciales-de-integracion.md al alcance de SOLO EL ALTA: la tabla BusinessCredential, la rotacion con solape y la revocacion se quedan en la propuesta. Decisiones del humano en esa conversacion: el disparador es el superadministrador de cuadrecaja UNA VEZ POR NEGOCIO (no por sucursal); el secreto es SIMETRICO en una cabecera, no firma asimetrica, porque con el alcance recortado y el mismo equipo a los dos lados no hay tercero que distinguir. No depende de F-029: el secreto se lee de process.env como hace el guard de /api/crons/*, asi que serverEnv() no se toca."
     },
     {
