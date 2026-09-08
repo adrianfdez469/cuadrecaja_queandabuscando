@@ -3,7 +3,7 @@ slug: pagina-asume-el-redirect-de-su-layout
 sintoma: "el log de next dev escupe «⨯ TypeError: Cannot read properties of null» desde una página cuyo layout comprueba la sesión y redirige, mientras la petición responde 307 con toda normalidad"
 firma: TypeError: Cannot read properties of null
 etapa: smoke
-visto_en: F-029
+visto_en: F-029, F-039
 creado: 2026-09-01T03:40:00Z
 promovido_a_agents: no
 arreglo: "quita la aserción no-nula: la página comprueba la sesión y redirige por su cuenta, porque un layout y su página renderizan EN PARALELO y el redirect del layout no ha ocurrido todavía cuando la página lee la sesión"
