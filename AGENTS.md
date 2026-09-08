@@ -179,8 +179,14 @@ diagnosticó mal dos veces seguidas: subirlos no arregló nada y ya no aseguran
 nada conocido.
 
 **Todo lo que el sync escribe es idempotente y va guardado contra escrituras
-rancias** (`sourceUpdatedAt`). Gracias a eso el orden de entrega no importa. Si
-agregas un handler, mantén ambas propiedades o el reintento corrompe datos. Hay
+rancias** (`sourceUpdatedAt`). Gracias a eso el orden de entrega no importa
+para lo que se escribe. Eso deja de ser cierto para si un evento correcto se
+aplica o no: desde F-037, el orden **dentro de un lote** decide, porque un
+`CATEGORY`/`CURRENCY` que falla arrastra a los `PRODUCT`/`EXCHANGE_RATE`
+posteriores del mismo lote que dependían de él, que vuelven en `failed[]`
+con `DEPENDENCY_FAILED_IN_BATCH` en vez de aplicarse a medias — ver
+`src/features/sync/dependencies.ts`. Si agregas un handler, mantén ambas
+propiedades o el reintento corrompe datos. Hay
 **dos** formas de la guarda, y no son intercambiables: la que **rechaza** y
 devuelve `STALE` (`STORE`, `CATEGORY`, `PRODUCT`) y la de **orden**, de
 `EXCHANGE_RATE` (F-036) — que escribe siempre y decide al leer, porque su tabla
