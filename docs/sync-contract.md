@@ -1,15 +1,14 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 12.1** · 6 de septiembre de 2026
+**Versión 12.2** · 8 de septiembre de 2026
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
 existe y está verificado contra los casos de abajo, **con una excepción marcada
-a propósito**: lo que la v11 y la v12 introducen (§ «Cambios respecto a la v10.1»
-y § «Cambios respecto a la v11») está acordado y publicado **antes** de estar
-implementado en queandabuscando, para que cuadrecaja sepa a qué atenerse
-mientras tanto. De la v12: **un evento `BUSINESS` todavía responde
-`400 INVALID_BATCH`**, porque `entity` aún no admite ese valor — no lo emitáis
-hasta el aviso. Y mientras tanto siguen
+a propósito**: lo que la v11 introduce (§ «Cambios respecto a la v10.1») está
+acordado y publicado **antes** de estar implementado en queandabuscando, para
+que cuadrecaja sepa a qué atenerse mientras tanto. La entidad `BUSINESS` y sus
+dos códigos de error, que la v12 publicó con el mismo aviso, **ya están en pie**
+(F-038): podéis emitirla desde ahora. Y mientras tanto siguen
 valiendo las reglas de la v10.1: una tasa nueva tarda hasta una hora en verse en
 el catálogo público, la vigente es la última que **llegó**, y un evento que
 dependía de otro que falló se aplica igual. Se avisa cuando cada una de las tres
@@ -40,6 +39,20 @@ delante es lo que implementó.
 
 Una corrección de tipografía o de un enlace roto es una menor: cuesta un dígito
 y evita la pregunta «¿es este el documento que leí?».
+
+## Cambios respecto a la v12.1
+
+Sube como **menor**: no cambia ninguna ruta, ningún campo, ningún enum ni ninguna
+regla de validación — solo dice que el lado receptor de `BUSINESS` ya está en
+pie (F-038). **Quien implementó la v12.1 sigue siendo un lector correcto y no
+tiene que tocar nada.**
+
+- **`entity: "BUSINESS"` ya se acepta.** El aviso de la cabecera, de
+  § «Cambios requeridos en cuadrecaja» y de § Verificación —«no lo emitáis hasta
+  el aviso»— queda retirado de los tres sitios: podéis emitirlo desde ahora,
+  con la forma que la v12 ya describía.
+- **La v13 queda reservada para las zonas** (S-007), todavía no publicada. Este
+  cambio no toca esa reserva.
 
 ## Cambios respecto a la v12
 
@@ -2423,17 +2436,16 @@ en ningún lado registre un error.
 
 ## Cambios requeridos en cuadrecaja
 
-### De la v12 — emitir `BUSINESS`, y no antes del aviso
+### De la v12 — emitir `BUSINESS`
 
 La v12 no pide ninguna columna nueva: `NegocioMoneda` con su `activo` ya
 existe. Pide **un evento nuevo**, `BUSINESS`, con los códigos activos de ese
 negocio, emitido cuando esa lista cambie. Tres cosas que van con él:
 
-1. **No lo emitáis hasta que se avise de que el lado receptor está en pie.**
-   `entity` todavía no admite `BUSINESS`, así que un evento así hoy responde
-   `400 INVALID_BATCH` y **se lleva el lote entero por delante**, incluidos los
-   `PRODUCT` que viajaran con él. Es la única parte de la v12 que puede hacer
-   daño antes de estar construida.
+1. **El lado receptor ya está en pie (v12.2, F-038): ya podéis emitirlo.**
+   Mientras no lo estuvo, `entity` no admitía `BUSINESS` y un evento así
+   respondía `400 INVALID_BATCH`, llevándose el lote entero por delante,
+   incluidos los `PRODUCT` que viajaran con él — ese riesgo ya no existe.
 2. **La lista completa en cada evento, no un delta.** Y con la moneda base
    dentro: no es obligatorio —si falta, se enseña igual, porque es la moneda del
    cobro— pero mandarla es lo que hace que las dos listas digan lo mismo. En la
@@ -2614,6 +2626,12 @@ node scripts/send-catalog-batch.mjs --stale         # stale
 node scripts/send-catalog-batch.mjs --singular-barcode  # 400 INVALID_BATCH (v4, F-024)
 node scripts/send-availability-batch.mjs OUT_OF_STOCK
 node scripts/send-catalog-batch.mjs --token=<otro-token-de-otro-negocio>  # 403 BUSINESS_MISMATCH
+node scripts/send-catalog-batch.mjs --business             # F-038: processed
+node scripts/send-catalog-batch.mjs --business=invalid      # F-038: failed BUSINESS_DISPLAY_CURRENCIES_INVALID
+node scripts/send-catalog-batch.mjs --business=delete       # F-038: failed BUSINESS_DELETE_NOT_SUPPORTED
+node scripts/send-catalog-batch.mjs --business --stale      # F-038: stale
+node scripts/send-catalog-batch.mjs --business --repeat     # F-038: processed
+node scripts/send-catalog-batch.mjs --business --repeat     # F-038: duplicate
 ```
 
 La renegociación (v5, F-019) se verifica con `scripts/renegotiate-order.mjs`,
@@ -2641,13 +2659,15 @@ node scripts/quote-delivery-order.mjs --dispatch  # 409 ORDER_DELIVERY_NOT_QUOTE
 node scripts/quote-delivery-order.mjs --expire    # vence contado desde la creación, con su cancelReason propio
 ```
 
-**Ni la v11 ni la v12 tienen guion propio, y no lo tendrán hasta que estén
-construidas.** Las tres reglas de la v11 se verifican con los features que las
-implementan —F-035 (caché), F-036 (tasa vigente) y F-037 (arrastre en el
-lote)—, cada uno con sus criterios ejecutables; la v12 lo hará con el suyo
-cuando exista. Mientras tanto, `send-catalog-batch.mjs --stale`
-sigue verificando la guarda anti-rancio de las entidades que ya la tenían, que
-es lo que F-036 extiende a las tasas.
+**La v11 no tiene guion propio, y no lo tendrá hasta que esté construida del
+todo.** Sus tres reglas se verifican con los features que las implementan
+—F-035 (caché), F-036 (tasa vigente) y F-037 (arrastre en el lote)—, cada uno
+con sus criterios ejecutables. **La v12 ya tiene el suyo (F-038)**: las seis
+líneas `--business` de arriba, que distinguen sus cuatro desenlaces
+(`processed`, `failed` con sus dos códigos, `stale` y `duplicate`). Mientras
+tanto, `send-catalog-batch.mjs --stale` sigue verificando la guarda anti-rancio
+de las entidades que ya la tenían, que es lo que F-036 extiende a las tasas y
+F-038 a `BUSINESS`.
 
 El criterio 6 de F-024 —cuántos productos canónicos comparten códigos entre
 negocios distintos— se mide con `npm run count:barcodes`
