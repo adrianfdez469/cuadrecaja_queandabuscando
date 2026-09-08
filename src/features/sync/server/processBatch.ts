@@ -174,6 +174,6 @@ function applyEvent(
     case "EXCHANGE_RATE":
       return handleExchangeRate(event.payload, businessId, renderableBranches);
     case "BUSINESS":
-      return handleBusiness(event.payload, event.operation, businessId);
+      return handleBusiness(event.payload, event.operation, businessId, renderableBranches);
   }
 }

@@ -59,6 +59,21 @@ export const SKIPPED: HandlerOutcome = { status: "skipped_not_published" };
 export const STALE: HandlerOutcome = { status: "stale" };
 
 /**
+ * F-039 (architecture.md AD8): the constructor of `HandlerOutcome`'s own
+ * `touchedStoreSlugs` field, moved here from `handlers/misc.ts` (its home
+ * since F-026/F-035) so `handlers/business.ts` (AD7) can share it without
+ * importing a module full of Prisma and handlers that do not concern it.
+ * The invariant it protects — an EMPTY set never sets the field at all —
+ * belongs next to the field's own declaration above: duplicating these
+ * three lines would leave two places where that invariant could diverge,
+ * and `processBatch.ts` cannot tell "field absent" from "field present with
+ * an empty array" until it counts invalidations.
+ */
+export function outcomeOf(touchedStoreSlugs: readonly PublicSlug[]): HandlerOutcome {
+  return touchedStoreSlugs.length > 0 ? { status: "processed", touchedStoreSlugs } : PROCESSED;
+}
+
+/**
  * F-032 (architecture.md § DA4): a PER-EVENT failure, thrown instead of
  * added as a new `HandlerOutcome["status"]` member. `processBatch.ts`'s
  * `catch` already turns `error.message` into `failed[].error`,

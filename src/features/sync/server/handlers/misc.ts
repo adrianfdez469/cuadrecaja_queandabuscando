@@ -1,11 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { uniqueSlug } from "@/lib/slug";
-import { canonicalSlug, type PublicSlug } from "@/lib/publicSlug";
+import { canonicalSlug } from "@/lib/publicSlug";
 import { isUniqueViolation } from "@/features/orders/server/prismaErrors";
 import { CATEGORY_SLUG_FALLBACK } from "@/constants/catalog";
 import type { CategoryPayload, CurrencyPayload, ExchangeRatePayload } from "../../schemas";
 import type { RenderableBranchLookup } from "../businessBranches";
-import { PROCESSED, SKIPPED, STALE, type HandlerOutcome } from "./types";
+import { outcomeOf, PROCESSED, SKIPPED, STALE, type HandlerOutcome } from "./types";
 
 // Mirrors `MAX_SLUG_RETRIES` in `features/storefront/server/registry.ts`'s
 // `createStorefrontWithStore`: a race between two events deriving the same
@@ -46,10 +46,6 @@ async function affectedStoreSlugs(businessId: string, localCategoryId: string) {
       brandBranchCount: store.storefront.stores.length,
     }),
   );
-}
-
-function outcomeOf(touchedStoreSlugs: readonly PublicSlug[]): HandlerOutcome {
-  return touchedStoreSlugs.length > 0 ? { status: "processed", touchedStoreSlugs } : PROCESSED;
 }
 
 /**

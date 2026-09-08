@@ -24,17 +24,28 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * handler's own `*.test.ts`), only that mixing them with a REAL
  * `EXCHANGE_RATE` path in the SAME batch does not inflate the count beyond
  * R12's `2 x N`.
+ *
+ * F-039 (architecture.md § Pruebas, row `processBatch.invalidationCount.test.ts`,
+ * C14): `./handlers/business` stays REAL too, for the same reason
+ * `handleCurrency`/`handleExchangeRate` do — this is the file that proves
+ * the memo (`createRenderableBranchLookup`) is shared ACROSS handler kinds
+ * within one batch, and `handleBusiness`'s own logic (the stale guard, R5)
+ * is already covered by `handlers/business.test.ts`. `prisma.business.updateMany`
+ * is mocked to resolve `{ count: 1 }` — a real write, never `STALE` — so
+ * every BUSINESS event here reaches `renderableBranches`.
  */
 
 const storefrontFindMany = vi.fn();
 const currencyUpsert = vi.fn();
 const exchangeRateCreate = vi.fn();
+const businessUpdateMany = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     storefront: { findMany: (...a: unknown[]) => storefrontFindMany(...a) },
     currency: { upsert: (...a: unknown[]) => currencyUpsert(...a) },
     exchangeRate: { create: (...a: unknown[]) => exchangeRateCreate(...a) },
+    business: { updateMany: (...a: unknown[]) => businessUpdateMany(...a) },
   },
 }));
 
@@ -171,10 +182,25 @@ function storeTagCallCount() {
   return revalidateTagSpy.mock.calls.filter(([tag]) => String(tag).startsWith("store:")).length;
 }
 
+function businessEvent(eventId: string, updatedAt: string) {
+  return {
+    eventId,
+    entity: "BUSINESS" as const,
+    operation: "UPDATE" as const,
+    occurredAt: updatedAt,
+    payload: {
+      businessId: "seed-negocio-1",
+      displayCurrencies: ["CUP", "USD"],
+      updatedAt,
+    },
+  };
+}
+
 beforeEach(() => {
   storefrontFindMany.mockReset().mockResolvedValue(THREE_RENDERABLE_BRANCHES);
   currencyUpsert.mockReset().mockResolvedValue({});
   exchangeRateCreate.mockReset().mockResolvedValue({});
+  businessUpdateMany.mockReset().mockResolvedValue({ count: 1 });
   revalidateTagSpy.mockReset();
   handleStore.mockReset();
   handleProduct.mockReset();
@@ -256,5 +282,41 @@ describe("processCatalogBatch() — 500 events on a 3-branch business invalidate
     // so R12's count stays 2 x 3 = 6. Not 6 x 4 entity kinds, and nowhere
     // near "500 events -> more invalidations".
     expect(storeTagCallCount()).toBe(6);
+  });
+});
+
+describe("processCatalogBatch() — BUSINESS shares the per-batch memo, real handleBusiness (F-039, C14)", () => {
+  it("two BUSINESS events of the SAME business, in one batch, make exactly ONE storefront.findMany and fire 2 x 3 revalidateTag, not twice that", async () => {
+    const events = [
+      businessEvent("evt-biz-1", "2026-09-08T00:00:00.000Z"),
+      businessEvent("evt-biz-2", "2026-09-08T00:00:01.000Z"),
+    ];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+
+    const summary = await processCatalogBatch(CALLER, events);
+
+    expect(summary.results.every((r) => r.status === "processed")).toBe(true);
+
+    // R18/AD7: one query per BATCH, not one per BUSINESS event — both
+    // calls above await the SAME memoized promise.
+    expect(storefrontFindMany).toHaveBeenCalledOnce();
+
+    // 2 tags x 3 renderable branches = 6, exactly what a single EXCHANGE_RATE
+    // batch already fires above — not 12 (once per BUSINESS event).
+    expect(storeTagCallCount()).toBe(6);
+  });
+
+  it("BUSINESS events of TWO DIFFERENT businesses (two separate batches) each run their own storefront.findMany — the memo never survives across batches", async () => {
+    const eventsA = [businessEvent("evt-biz-a", "2026-09-08T00:00:00.000Z")];
+    recordBatch.mockResolvedValueOnce({ fresh: eventsA, duplicateIds: [] });
+    await processCatalogBatch(CALLER, eventsA);
+
+    expect(storefrontFindMany).toHaveBeenCalledOnce();
+
+    const eventsB = [businessEvent("evt-biz-b", "2026-09-08T00:00:00.000Z")];
+    recordBatch.mockResolvedValueOnce({ fresh: eventsB, duplicateIds: [] });
+    await processCatalogBatch({ businessId: "business-2", externalId: "seed-negocio-2" }, eventsB);
+
+    expect(storefrontFindMany).toHaveBeenCalledTimes(2);
   });
 });

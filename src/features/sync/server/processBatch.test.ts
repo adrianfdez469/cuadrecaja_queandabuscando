@@ -760,7 +760,7 @@ function businessEvent(eventId: string, businessId = "seed-negocio-1") {
 }
 
 describe("processCatalogBatch() — routes BUSINESS to handleBusiness and to nobody else (paso 8)", () => {
-  it("calls handleBusiness(payload, operation, caller.businessId) for a BUSINESS event, and no other handler", async () => {
+  it("calls handleBusiness(payload, operation, caller.businessId, renderableBranches) for a BUSINESS event, and no other handler", async () => {
     const events = [businessEvent("evt-biz")];
     recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
     handleBusiness.mockResolvedValue({ status: "processed" });
@@ -771,6 +771,7 @@ describe("processCatalogBatch() — routes BUSINESS to handleBusiness and to nob
       events[0].payload,
       "UPDATE",
       "business-1",
+      expect.any(Function),
     );
     expect(handleStore).not.toHaveBeenCalled();
     expect(handleProduct).not.toHaveBeenCalled();
@@ -778,6 +779,30 @@ describe("processCatalogBatch() — routes BUSINESS to handleBusiness and to nob
     expect(handleCurrency).not.toHaveBeenCalled();
     expect(handleExchangeRate).not.toHaveBeenCalled();
     expect(summary.ok).toContain("evt-biz");
+  });
+
+  // F-039 (architecture.md AD7, § Pruebas): the FOURTH argument is not just
+  // "a function" — it is the SAME per-batch memo `handleCurrency`/
+  // `handleExchangeRate` receive as their own third argument, never a fresh
+  // one built for BUSINESS alone.
+  it("passes the SAME renderableBranches function to handleBusiness as to handleCurrency/handleExchangeRate of the same batch", async () => {
+    const events = [
+      businessEvent("evt-biz"),
+      currencyEvent("evt-cur"),
+      exchangeRateEvent("evt-rate"),
+    ];
+    recordBatch.mockResolvedValue({ fresh: events, duplicateIds: [] });
+    handleBusiness.mockResolvedValue({ status: "processed" });
+    handleCurrency.mockResolvedValue({ status: "processed" });
+    handleExchangeRate.mockResolvedValue({ status: "processed" });
+
+    await processCatalogBatch(CALLER, events);
+
+    const businessArg = handleBusiness.mock.calls[0][3];
+    const currencyArg = handleCurrency.mock.calls[0][2];
+    const exchangeRateArg = handleExchangeRate.mock.calls[0][2];
+    expect(businessArg).toBe(currencyArg);
+    expect(businessArg).toBe(exchangeRateArg);
   });
 
   // F-038 E14/R12 (unit half): BUSINESS neither drags nor is dragged — it
@@ -795,6 +820,7 @@ describe("processCatalogBatch() — routes BUSINESS to handleBusiness and to nob
       events[1].payload,
       "UPDATE",
       "business-1",
+      expect.any(Function),
     );
     expect(summary.ok).toContain("evt-biz");
     expect(summary.failed.map((f) => f.id)).toEqual(["evt-cat"]);
