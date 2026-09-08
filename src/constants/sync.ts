@@ -49,3 +49,13 @@ export const STORE_TIMEZONE_INVALID = "STORE_TIMEZONE_INVALID";
  * 200 character limits the schema already enforces, not a tight budget.
  */
 export const PROVISIONING_MAX_BODY_BYTES = 4096;
+
+/**
+ * F-037 (R9, R20): an otherwise-correct event that does NOT get applied
+ * because another, earlier event of the SAME batch that it depends on
+ * failed (`CATEGORY` → its `PRODUCT`s, `CURRENCY` → its `EXCHANGE_RATE`s).
+ * Travels as-is, with no adornment, in `failed[].error` of the `207` and in
+ * `SyncEvent.error` — the POS compares it against the exact string in
+ * `docs/sync-contract.md` § Vocabulario de errores.
+ */
+export const DEPENDENCY_FAILED_IN_BATCH = "DEPENDENCY_FAILED_IN_BATCH";

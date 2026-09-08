@@ -6,6 +6,7 @@ import {
 } from "@/lib/cache";
 import { removeStoreObjectsUnder } from "@/lib/supabase/storage";
 import type { PublicSlug } from "@/lib/publicSlug";
+import { DEPENDENCY_FAILED_IN_BATCH } from "@/constants/sync";
 import {
   summarize,
   type CatalogBatchResponse,
@@ -17,6 +18,8 @@ import { handleProduct } from "./handlers/product";
 import { handleStore } from "./handlers/store";
 import { handleCategory, handleCurrency, handleExchangeRate } from "./handlers/misc";
 import { createRenderableBranchLookup, type RenderableBranchLookup } from "./businessBranches";
+import { createBatchDependencies } from "../dependencies";
+import { SyncEventFailure } from "./handlers/types";
 import type { InternalCaller } from "./caller";
 
 /**
@@ -44,6 +47,12 @@ export async function processCatalogBatch(
   // event never runs it at all).
   const renderableBranches = createRenderableBranchLookup();
 
+  // F-037 (architecture.md § AD1): built ONCE per batch, the gemelo of
+  // `renderableBranches` above — a `Set` of the keys that failed so far, so
+  // an event that depends on one is diverted to `failed[]` BEFORE its
+  // handler runs (R8), instead of applying with a NULL reference.
+  const dependencies = createBatchDependencies();
+
   const results: EventResult[] = duplicateIds.map((eventId) => ({
     eventId,
     status: "duplicate" as const,
@@ -68,7 +77,24 @@ export async function processCatalogBatch(
 
   for (const event of fresh) {
     try {
+      // F-037 (R8, AD2): checked BEFORE applyEvent — an event that depends
+      // on a key that already failed in this same batch never reaches its
+      // handler, so it never writes a row with a NULL reference. The
+      // `eventId` is what ties this line back to the POS's own outbox.
+      const blocker = dependencies.blockedBy(event);
+      if (blocker) {
+        console.warn("[sync] event blocked by a failed dependency in the same batch:", {
+          eventId: event.eventId,
+          entity: event.entity,
+          dependency: blocker,
+        });
+        throw new SyncEventFailure(DEPENDENCY_FAILED_IN_BATCH);
+      }
+
       const outcome = await applyEvent(event, caller.businessId, renderableBranches);
+      // R13/E17: noted right after the handler ran, so a category repaired
+      // later in this same batch stops blocking the products behind it.
+      dependencies.note(event, outcome.status);
 
       if (outcome.touchedStoreSlug) touchedStores.add(outcome.touchedStoreSlug);
       if (outcome.touchedBrandSlug) touchedBrands.add(outcome.touchedBrandSlug);
@@ -89,6 +115,11 @@ export async function processCatalogBatch(
 
       results.push({ eventId: event.eventId, status: outcome.status });
     } catch (error) {
+      // F-037 (R2): whatever failed — the guard above or the handler
+      // itself — also counts as a "failed" outcome for whoever depends on
+      // THIS event's own key (a no-op today: R11, no PRODUCT/EXCHANGE_RATE
+      // ever provides a key; see architecture.md § Flujo de datos).
+      dependencies.note(event, "failed");
       const message = error instanceof Error ? error.message : String(error);
       failed.push({ eventId: event.eventId, error: message });
       results.push({ eventId: event.eventId, status: "failed", error: message });
@@ -118,7 +149,7 @@ export async function processCatalogBatch(
   for (const prefix of purgePrefixes) {
     const removed = await removeStoreObjectsUnder(prefix);
     if (!removed.ok) {
-      console.error("[sync] failed to purge product image objects:", prefix, removed.reason);
+      console.warn("[sync] failed to purge product image objects:", prefix, removed.reason);
     }
   }
 
