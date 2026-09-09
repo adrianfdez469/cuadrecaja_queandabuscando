@@ -8,6 +8,7 @@
  * the islands expect.
  */
 import type { SerializableIssue } from "@/lib/httpJson";
+import type { DeliveryFeeModeName } from "./deliveryOffer";
 
 export type QuoteLineReason = "OUT_OF_STOCK" | "REMOVED" | "NO_PRICE";
 
@@ -22,8 +23,10 @@ export type QuoteStore = {
   deliveryEnabled: boolean;
   deliveryFee: string | null;
   /** F-031 R20: travels EXPLICIT so the checkout island never has to deduce
-   *  a mode from `deliveryFee === null`, which today means "no delivery". */
-  deliveryFeeMode: "FLAT_RATE" | "QUOTED_PER_ORDER";
+   *  a mode from `deliveryFee === null`, which today means "no delivery".
+   *  F-041 (I4): sourced from the generated enum via `deliveryOffer.ts`, not
+   *  a hand-rolled union — a third value here compiles again on its own. */
+  deliveryFeeMode: DeliveryFeeModeName;
   /** F-039 (architecture.md AD3): `Business.displayCurrencies` as declared
    *  (R1), unpruned — the same list `priceEquivalents`/`selectableCurrencies`
    *  read elsewhere. Obligatory, not optional: an opt-out here would leave a

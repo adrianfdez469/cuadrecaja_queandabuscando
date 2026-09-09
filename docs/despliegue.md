@@ -79,9 +79,17 @@ base sin el unique. Ese error se resuelve consultando las colisiones a mano
 HAVING count(*) > 1`) y no reintentando `db:deploy` sin más — la causa es un
 dato real, no un fallo transitorio.
 
----
-
-## 2. Almacenamiento de imágenes
+**⟳ F-041 — el catálogo de zonas se siembra a mano, una vez por entorno,
+después de `db:deploy`.** `npm run seed:zones` (`scripts/seed-zone-catalog.ts`)
+carga las 184 filas de `src/features/zones/zone-index.json` — 16 divisiones de
+primer nivel y 168 municipios — en un `INSERT … ON CONFLICT DO UPDATE`
+idempotente, y anota su versión y su sha256 en `ZoneCatalogVersion`. **No** va
+enganchado a `db:deploy` ni al arranque: es un paso de datos, no de esquema
+(decisión del humano, AP3). Sin este paso, la migración ya deja `Store.zoneCode`
+y las tablas `Zone`/`ZoneTariff` en pie, pero **todo `ZONE_TARIFF` falla por
+clave ajena** — el catálogo migrado y vacío es indistinguible de "está bien"
+hasta que llega el primer evento. Repetirlo en una versión nueva del índice
+actualiza las filas existentes en vez de duplicarlas.
 
 1. Crear el bucket. Por defecto se llama `store-media`
    (`SUPABASE_STORAGE_BUCKET`).

@@ -5,3 +5,6 @@ prisma/migrations
 package-lock.json
 coverage
 .agent/runs
+# F-041: bytes commiteados cuya autoridad es el sha256 publicado en
+# docs/sync-contract.md. Prettier los reindentaría y cambiaría el hash.
+src/features/zones/zone-index.json

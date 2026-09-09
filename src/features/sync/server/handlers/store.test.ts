@@ -25,6 +25,7 @@ const storeFindUnique = vi.fn();
 const storeUpdate = vi.fn();
 const storefrontCreate = vi.fn();
 const slugFindUnique = vi.fn();
+const zoneTariffDeleteMany = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -40,6 +41,11 @@ vi.mock("@/lib/prisma", () => ({
     },
     slug: {
       findUnique: (...a: unknown[]) => slugFindUnique(...a),
+    },
+    // F-041 R22(b): the DELETE path that actually applies takes its
+    // ZoneTariff rows with it.
+    zoneTariff: {
+      deleteMany: (...a: unknown[]) => zoneTariffDeleteMany(...a),
     },
   },
 }));
@@ -100,6 +106,7 @@ beforeEach(() => {
   storeUpdate.mockReset().mockResolvedValue({ slug: "tienda-demo" });
   storefrontCreate.mockReset();
   slugFindUnique.mockReset().mockResolvedValue(null);
+  zoneTariffDeleteMany.mockReset().mockResolvedValue({ count: 0 });
 });
 
 describe("handleStore() — stale-write guard (AP6)", () => {

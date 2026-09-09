@@ -20,6 +20,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
+    "seed:zones": "tsx scripts/seed-zone-catalog.ts",
+    "vector:zones": "tsx scripts/compute-zone-vector.ts",
     "db:backfill-search": "tsx scripts/backfill-search-vector.ts",
     "count:barcodes": "tsx scripts/count-canonical-barcodes.ts",
     "mint:token": "tsx scripts/mint-sync-token.ts",

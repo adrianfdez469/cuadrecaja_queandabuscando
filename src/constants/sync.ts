@@ -76,3 +76,59 @@ export const BUSINESS_DISPLAY_CURRENCIES_INVALID = "BUSINESS_DISPLAY_CURRENCIES_
  * list, emit `displayCurrencies: []` instead.
  */
 export const BUSINESS_DELETE_NOT_SUPPORTED = "BUSINESS_DELETE_NOT_SUPPORTED";
+
+/**
+ * F-041 R17: a `ZONE_TARIFF` (or a `STORE.zoneCode`'s schema-level check —
+ * see `STORE_ZONE_UNKNOWN` below for the row-level one) whose `zoneCode` is
+ * not in the committed catalog (`src/features/zones/catalog.ts`). Decided in
+ * the sobre's schema, against the ARTEFACT — zero database queries (I7) —
+ * so it kills the whole `400 INVALID_BATCH` lote, same class of cost the ADR
+ * 0028 § Consecuencias already accepted for a malformed value (I6).
+ *
+ * Class for cuadrecaja's outbox (S-007 point 9): RETRYABLE. The event is not
+ * malformed — it names a real zone the two catalogs have not converged on
+ * yet — so the SAME event, unchanged, can end up applying once this side's
+ * catalog artefact catches up. Not one of `QAB_OUTBOX_PERMANENT_ERROR_CODES`.
+ */
+export const ZONE_TARIFF_ZONE_UNKNOWN = "ZONE_TARIFF_ZONE_UNKNOWN";
+
+/**
+ * F-041 R15: `deliveryFee` present (including an explicit `null`) on a
+ * `ZONE_TARIFF` whose `rule` is `NOT_SERVED` or `INHERIT` — both forbid an
+ * amount. Lives inside a `400`'s `issues[].message` (precedent: `barcode`,
+ * `src/features/sync/schemas.ts`), not in the wire's error vocabulary: the
+ * three codes the POS compares byte for byte are this one's siblings below.
+ *
+ * Class for cuadrecaja's outbox (S-007 point 9): PERMANENT. The same
+ * `payload`, with the same `deliveryFee` where `rule` forbids it, fails
+ * identically forever — the POS has to drop the field or change `rule`
+ * before resending, same reasoning as `STORE_DELIVERY_CONFIG_INCONSISTENT`.
+ */
+export const ZONE_TARIFF_FEE_NOT_ALLOWED = "ZONE_TARIFF_FEE_NOT_ALLOWED";
+
+/**
+ * F-041 R20: a `ZONE_TARIFF` with `operation: "DELETE"`. Not an operation
+ * this entity supports — `INHERIT` is the only retraction there is — thrown
+ * FIRST in the handler, before any query and before the anti-stale guard:
+ * a format error cannot depend on a timestamp (precedent:
+ * `src/features/sync/server/handlers/business.ts`'s
+ * `BUSINESS_DELETE_NOT_SUPPORTED`).
+ *
+ * Class for cuadrecaja's outbox (S-007 point 9): PERMANENT. A `DELETE`
+ * never becomes valid by retrying it unchanged — the POS has to resend the
+ * same row as an `UPDATE` with `rule: "INHERIT"` instead.
+ */
+export const ZONE_TARIFF_DELETE_NOT_SUPPORTED = "ZONE_TARIFF_DELETE_NOT_SUPPORTED";
+
+/**
+ * F-041 R18: a `STORE` payload's `zoneCode` is not in the committed catalog.
+ * Thrown in `src/features/sync/server/handlers/store.ts`, BEFORE each of the
+ * three writes it guards (same pattern as `STORE_OPENING_HOURS_INVALID`):
+ * the whole event fails, none of its other fields apply, and
+ * `sourceUpdatedAt` does not advance.
+ *
+ * Class for cuadrecaja's outbox (S-007 point 9): RETRYABLE, same reasoning
+ * as `ZONE_TARIFF_ZONE_UNKNOWN` above — the code names a real zone the two
+ * catalogs have not converged on yet, not a malformed value.
+ */
+export const STORE_ZONE_UNKNOWN = "STORE_ZONE_UNKNOWN";

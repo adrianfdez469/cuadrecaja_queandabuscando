@@ -138,10 +138,10 @@ function expectSameFields(schemaColumns: string[], contractRows: ContractRow[], 
 }
 
 describe("field ownership table (F-022, criterio 4) — docs/sync-contract.md vs. prisma/schema.prisma", () => {
-  it("measured counts match the spec: Store 31, StoreProduct 23", () => {
-    expect(schemaStoreColumns.length).toBe(31);
+  it("measured counts match the spec: Store 32, StoreProduct 23", () => {
+    expect(schemaStoreColumns.length).toBe(32);
     expect(schemaStoreProductColumns.length).toBe(23);
-    expect(contractTables.store.length).toBe(31);
+    expect(contractTables.store.length).toBe(32);
     expect(contractTables.storeProduct.length).toBe(23);
   });
 
@@ -162,7 +162,7 @@ describe("field ownership table (F-022, criterio 4) — docs/sync-contract.md vs
     }
   });
 
-  it("all three cells (field, owner, note) are non-empty in all 54 rows", () => {
+  it("all three cells (field, owner, note) are non-empty in all 55 rows", () => {
     for (const row of [...contractTables.store, ...contractTables.storeProduct]) {
       expect(row.field, "field").not.toBe("");
       expect(row.owner, `owner of ${row.field}`).not.toBe("");

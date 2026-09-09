@@ -52,6 +52,10 @@ const FORBIDDEN_WRITE_COLUMNS = [
   "deliveryFee",
   "deliveryFeeMode",
   "orderExpiryHours",
+  // F-041 (ADR 0017 (a), ADR 0028 (c)): the store's computable zone is the
+  // sync's alone, same as the five above — the panel shares no column with
+  // it.
+  "zoneCode",
 ];
 
 function listFiles(dir: string): string[] {

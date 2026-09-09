@@ -188,11 +188,14 @@ con `DEPENDENCY_FAILED_IN_BATCH` en vez de aplicarse a medias — ver
 `src/features/sync/dependencies.ts`. Si agregas un handler, mantén ambas
 propiedades o el reintento corrompe datos. Hay
 **dos** formas de la guarda, y no son intercambiables: la que **rechaza** y
-devuelve `STALE` (`STORE`, `CATEGORY`, `PRODUCT`, `BUSINESS`) y la de **orden**, de
-`EXCHANGE_RATE` (F-036) — que escribe siempre y decide al leer, porque su tabla
-es append-only y el histórico es el producto. Copiar la forma de una entidad
-esperando el mecanismo de la otra es el error: ver
+devuelve `STALE` (`STORE`, `CATEGORY`, `PRODUCT`, `BUSINESS`, `ZONE_TARIFF`) y la
+de **orden**, de `EXCHANGE_RATE` (F-036) — que escribe siempre y decide al leer,
+porque su tabla es append-only y el histórico es el producto. Copiar la forma de
+una entidad esperando el mecanismo de la otra es el error: ver
 [`docs/adr/0030-la-tasa-vigente-la-decide-la-lectura.md`](docs/adr/0030-la-tasa-vigente-la-decide-la-lectura.md).
+Desde F-041, `STORE` también **provee** clave de dependencia intra-lote para
+`ZONE_TARIFF`: un tarifario cuyo `STORE` falló en el mismo lote vuelve en
+`failed[]` con `DEPENDENCY_FAILED_IN_BATCH`, nunca `skipped_not_published`.
 
 **Un archivo que todavía no existe no se cita entre comillas invertidas.**
 `npm run check:harness` recorre la prosa del arnés y

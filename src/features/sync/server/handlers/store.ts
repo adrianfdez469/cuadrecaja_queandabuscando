@@ -6,10 +6,12 @@ import {
   STORE_DELIVERY_CONFIG_INCONSISTENT,
   STORE_OPENING_HOURS_INVALID,
   STORE_TIMEZONE_INVALID,
+  STORE_ZONE_UNKNOWN,
 } from "@/constants/sync";
 import { DEFAULT_STORE_TIMEZONE } from "@/constants/storeHours";
 import { isCanonicalTimeZone } from "@/lib/timezone";
 import { openingHoursSchema } from "@/lib/openingHours";
+import { isKnownZoneCode } from "@/features/zones/catalog";
 import {
   effectiveDeliveryConfig,
   NEW_STORE_DELIVERY_BASELINE,
@@ -133,6 +135,7 @@ export async function handleStore(
     // write it guards, not once at the top: doing it before the SKIPPED
     // above would turn E12 into a failure the spec requires stays skipped.
     assertDeliveryConsistent(config, rowDeliveryConfig(existing));
+    assertZoneKnown(config);
     const optInChanged = existing.sourceOptIn !== false;
     await prisma.store.update({
       where: { id: existing.id },
@@ -154,6 +157,16 @@ export async function handleStore(
         ...config,
       },
     });
+    // F-041 R22(b): a `STORE` `DELETE` that ACTUALLY APPLIES (this path)
+    // takes its ZoneTariff rows with it — today this event SUSPENDS rather
+    // than deletes the row (I1), so the `onDelete: Cascade` FK alone would
+    // never fire in production. An `UPDATE` that merely unpublishes
+    // (`publishToStore: false`, vacations) does NOT reach here with
+    // `operation === "DELETE"`, so it never touches the tarifario — it is
+    // reversible and the tariff has to be there when the store reopens.
+    if (operation === "DELETE") {
+      await prisma.zoneTariff.deleteMany({ where: { storeId: existing.id } });
+    }
     const canonical = canonicalSlug({
       storeSlug: existing.slug,
       brandSlug: existing.storefront.slug,
@@ -198,6 +211,7 @@ export async function handleStore(
     // as inconsistent as it would be against `FLAT_RATE`/`NULL` on an
     // existing row.
     assertDeliveryConsistent(config, NEW_STORE_DELIVERY_BASELINE);
+    assertZoneKnown(config);
     // R12: a brand-new row has not written its own zone yet, so what is
     // ABOUT to publish is the column's default — checked as a constant, kept
     // honest by the caso límite 1 test that the default is itself a value
@@ -244,6 +258,7 @@ export async function handleStore(
   // turn the SKIPPED/STALE returns above into failures the spec requires
   // stay exactly what they are.
   assertDeliveryConsistent(config, rowDeliveryConfig(existing));
+  assertZoneKnown(config);
   const optInChanged = existing.sourceOptIn !== true;
   // R12: only checked when `data` below is about to carry
   // `status: "PUBLISHED"` — a routine event (a new phone number) on a store
@@ -334,6 +349,25 @@ function assertDeliveryConsistent(config: StoreConfigWrite, fallback: DeliveryCo
   if (!touchesTriad) return;
   if (isDeliveryConfigInconsistent(effectiveDeliveryConfig(config, fallback))) {
     throw new SyncEventFailure(STORE_DELIVERY_CONFIG_INCONSISTENT);
+  }
+}
+
+/**
+ * F-041 R18: `zoneCode` validated against the catalog, in the HANDLER —
+ * never in `storePayloadSchema` (I6: a `400` of the whole lote over one
+ * store's zone would take the other 499 events down with it). Does nothing
+ * when `config` does not touch `zoneCode` at all — same doctrine as
+ * `assertDeliveryConsistent`: a row already carrying a stale zone must not
+ * fail an unrelated event. `null` (an explicit clear, R29) is never checked
+ * against the catalog — there is nothing to look up. Called HERE, right
+ * before each of the three writes it guards, never once at the top
+ * (architecture.md § Flujo de datos): doing so would turn the SKIPPED/STALE
+ * returns above into failures the spec requires stay exactly what they are.
+ */
+function assertZoneKnown(config: StoreConfigWrite): void {
+  if (config.zoneCode == null) return;
+  if (!isKnownZoneCode(config.zoneCode)) {
+    throw new SyncEventFailure(STORE_ZONE_UNKNOWN);
   }
 }
 

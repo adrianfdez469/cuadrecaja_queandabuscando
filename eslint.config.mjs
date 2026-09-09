@@ -49,6 +49,18 @@ export default defineConfig([
               message:
                 "Components and pages must not touch Prisma. Go through features/*/server instead.",
             },
+            {
+              // F-041 (architecture.md § Escalabilidad, punto 6): the zone
+              // index is ~7 KB gzip that `check:bundle` would NOT catch if it
+              // leaked into a client chunk — there is no client reader of it
+              // until F-042. This rule is one of the two guarantees (the
+              // other is `src/features/zones/boundaries.test.ts`, por crear,
+              // whose allow-list also covers the checkout components this
+              // pattern cannot reach).
+              group: ["@/features/zones/catalog", "@/features/zones/zone-index.json"],
+              message:
+                "The zone catalog index is server-only until F-042. Client components must not import it.",
+            },
           ],
         },
       ],

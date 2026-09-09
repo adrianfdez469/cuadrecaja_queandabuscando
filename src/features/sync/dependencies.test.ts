@@ -149,8 +149,15 @@ describe("dependencyRoleOf()", () => {
     });
   });
 
-  it("a STORE neither provides nor requires anything", () => {
-    expect(dependencyRoleOf(storeEvent())).toEqual({ provides: null, requires: null });
+  // F-041 SP3/R23: STORE now PROVIDES its externalId, so a ZONE_TARIFF of
+  // that same branch can require it — without this, a STORE that fails in
+  // the same lote would leave its tariffs `skipped_not_published`, which
+  // travels in `ok` and loses them in silence.
+  it("a STORE provides its externalId and requires nothing", () => {
+    expect(dependencyRoleOf(storeEvent())).toEqual({
+      provides: "STORE:ext-store-1",
+      requires: null,
+    });
   });
 
   // F-038 R12/E14: BUSINESS adds no order dependency of any kind, so the

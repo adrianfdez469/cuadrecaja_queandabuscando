@@ -186,7 +186,7 @@ describe("BUSINESS against real Postgres, through the real POST (paso 10)", () =
     expect(row.displayCurrenciesSourceUpdatedAt).toEqual(new Date("2026-09-06T14:03:00.000Z"));
   });
 
-  it("C2 (mitad POST, E2): an entity the contract does not define (ZONE_TARIFF) still kills the WHOLE batch — no SyncEvent row for either event, the PRODUCT next to it never applies", async () => {
+  it("C2 (mitad POST, E2): an entity the contract does not define (ORDER, I13 — ZONE_TARIFF was this example until F-041 defined it) still kills the WHOLE batch — no SyncEvent row for either event, the PRODUCT next to it never applies", async () => {
     const store = await session.createStore();
     const zoneEventId = `${session.token}-c2-zone`;
     const productEventId = `${session.token}-c2-product`;
@@ -195,13 +195,12 @@ describe("BUSINESS against real Postgres, through the real POST (paso 10)", () =
     const events: unknown[] = [
       {
         eventId: zoneEventId,
-        entity: "ZONE_TARIFF",
+        entity: "ORDER",
         operation: "UPDATE",
         occurredAt: "2026-09-06T09:00:00.000Z",
         payload: {
-          zoneId: "z1",
-          rule: "FEE",
-          deliveryFee: 100,
+          orderId: "o1",
+          status: "CONFIRMED",
           updatedAt: "2026-09-06T09:00:00.000Z",
         },
       },

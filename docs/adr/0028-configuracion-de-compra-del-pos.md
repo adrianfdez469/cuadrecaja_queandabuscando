@@ -4,6 +4,11 @@
 F-032 esté construido, verificado y fusionado, como hizo
 [ADR 0017](0017-frontera-de-escritura-del-panel.md) con su propia versión.
 
+**Su invariante (e) fue superado, para el modo `ZONE_BASED`, por
+[ADR 0033](0033-cobrar-el-domicilio-y-ofrecerlo-son-dos-preguntas.md) (F-041,
+9 de septiembre de 2026).** Sigue siendo cierto tal cual para `FLAT_RATE` y
+`QUOTED_PER_ORDER`.
+
 Completa a [ADR 0017](0017-frontera-de-escritura-del-panel.md) (a), que dice
 **quién puede escribir cada columna**, y a
 [ADR 0027](0027-ausencia-de-importe-en-la-base-cero-mas-bandera-en-el-cable.md),

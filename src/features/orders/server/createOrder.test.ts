@@ -44,6 +44,7 @@ const store = {
   checkoutMode: "WHATSAPP" as const,
   deliveryEnabled: false,
   deliveryFee: null as string | null,
+  deliveryFeeMode: "FLAT_RATE" as const,
   whatsappNumber: "+5350000001",
   status: "PUBLISHED" as const,
   disabledReasonCode: null,
@@ -397,6 +398,72 @@ describe("createOrder() — writing the order", () => {
       expect(result).toMatchObject({ kind: "created" });
       const data = orderCreate.mock.calls[0][0].data;
       expect(data.deliveryFee).toBe("0.00");
+    });
+  });
+
+  describe("F-041 — ZONE_BASED (C15, E15/E17, R11-R13): no selector yet, so no charge yet", () => {
+    it("criterio 15: a residual Store.deliveryFee is NOT charged — DELIVERY degrades to PICKUP with 0.00, never the residual amount and never QUOTED's uncertain cycle", async () => {
+      const zoneBasedStore = {
+        ...store,
+        deliveryEnabled: true,
+        deliveryFeeMode: "ZONE_BASED" as const,
+        // A residual amount left in the column from before the store
+        // switched modes (R11: ZONE_BASED never reads this column at all).
+        deliveryFee: "500.00" as string | null,
+      };
+      loadStoreForOrder.mockResolvedValue(zoneBasedStore);
+      quoteCart.mockResolvedValue({
+        store: zoneBasedStore,
+        lines: [orderableLine()],
+        subtotal: money("900.00", "CUP"),
+        discountTotal: money("0", "CUP"),
+        rates: {},
+        capturedAt: "now",
+      });
+      orderCreate.mockResolvedValue({ code: "A7K3M9PQR2" });
+
+      const result = await createOrder(
+        baseBody({
+          fulfillment: "DELIVERY",
+          deliveryAddress: "Calle 23, Vedado",
+          expectedTotal: "900.00",
+        }),
+      );
+
+      expect(result).toMatchObject({ kind: "created" });
+      const data = orderCreate.mock.calls[0][0].data;
+      // Neither the residual 500.00 NOR a silent 0.00 delivery charge: the
+      // order closes as PICKUP, exactly like R13 of F-010 already does when
+      // delivery is not offered — never QUOTED_PER_ORDER's partial-total
+      // cycle (R11-R13, deliveryOffer.ts's `isDeliveryOffered` returns
+      // `false` for ZONE_BASED until F-042 exists).
+      expect(data.deliveryFee).toBe("0.00");
+      expect(data.deliveryAddress).toBeNull();
+      expect(data.total).toBe("900.00");
+    });
+
+    it("ZONE_BASED with deliveryEnabled and NO tariff at all is still a valid, orderable configuration (caso límite 9) — PICKUP, same as above", async () => {
+      const zoneBasedStore = {
+        ...store,
+        deliveryEnabled: true,
+        deliveryFeeMode: "ZONE_BASED" as const,
+        deliveryFee: null as string | null,
+      };
+      loadStoreForOrder.mockResolvedValue(zoneBasedStore);
+      quoteCart.mockResolvedValue({
+        store: zoneBasedStore,
+        lines: [orderableLine()],
+        subtotal: money("900.00", "CUP"),
+        discountTotal: money("0", "CUP"),
+        rates: {},
+        capturedAt: "now",
+      });
+      orderCreate.mockResolvedValue({ code: "A7K3M9PQR2" });
+
+      const result = await createOrder(baseBody({ fulfillment: "PICKUP" }));
+
+      expect(result).toMatchObject({ kind: "created" });
+      expect(orderCreate.mock.calls[0][0].data.deliveryFee).toBe("0.00");
     });
   });
 
