@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "project": "queandabuscando",
-  "updated_at": "2026-09-09",
+  "updated_at": "2026-09-10",
   "rules": [
     "Solo se cambia 'passes' a true cuando TODOS los acceptance_criteria fueron verificados ejecutando algo, no leyendo código.",
     "Nunca se borra un feature: se marca 'status': 'deprecated' y se explica en 'notes'.",
@@ -879,7 +879,7 @@
         "docs/sync-contract.md sube de version retirando el 400 de lote por zona desconocida, con el codigo declarado como reintentable y el ejemplo del 400 que se llevaba 499 eventos eliminado, coordinada con cuadrecaja.",
         "bash .agent/verify.sh F-043 --full termina con codigo 0."
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Entrada anadida por indicacion expresa del humano el 2026-09-09, opcion 'todo a failed[]', tras el veredicto de cuadrecaja sobre el borrador de la v13 (su punto 1 de nueve, el que ponen como mas grave). CORRIGE EL CRITERIO 6 DE F-041, que exige un 400 de lote: la regla 3 prohibe modificar un criterio ya escrito, asi que se corrige con este feature en vez de editar aquel. POR QUE, MEDIDO EN SU CODIGO Y NO SUPUESTO: un 400 les llega como outcome.kind === 'error' y su planOutboxAck (src/lib/qab/outboxAck.ts) le pone intentos++ a TODAS las filas del lote, no a la culpable; con QAB_OUTBOX_MAX_ATTEMPTS = 6, una sola divergencia de un municipio quema seis intentos de cada PRODUCT y cada STORE que viaje con ella y despues el drenaje NO LOS VUELVE A RECLAMAR NUNCA. Y no es un caso raro: la divergencia de catalogos es la razon de existir de ese codigo. ADEMAS ARREGLA UNA INCOHERENCIA NUESTRA que el arquitecto ya habia marcado (I6): STORE.zoneCode desconocido va en failed[] y el de ZONE_TARIFF iba en 400, para la misma clase de fallo. EL HUMANO ELIGIO LA VARIANTE SIMPLE: cualquier zoneCode no valido va a failed[], sin distinguir si esta mal formado — se descarto partirlo en 'forma mal escrita es 400, codigo inexistente es failed[]'. SECUENCIA QUE IMPORTA: esto entra ANTES de publicar la v13, para no publicar un 400 que ya sabemos que les rompe el drenaje y corregirlo en la version siguiente."
     },
     {
@@ -899,6 +899,25 @@
       ],
       "passes": false,
       "notes": "Entrada anadida por indicacion expresa del humano el 2026-09-09, opcion 'feature nuevo, con hash', tras el veredicto de cuadrecaja sobre el borrador de la v13 (su punto 2 de nueve, el segundo mas grave para ellos). EL ARGUMENTO, QUE ES SUYO Y ES BUENO: el hash del § ⑤ cubre productos —precio, moneda, disponibilidad— y el tarifario queda fuera, y el tarifario es LO UNICO DEL CABLE QUE ES UN PRECIO que no tiene espejo. Si un ZONE_TARIFF se abandona tras sus seis intentos de outbox, su lado cree que lo mando, el encargado ve su tabla, y aqui se cobra otro importe PARA SIEMPRE Y SIN RUIDO. En productos eso es un catalogo viejo; aqui es dinero. SE DESCARTO la alternativa que ellos tambien ofrecian —un GET de relectura del tarifario aplicado, con el precedente de la consulta de disponibilidad— porque solo ve la divergencia quien se acuerde de mirar, mientras que el hash la detecta sin que nadie pregunte y reusa un mecanismo que las dos partes ya tienen escrito y cruzado. OJO AL CASO DE CERO FILAS: string_agg sobre cero filas da null y el coalesce de fuera es lo que lo salva, que es el fallo que ya esta fichado para el hash de productos."
+    },
+    {
+      "id": "F-045",
+      "category": "integracion",
+      "status": "active",
+      "depends_on": ["F-043"],
+      "description": "Un evento STORE que no se aplica deja de escribir el nombre y la moneda base del negocio.",
+      "acceptance_criteria": [
+        "Un STORE rechazado con STORE_ZONE_UNKNOWN deja Business.name y Business.baseCurrencyCode exactamente como estaban, leidas antes y despues de la peticion, y la respuesta sigue siendo 207 con ese evento en failed[] con ese codigo.",
+        "Lo mismo, con su propia peticion y sus dos lecturas, para STORE_OPENING_HOURS_INVALID, para STORE_DELIVERY_CONFIG_INCONSISTENT en su forma de 207 y para STORE_TIMEZONE_INVALID: los cuatro codigos de error de STORE dejan las dos columnas intactas.",
+        "Un STORE rancio responde stale dentro de ok y las dos columnas conservan los valores NUEVOS: partiendo de name 'Nombre NUEVO' y baseCurrencyCode 'USD' y enviando un evento viejo que trae 'Nombre VIEJO' y 'CUP', la lectura posterior sigue diciendo 'Nombre NUEVO' y 'USD'.",
+        "Un STORE de una sucursal de otro negocio y un STORE que despublica una sucursal inexistente responden skipped_not_published y no mueven ninguna de las dos columnas, verificado leyendolas despues.",
+        "Un STORE que si se aplica las sigue escribiendo en los tres caminos —alta de sucursal nueva, actualizacion de una publicada y despublicacion de una existente—, verificado leyendo las dos columnas tras cada uno; y en un lote con un STORE bueno y otro que falla, el valor final es el del bueno, sea cual sea el orden de los dos eventos en el lote.",
+        "El numero de escrituras no sube: contadas con el mock de src/features/sync/server/handlers/store.test.ts, un STORE que se aplica llama a business.update una vez, y uno que devuelve stale, skipped_not_published o failed lo llama cero veces.",
+        "docs/sync-contract.md sube a v13.3 retirando la salvedad de I4 del § de zoneCode en el payload de STORE y de la fila de STORE_ZONE_UNKNOWN, con su entrada en 'Cambios respecto a la v12.2'; grep -c 'Business.name' docs/sync-contract.md da 0.",
+        "bash .agent/verify.sh F-045 --full termina con codigo 0."
+      ],
+      "passes": false,
+      "notes": "Entrada anadida por indicacion expresa del humano el 2026-09-10 ('Crea un feature correctivo para I4'), sobre la propuesta medida en .agent/specs/propuestas/store-escribe-el-negocio-antes-de-las-guardas.md. CORRIGE LA INCONGRUENCIA I4, que F-043 dejo escrita y verificada por ejecucion pero no arreglo (decision AP1=(a) del humano el 2026-09-09). EL DEFECTO: handleStore hace prisma.business.update lo PRIMERO, antes de toda guarda y antes de leer la sucursal (src/features/sync/server/handlers/store.ts:71-78), asi que un evento que despues falla o se descarta ya escribio Business.name y Business.baseCurrencyCode. MEDIDO EJECUTANDO CONTRA POSTGRES REAL, NO SUPUESTO, y lo grave no es el camino que F-043 miro: un evento RANCIO responde stale dentro de ok y AUN ASI retrocede las dos columnas, de 'Nombre NUEVO'/USD a 'Nombre VIEJO'/CUP, con Store.sourceUpdatedAt intacto — y la guarda anti-rancio esta tres lineas por debajo de la escritura. El outbox de cuadrecaja reentrega seis veces por fila, asi que no es hipotetico. Business.name es COSMETICO (cero lectores en src/; lo que el comprador ve como marca es Storefront.name), pero Business.baseCurrencyCode NO: es la moneda del catalogo, la frase 'Cobramos en X' y la moneda con la que quote.ts:142 cotiza un pedido. Y los caminos que escriben de mas son justo los que NO revalidan, asi que la portada (ISR 3600) y el catalogo pueden discrepar de moneda durante una hora. POR QUE ESTABA AHI, comprobado en el historial: el comentario la justifica con R8/E16 de F-018 y ninguna de las dos habla de POSICION — era un upsert cuyo resultado hacia falta abajo (613b254), 12eacc8 lo volvio update y lo dejo en el sitio. Hoy nada de lo que viene despues depende de esa llamada. ARREGLO ELEGIDO POR EL HUMANO: opcion (a), un helper privado applyBusinessFields llamado justo antes de cada una de las tres escrituras, exactamente donde el archivo ya coloca assertZoneKnown y assertDeliveryConsistent y donde sus docstrings declaran esa colocacion como doctrina. ~12 lineas, sin migracion, sin mover ninguna guarda. SE DESCARTO la transaccion: AGENTS.md prohibe el cliente global dentro de $transaction contra el pooler. El nested write de Prisma queda como optimizacion posterior, no como arreglo: el camino de alta pasa por createStorefrontWithStore y no tiene donde plegarse. SECUENCIA QUE IMPORTA: entra ANTES de F-044 y ANTES de publicar la v13, para publicarla ya con la promesa fuerte en vez de con la salvedad de I4 y tener que desdecirse. EL ASERTO DE F-043 QUE HAY QUE INVERTIR, hoy verde y afirmando el defecto: src/features/sync/server/handlers/business.db.test.ts:673-676 — la regla 3 protege los criterios escritos, no las pruebas. FUERA DE ESTE FEATURE, decidido el 2026-09-10 tras plantear el choque: el .default('CUP') de baseCurrency en src/features/sync/schemas.ts:42, que hace que un evento que OMITE el campo ponga el negocio en CUP viniendo de USD. Se saco porque quitarlo cambia lo que el POS puede omitir, es version MAYOR del contrato y habria bloqueado la publicacion de la v13; va en su propia propuesta."
     }
   ]
 }

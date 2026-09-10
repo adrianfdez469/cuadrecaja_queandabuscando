@@ -5,6 +5,19 @@ actualizado: 2026-09-08T19:00:09Z
 estado: listo
 ---
 
+> **SUPERADO EN PARTE POR F-043 (2026-09-10).** El **criterio 6** de este
+> feature —una zona desconocida es `400 INVALID_BATCH` de **lote**— ya **no
+> describe lo que existe**, y con él R17, E9, la fila
+> `ZONE_TARIFF_ZONE_UNKNOWN` de la tabla de códigos, los casos límite 4 y 5, y
+> la incongruencia **I6**, que F-043 cerró en vez de conservar. Hoy ese
+> `zoneCode` —ausente del catálogo **o** sin la forma del DPA, que el sobre ya
+> no distingue— falla **solo su evento**, en `failed[]` del `207`. El porqué,
+> medido en el código de cuadrecaja y no supuesto: un `400` les sube el
+> contador de intentos de **todas** las filas del lote, no de la culpable. La
+> especificación viva de este camino es `.agent/specs/F-043/`. No se edita el
+> criterio 6 (regla 3): se anota que quedó superado, que es para lo que existió
+> F-043.
+>
 > Nace de la **S-007** de cuadrecaja (`.agent/solicitudes.md` § «Abiertas»),
 > **cerrada de diseño el 2026-09-06 entre los dos arneses** y todavía **sin
 > publicar**: el contrato va por la v12.2 y esto es la **v13**. El análisis

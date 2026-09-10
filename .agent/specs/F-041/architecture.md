@@ -5,6 +5,18 @@ actualizado: 2026-09-08T21:30:02Z
 estado: listo
 ---
 
+> **SUPERADO EN PARTE POR F-043 (2026-09-10).** Todo lo que este documento dice
+> sobre el `400` de lote por una zona desconocida —el diagrama de secuencia, la
+> fila `ZONE_TARIFF_ZONE_UNKNOWN` de la tabla de códigos y la asimetría que
+> **I6** decidió conservar a propósito— ya **no describe lo que existe**. F-043
+> movió esa comprobación del **sobre** al **aplicador**: hoy es `failed[]` de
+> ese evento, y la asimetría de I6 quedó cerrada, no conservada. La
+> arquitectura viva de este camino es `.agent/specs/F-043/architecture.md`, y
+> el sensor que impide que el `.refine` vuelva al sobre es la lista blanca de
+> `src/features/zones/boundaries.test.ts`. El resto de este documento —la
+> entidad, la precedencia, el catálogo, la cascada `STORE → ZONE_TARIFF`— sigue
+> vigente tal cual.
+>
 > Sobre `.agent/specs/F-041/spec.md` (`estado: listo`, 22 escenarios, 29 reglas,
 > 16 casos límite, 12 incongruencias). Esta arquitectura **cierra las tres cosas
 > que la spec le reservó** en su § «No decidido a propósito» —los nombres, dónde
