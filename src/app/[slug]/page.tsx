@@ -2,14 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import {
   getPublishedStoreSlugs,
-  getStoreCatalog,
+  getStoreCatalogPricing,
   getStoreCategories,
-  getStoreRates,
   requireStore,
 } from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
 import { branchTrailStore, brandTrailStore, catalogTrail } from "@/features/storefront/trail";
 import { catalogEntryHref, shouldOfferCatalogEntryLink } from "@/features/catalog/catalogFilters";
+import { UNPRICED_CATALOG_CLOSURE } from "@/features/catalog/unpricedCatalog";
 import { CATALOG_ROUTE_SEGMENT } from "@/constants/catalog";
 import { publicEnv } from "@/lib/publicEnv";
 import { CATALOG_EAGER_IMAGE_COUNT } from "@/constants/media";
@@ -139,13 +139,40 @@ export default async function StorePage({ params }: PageProps<"/[slug]">) {
     );
   }
 
-  const [products, rates, categories] = await Promise.all([
-    getStoreCatalog(resolution),
-    getStoreRates(resolution),
+  const [pricing, categories] = await Promise.all([
+    getStoreCatalogPricing(resolution, store.baseCurrencyCode),
     getStoreCategories(resolution),
   ]);
+  const products = pricing.catalog;
+  const rates = pricing.rates;
 
   const trail = catalogTrail(branchTrailStore(resolution, store));
+
+  // F-040 (architecture.md AD7): la guarda va DESPUÉS de la rama
+  // `status !== "PUBLISHED"` de arriba, que no se toca — nunca antes.
+  if (pricing.unpriced) {
+    return (
+      <>
+        <Container className="pt-4 pb-8">
+          <StoreTrail trail={trail} />
+          <StoreClosedNotice
+            storeName={store.name}
+            {...UNPRICED_CATALOG_CLOSURE}
+            whatsapp={store.whatsapp}
+            phone={store.phone}
+            address={store.address}
+          />
+        </Container>
+        <BranchBar
+          branchName={store.name}
+          canonicalSlug={store.canonicalSlug}
+          branchCount={resolution.branchCount}
+          isOpen={false}
+        />
+      </>
+    );
+  }
+
   // F-022 R8/E8/E9: only reached in the PUBLISHED branch (the closed branch
   // returns earlier, above). `readWeeklySchedule` returns `null` for both
   // "no horario" and "horario ilegible" (E8, E12), and then nothing new is

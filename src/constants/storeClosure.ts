@@ -32,4 +32,15 @@ export function isStoreDisabledReasonCode(value: string): value is StoreDisabled
  */
 export const PLATFORM_ROLLOUT_REASON_CODE = "PLATFORM_ROLLOUT";
 
+/**
+ * F-040 (architecture.md AD3, R5): the derived "this store cannot show any
+ * price right now" state — computed at render time from the catalogue and
+ * the rates, NEVER persisted (criterio 4, ADR 0017 (a)). Same shape as
+ * `PLATFORM_ROLLOUT_REASON_CODE`: a loose constant, deliberately outside
+ * `STORE_DISABLED_REASONS`, so it never shows up in the panel's list and
+ * `storeStatusBodySchema` (`src/features/admin/schemas.ts`) rejects it if
+ * anything ever tried to write it (E19).
+ */
+export const PRICES_UNAVAILABLE_REASON_CODE = "PRICES_UNAVAILABLE";
+
 export const STORE_DISABLED_MESSAGE_MAX_LENGTH = 140;

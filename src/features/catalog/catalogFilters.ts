@@ -20,7 +20,7 @@ import {
 import { STORE_SEARCH_PAGE_SIZE } from "@/constants/storeSearch";
 import { clampSearchPage, normalizeSearchTerm } from "@/lib/searchTerm";
 import { compare, formatWholeMoney, money, type Money, type RateTable } from "@/lib/money";
-import { resolvePrice } from "@/lib/pricing";
+import { tryResolvePrice } from "@/lib/pricing";
 import type { StoreCategory } from "@/features/catalog/storeCategories";
 import type { CatalogProduct } from "@/features/catalog/server/queries";
 
@@ -248,21 +248,20 @@ export function catalogFilterHref(
 type KeptItem = { product: CatalogProduct; price: Money | null };
 
 /**
- * Same treatment as `ProductCard`'s own `safeResolve` (which this comment
- * cites, and which cites this one back): a product priced in a currency
- * with no vigent rate must not take the filtered catalogue down either.
+ * `tryResolvePrice` (architecture.md AD6): the ONE `try/catch` this repo
+ * defines for "this product has no price", shared with `ProductCard` and the
+ * product page — a product priced in a currency with no vigent rate must not
+ * take the filtered catalogue down either.
  */
 function resolveProductPrice(product: CatalogProduct, context: CatalogFilterContext): Money | null {
-  try {
-    return resolvePrice(product, {
+  return (
+    tryResolvePrice(product, {
       targetCurrency: context.displayCurrency,
       rates: context.rates,
       baseCurrency: context.displayCurrency,
       promotions: product.promotions,
-    }).price;
-  } catch {
-    return null;
-  }
+    })?.price ?? null
+  );
 }
 
 function passesPriceRange(price: Money | null, min: number | null, max: number | null): boolean {

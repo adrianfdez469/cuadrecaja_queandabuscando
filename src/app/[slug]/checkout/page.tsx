@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { requireStore } from "@/features/catalog/server/queries";
+import { getStoreCatalogPricing, requireStore } from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
 import { branchTrailStore, checkoutTrail } from "@/features/storefront/trail";
 import { Container } from "@/components/ui/Container";
 import { CheckoutForm } from "@/features/cart/components/CheckoutForm";
 import { StoreClosedNotice } from "@/components/store/StoreClosedNotice";
 import { StoreTrail } from "@/components/store/StoreTrail";
+import { UNPRICED_CATALOG_CLOSURE } from "@/features/catalog/unpricedCatalog";
 import { loadStoreForOrder } from "@/features/orders/server/quote";
 import { loadStoreZoneCoverageForRender } from "@/features/zones/server/coverage";
 import { isDeliveryOffered, type DeliveryConfig } from "@/features/orders/deliveryOffer";
@@ -52,7 +53,36 @@ export default async function CheckoutPage({ params }: PageProps<"/[slug]/checko
   // nuevos como `undefined`, y una tienda ZONE_BASED apagaría su domicilio
   // durante una hora sin que nada falle). `loadStoreForOrder` es el mismo
   // lector, sin caché, que ya usan la cotización y `createOrder`.
-  const orderStore = await loadStoreForOrder(store.canonicalSlug);
+  //
+  // F-040 (architecture.md AD9): en paralelo con la lectura de F-040, que
+  // esta vista ESTRENA (SP3(a), R9) — dos accesos a la caché de datos por
+  // petición (esta página es `force-dynamic`), a la vez que una consulta
+  // Prisma sin caché que ya se pagaba y que es más lenta: la latencia
+  // añadida es `max(...) - antes ≈ 0`, no la suma.
+  const [pricing, orderStore] = await Promise.all([
+    getStoreCatalogPricing(resolution, store.baseCurrencyCode),
+    loadStoreForOrder(store.canonicalSlug),
+  ]);
+
+  // La guarda va DESPUÉS de ese `Promise.all` y ANTES de la cobertura de
+  // zonas (condicional, más abajo): una tienda muda `ZONE_BASED` se ahorra
+  // esa consulta. Sin `BranchBar`: `/checkout` nunca lo montó (design.md).
+  if (pricing.unpriced) {
+    return (
+      <Container className="pt-4 pb-8">
+        <StoreTrail trail={trail} />
+        <StoreClosedNotice
+          storeName={store.name}
+          {...UNPRICED_CATALOG_CLOSURE}
+          whatsapp={store.whatsapp}
+          phone={store.phone}
+          address={store.address}
+          extraNote="Si tenías productos en el carrito, siguen guardados en este teléfono: cuando la tienda vuelva a mostrar precios, los vas a encontrar ahí."
+        />
+      </Container>
+    );
+  }
+
   const deliveryConfig: DeliveryConfig = orderStore
     ? {
         deliveryEnabled: orderStore.deliveryEnabled,
