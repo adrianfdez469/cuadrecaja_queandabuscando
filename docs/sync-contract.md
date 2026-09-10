@@ -1,6 +1,6 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 13.3** · 10 de septiembre de 2026 — **BORRADOR, sin publicar.** Sale
+**Versión 13.4** · 10 de septiembre de 2026 — **BORRADOR, sin publicar.** Sale
 hacia cuadrecaja para revisión mientras F-041 se termina de implementar y de
 verificar; lo que este documento describe de la v13 (`ZONE_BASED`,
 `ZONE_TARIFF`, `zoneCode`, el vector de precedencia) **no se emite todavía** —
@@ -48,6 +48,26 @@ y evita la pregunta «¿es este el documento que leí?».
 
 ## Cambios respecto a la v12.2
 
+**v13.4 (F-044, 10 de septiembre de 2026).** ⑤ Reconciliación gana el hash del
+tarifario de envío: la respuesta de
+`GET /api/internal/reconciliation?storeId=` pasa de `{products, hash}` a
+`{products, hash, tariffs, tariffHash}`, dos campos aditivos en la misma
+llamada, con el mismo `404 UNKNOWN_STORE` y el mismo `400 MISSING_STORE_ID` de
+siempre. `tariffs` cuenta las filas de `ZONE_TARIFF` de esa sucursal cuyo
+`rule` es `FEE` o `NOT_SERVED` — las de `rule: "INHERIT"` no entran, porque
+para la resolución de la tarifa `INHERIT` y «no hay fila» son el mismo
+veredicto — y `tariffHash` es el md5 de su concatenación canónica, con su
+propio pseudocódigo, su SQL espejo y su vector de prueba en § ⑤ más abajo.
+**Quien ignore los dos campos nuevos sigue siendo un lector correcto**: los
+dos campos viejos no cambian de nombre, de tipo ni de valor. Como los dos
+campos son aditivos y el borrador de la v13 sigue sin publicarse, esta
+revisión mueve un dígito **menor** (v13.1 F-042, v13.2 F-043, v13.3 F-045),
+no uno mayor; el día que la v13 se publique, su párrafo de publicación
+—más abajo— ya nombra `tariffs` y `tariffHash` entre lo que gana la
+respuesta de ⑤. La divergencia del tarifario **solo alerta**: no hay query
+convergente para él ni acción de recuperación de este lado — ver § ⑤,
+«La divergencia del tarifario».
+
 **v13.3 (F-045, 10 de septiembre de 2026).** Un `STORE` que responde `failed`,
 `stale` o `skipped_not_published` no escribe **nada**, ni siquiera el nombre
 del negocio o su moneda base: hasta esta revisión, esas dos columnas se
@@ -88,12 +108,13 @@ abajo) y retira la advertencia de que «entre la v13 y F-042 una tienda
 `ZONE_BASED` no ofrece domicilio» (I6): F-042 ya está construido.
 
 Sube como **mayor** —un tercer valor de `deliveryFeeMode`, una entidad nueva
-en `entity`, un campo nuevo en el `payload` de `STORE` y tres códigos de error
-son vocabulario nuevo del cable— pero es **aditiva**: quien implementó la
-v12.2 y no emite `ZONE_BASED` ni `ZONE_TARIFF` sigue siendo un lector correcto
-y no tiene que tocar nada. Las seis entidades anteriores no cambian de forma
-ni de significado. Es la respuesta a **S-007**, cerrada de diseño con vuestro
-arnés el 2026-09-06.
+en `entity`, un campo nuevo en el `payload` de `STORE`, tres códigos de error y
+—F-044— dos campos nuevos en la respuesta de ⑤ Reconciliación (`tariffs`,
+`tariffHash`) son vocabulario nuevo del cable— pero es **aditiva**: quien
+implementó la v12.2 y no emite `ZONE_BASED` ni `ZONE_TARIFF`, y quien lee solo
+`products`/`hash` de ⑤, sigue siendo un lector correcto y no tiene que tocar
+nada. Las seis entidades anteriores no cambian de forma ni de significado. Es
+la respuesta a **S-007**, cerrada de diseño con vuestro arnés el 2026-09-06.
 
 **No emitáis `ZONE_TARIFF` ni `deliveryFeeMode: "ZONE_BASED"` hasta el
 aviso.** Hasta que el lado receptor esté en pie, `entity` no admite
@@ -209,8 +230,9 @@ viajaría en `ok` y os haría dar esas tarifas por entregadas para siempre. Ver
 
 **Un `storeId` de otro negocio es indistinguible de uno inexistente (S-007,
 uno de los cinco menores), comprobado ejecutando y no solo leyendo el
-código.** El `storeId` de ⑤ Reconciliación —que todavía no existe para
-`ZONE_TARIFF`, es F-044— responde `404 UNKNOWN_STORE` en los dos casos; el
+código.** El `storeId` de ⑤ Reconciliación —que desde F-044 también resuelve
+`tariffs`/`tariffHash`, no solo `products`/`hash`— responde `404 UNKNOWN_STORE`
+en los dos casos; el
 outbox de `ZONE_TARIFF` es un evento, no un `GET`, así que el mecanismo es
 otro pero la propiedad es la misma: `handleZoneTariff`
 (`src/features/sync/server/handlers/zoneTariff.ts`) hace
@@ -1835,7 +1857,7 @@ toca ninguna ruta.
 | `GET`  | `/api/internal/orders?ids=a,b` (lateral)               | —                                  | 200 `{ orders, nextCursor: null, nextAfter: null }`                              |
 | `POST` | `/api/internal/orders/status`                          | `{ orderId, status, reason? }`     | 200 `{ ok: true }`                                                               |
 | `POST` | `/api/internal/orders/proposal`                        | ver § ③④ «Proponer un cambio» (v5) | 200 ver § ③④                                                                     |
-| `GET`  | `/api/internal/reconciliation?storeId=`                | —                                  | 200 `{ products, hash }`                                                         |
+| `GET`  | `/api/internal/reconciliation?storeId=`                | —                                  | 200 `{ products, hash, tariffs, tariffHash }` (v13.4, F-044)                     |
 | `GET`  | `/api/internal/slug-availability?slug=&name=&storeId=` | —                                  | 200 `{ candidate, available, reason, resolvedSlug, url, storeKnown, reserving }` |
 
 **La octava ruta, `POST /api/provisioning/credential` (v10), vive fuera de
@@ -3316,8 +3338,13 @@ md5( concat( externalId ":" precio ":" moneda ":" disponibilidad "|" )
      ordenado por externalId )
 ```
 
-Si los hashes difieren: poner `dispPublicada = NULL` en las filas de ese local
-(lo que hace que la query convergente las levante todas) y alertar.
+**Si `hash` (el de productos) difiere: poner `dispPublicada = NULL` en las
+filas de ese local** (lo que hace que la query convergente las levante todas)
+**y alertar.** Esta es la única acción de recuperación que existe de este
+lado, y es **solo** la de productos: un `tariffHash` (v13.4, F-044) divergente
+no se arregla resincronizando el catálogo — ver «La divergencia del
+tarifario», al final de esta sección, para qué hacer cuando el que difiere es
+ese.
 
 **Alertar también si no hubo una corrida exitosa en 30 minutos.**
 
@@ -3422,6 +3449,205 @@ mano. Si el SQL implementado del lado de cuadrecaja no reproduce este hash
 sobre estos mismos cuatro valores, la diferencia está en la serialización del
 precio o en el orden, no en los datos reales.
 
+### El hash del tarifario de envío (v13.4)
+
+**Nuevo en la v13.4 (F-044).** El hash de arriba cubre el catálogo publicado
+—precio, moneda, disponibilidad— y deja fuera el tarifario de envío
+(`ZONE_TARIFF`, v13/F-041), que es lo único del cable que es un precio y no
+tenía espejo: si un `ZONE_TARIFF` agota sus reintentos de outbox, el hash de
+productos sigue coincidiendo y la divergencia queda invisible para siempre.
+Este segundo hash, `tariffHash`, junto con su cuenta `tariffs`, viaja en la
+MISMA respuesta de ⑤ (`{ products, hash, tariffs, tariffHash }`), calculado
+sobre la MISMA sucursal que resuelve `storeId`.
+
+```
+md5( concat( zoneCode ":" rule ":" importe "|" )
+     sobre las filas con rule ∈ {FEE, NOT_SERVED}, ordenado por bytes de zoneCode )
+```
+
+donde `importe` es el importe sin ceros de relleno cuando `rule = FEE`, y la
+cadena vacía en cualquier otro caso.
+
+**Qué filas entran: `FEE` y `NOT_SERVED`; `INHERIT` no.** Tres razones:
+
+1. **`INHERIT` no publica nada.** Para la resolución de la tarifa, `INHERIT`
+   y «no hay fila» son el mismo veredicto — el importe que se le cobra a un
+   comprador de cualquier zona es una función **solo** de las filas
+   `FEE`/`NOT_SERVED`, así que dos lados con el mismo conjunto de filas
+   `FEE`/`NOT_SERVED` cobran lo mismo en todas las zonas, que es exactamente
+   lo que este hash tiene que afirmar.
+2. **La retracción tiene que converger sin depender de vuestra tabla.**
+   `INHERIT` es la única retracción que existe y vuestra tabla todavía no
+   existe: no sabemos si guardaréis una fila `INHERIT` o borraréis la
+   vuestra. Con `INHERIT` fuera del hash, los dos lados convergen en las dos
+   formas.
+3. **No pierde detección.** Un `INHERIT` que se pierda por el camino deja
+   aquí la fila `FEE` vieja: este lado aporta una entrada que el vuestro no
+   aporta, y el hash **y** la cuenta difieren igual.
+
+   **Costo aceptado, para que nadie lo descubra depurando:** el hash no
+   distingue «hay una fila `INHERIT`» de «no hay fila». Es una diferencia sin
+   consecuencia sobre el importe.
+
+```sql
+SELECT count(*) AS tariffs,
+       md5(coalesce(string_agg(
+              t."zoneCode" || ':' ||
+              t."rule"::text || ':' ||
+              coalesce(case when t."rule" = 'FEE'
+                            then trim(trailing '.' from
+                                 trim(trailing '0' from round(t."deliveryFee"::numeric, 2)::text))
+                       end, '') || '|',
+              '' ORDER BY t."zoneCode" COLLATE "C"
+            ), '')) AS "tariffHash"
+FROM "ZoneTariff" t
+WHERE t."storeId" = $1
+  AND t."rule" <> 'INHERIT';
+```
+
+**Vuestra tabla todavía no existe (S-007, F-013): ajustad los nombres de
+vuestras columnas.** Lo de arriba está escrito con los nombres del cable
+—`storeId`, `zoneCode`, `rule`, `deliveryFee`— sobre una tabla `ZoneTariff`
+que es la nuestra, no la vuestra. **Lo que fija la semántica es el vector de
+prueba** de más abajo, igual que en el hash de productos.
+
+Cinco decisiones que este SQL lleva y que no se deducen del pseudocódigo:
+
+1. **`t."rule" <> 'INHERIT'` en el `WHERE`.** La razón está arriba: `INHERIT`
+   no publica nada y su retracción tiene que converger sin depender de
+   vuestra tabla.
+2. **El hueco vacío del importe, y su `coalesce` interior.** Una fila que no
+   publica importe —`rule` distinto de `FEE`, o la columna nula— entra con el
+   hueco **vacío**, nunca con `0` ni con un `NULL` sin envolver: `0.00` da
+   `0`, no `""`, así que el hueco vacío significa «sin importe» sin
+   ambigüedad. La condición se escribe sobre `rule`, no sobre la nulidad de
+   la columna, porque vuestra tabla podría tenerla `NOT NULL DEFAULT 0`.
+3. **El `coalesce(..., '')` de fuera.** `string_agg` sobre cero filas da
+   `NULL`, y `md5(NULL)` es `NULL`, no un hash. Con este `coalesce`, una
+   sucursal sin ninguna fila da `d41d8cd98f00b204e9800998ecf8427e` — el md5
+   de la cadena vacía.
+4. **La serialización del importe sin ceros de relleno**, con la precondición
+   de los dos decimales heredada de § ①: el importe del cable es múltiplo de
+   `0.01`, y con tres decimales los dos lados divergirían en el redondeo de
+   forma permanente, igual que `2.675` en el hash de productos.
+5. **Las filas de una sucursal dada de baja se excluyen del lado que tiene la
+   marca.** Aquí un `STORE` con `operation: "DELETE"` aplicado **borra** el
+   tarifario de esa sucursal, así que un espejo que siga contando las filas
+   de una sucursal que vosotros disteis de baja divergiría y **no volvería a
+   converger nunca**. Un `publishToStore: false` —vacaciones— **no** borra
+   nada aquí y **no** debe excluir nada allí.
+
+**El orden es de bytes, no el de una colación.** `ORDER BY t."zoneCode"
+COLLATE "C"`, la misma regla que el hash de productos y por el mismo motivo.
+
+**Precondición: el importe viaja con dos decimales como máximo** (ver § ①,
+`ZONE_TARIFF`): la columna es `Decimal(14,2)` y el sobre exige múltiplo de
+`0.01`. Con más de dos decimales, los dos lados divergirían en el redondeo de
+forma permanente, igual que `2.675` en el hash de productos.
+
+**Qué SÍ prueba la implementación de aquí, y qué NO.** Esta traducción se
+verifica contra filas de `ZoneTariff`, no contra vuestra tabla: valida el
+orden, los separadores, la serialización del importe, el hueco vacío y la
+exclusión de `INHERIT`. **No valida** los nombres de vuestras columnas, ni que
+vuestra tabla guarde una fila por `(sucursal, zona)`, ni vuestra exclusión de
+las sucursales dadas de baja — eso solo lo puede comprobar el equipo de
+cuadrecaja ejecutando el SQL de arriba contra su propia base.
+
+#### Vector del hash del tarifario (v13.4)
+
+```json
+{
+  "version": "1",
+  "cases": [
+    {
+      "id": "T1",
+      "rows": [
+        {
+          "zoneCode": "40.01",
+          "rule": "INHERIT",
+          "deliveryFee": null
+        },
+        {
+          "zoneCode": "23.05",
+          "rule": "FEE",
+          "deliveryFee": "300.00"
+        },
+        {
+          "zoneCode": "21",
+          "rule": "FEE",
+          "deliveryFee": "0.00"
+        },
+        {
+          "zoneCode": "23.01",
+          "rule": "FEE",
+          "deliveryFee": "250.50"
+        },
+        {
+          "zoneCode": "21.05",
+          "rule": "NOT_SERVED",
+          "deliveryFee": null
+        }
+      ],
+      "expected": {
+        "tariffs": 4,
+        "entries": ["21:FEE:0|", "21.05:NOT_SERVED:|", "23.01:FEE:250.5|", "23.05:FEE:300|"],
+        "tariffHash": "a67d37235e3dc5c803b469bfe9cadee7"
+      }
+    },
+    {
+      "id": "T2",
+      "rows": [],
+      "expected": {
+        "tariffs": 0,
+        "entries": [],
+        "tariffHash": "d41d8cd98f00b204e9800998ecf8427e"
+      }
+    }
+  ]
+}
+```
+
+Calculado ejecutando `tariffReconciliation` (`npm run vector:tariff`) sobre
+estas filas literales — no a mano. `entries` se publica, con las entradas ya
+serializadas y en su orden final: con ellas delante, cuadrecaja puede decir si
+su diferencia está en el **orden** o en la **serialización**, la misma frase
+con la que se cierra el vector de productos. Las `rows` de `T1` viajan en un
+orden distinto del orden por bytes a propósito, para que una implementación
+que concatene «según le llegan» falle este caso en vez de pasarlo por
+casualidad. `21` y `21.05` son códigos reales del catálogo publicado —Pinar
+del Río y su municipio La Palma—, elegidos para que este mismo bloque se
+pueda insertar tal cual en una sucursal real, sin violar la clave ajena contra
+`Zone`.
+
+#### El hash del bloque JSON del vector del tarifario
+
+El alcance es el mismo que el de productos: los bytes exactos capturados por
+la misma expresión regular (el grupo 1 de ` ```json\n([\s\S]*?)\n``` `), sin
+normalizar espacios ni saltos de línea.
+
+**sha256 del bloque JSON del vector del tarifario (v13.4):**
+
+`461437dd951bcd6436237cf95c0ab0c75deb664a8ce221ebce9909d2414ed01e`
+
+### La divergencia del tarifario (v13.4)
+
+**Solo alerta: no hay query convergente ni acción de recuperación de este
+lado para el tarifario.** Tres cosas que quedan dichas aquí, con letra y no
+entre líneas:
+
+(a) Si `tariffHash` difiere, **no** se ejecuta la resincronización de arriba
+—`dispPublicada = NULL`—, que es **solo** la del hash de productos y no toca
+ninguna fila de `ZoneTariff`.
+
+(b) **Una fila que sobre de este lado no se puede borrar desde aquí**: `DELETE`
+está rechazado (`ZONE_TARIFF_DELETE_NOT_SUPPORTED`) e `INHERIT` es la única
+retracción que existe. Solo la corrige un `ZONE_TARIFF` vuestro con
+`rule: "INHERIT"` y un `updatedAt` posterior al de la fila que sobra.
+
+(c) **Mientras diverge, el domicilio de la sucursal sigue funcionando**, con
+el importe que este lado tiene: una divergencia del tarifario no apaga ni
+degrada el checkout de nadie.
+
 ---
 
 ## Idempotencia, en dos capas
@@ -3472,6 +3698,10 @@ Cuando se avise, lo que hace falta de vuestro lado:
    qué va a cobrar realmente en cada municipio — municipio → su provincia →
    no servida, con las tres guardas de importe. El vector de trece casos de
    arriba es lo que prueba que las dos implementaciones coinciden.
+6. **El espejo del hash del tarifario (v13.4, F-044)** — § ⑤, «El hash del
+   tarifario de envío», arriba: es donde este lado publica qué filas entran,
+   cómo se serializa el importe y el vector de prueba con el que comprobar
+   vuestra propia traducción.
 
 ### De la v12 — emitir `BUSINESS`
 
