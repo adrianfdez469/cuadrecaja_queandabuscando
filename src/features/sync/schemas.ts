@@ -1,11 +1,6 @@
 import { z } from "zod";
 import { CheckoutMode, DeliveryFeeMode } from "@/generated/prisma/enums";
-import {
-  STORE_DELIVERY_CONFIG_INCONSISTENT,
-  ZONE_TARIFF_FEE_NOT_ALLOWED,
-  ZONE_TARIFF_ZONE_UNKNOWN,
-} from "@/constants/sync";
-import { isKnownZoneCode, ZONE_CODE_PATTERN } from "@/features/zones/catalog";
+import { STORE_DELIVERY_CONFIG_INCONSISTENT, ZONE_TARIFF_FEE_NOT_ALLOWED } from "@/constants/sync";
 
 /**
  * Wire format for /api/internal/sync/*.
@@ -50,12 +45,15 @@ export const storePayloadSchema = z
      * absent leaves the column INTACT, an explicit `null` clears it. NOT one
      * of the nine contact fields, where absent clears (`docs/sync-contract.md`
      * § "dos semánticas de omisión"): this is computable configuration the
-     * POS may not emit yet, not presentation text. Validated against the
-     * catalog in the HANDLER (`STORE_ZONE_UNKNOWN`, `failed[]` of THIS
-     * event), never here — a `400` of the whole lote over one store's zone
-     * would take the other 499 events down with it (I6).
+     * POS may not emit yet, not presentation text. F-043 (R1/R5): the sobre
+     * no longer opines on the VALUE at all — neither "in the catalog" nor
+     * "has the DPA's shape" — only on the TYPE (a string, or absent, or
+     * explicit `null`). Both are validated against the catalog in the
+     * HANDLER (`STORE_ZONE_UNKNOWN`, `failed[]` of THIS event), never here —
+     * a `400` of the whole lote over one store's zone would take the other
+     * 499 events down with it (I6).
      */
-    zoneCode: z.string().regex(ZONE_CODE_PATTERN).nullish(),
+    zoneCode: z.string().nullish(),
     /**
      * F-032 (R1-R3, R5, R19): the purchase configuration cuadrecaja is now the
      * owner of. All five are OPTIONAL and PLAIN (R2) — absent means "leave the
@@ -166,16 +164,22 @@ export const businessPayloadSchema = z.object({
  * re-check what the schema already knew. With the union, `rule: "FEE"`
  * IMPLIES `deliveryFee: number` in TypeScript — a discriminant that cannot
  * contradict itself (R15).
+ *
+ * F-043 (R1/R2/R5): `zoneCode` is `z.string()` and nothing else in all three
+ * branches — no `regex`, no `refine(isKnownZoneCode)`. Whether the value is
+ * in the catalog and whether it has the DPA's shape are both questions for
+ * the HANDLER's `assertZoneKnown` (`src/features/sync/server/handlers/zoneTariff.ts`),
+ * never the sobre: a `400` of the whole lote over one tariff's zone would
+ * take the other 499 events down with it (same doctrine as `barcodes` in the
+ * v4 and `displayCurrencies` in the v12, both below). The TYPE — string,
+ * present, non-null — stays the sobre's call, so a `zoneCode` that arrives as
+ * a number, `null`, or absent is still `400 INVALID_BATCH` like any other
+ * malformed required field.
  */
-const zoneCodeSchema = z
-  .string()
-  .regex(ZONE_CODE_PATTERN)
-  .refine(isKnownZoneCode, { error: ZONE_TARIFF_ZONE_UNKNOWN });
-
 export const zoneTariffPayloadSchema = z.discriminatedUnion("rule", [
   z.object({
     storeId: z.string().min(1),
-    zoneCode: zoneCodeSchema,
+    zoneCode: z.string(),
     rule: z.literal("FEE"),
     // R16: same domain and shape as STORE's own `deliveryFee` above.
     // OBLIGATORY here — the other half of guard (1) of R27 lives in
@@ -186,7 +190,7 @@ export const zoneTariffPayloadSchema = z.discriminatedUnion("rule", [
   }),
   z.object({
     storeId: z.string().min(1),
-    zoneCode: zoneCodeSchema,
+    zoneCode: z.string(),
     rule: z.literal("NOT_SERVED"),
     // FORBIDDEN, not ignored: present — including an explicit `null` — is a
     // `400`. Precedent: `barcode` above.
@@ -195,7 +199,7 @@ export const zoneTariffPayloadSchema = z.discriminatedUnion("rule", [
   }),
   z.object({
     storeId: z.string().min(1),
-    zoneCode: zoneCodeSchema,
+    zoneCode: z.string(),
     rule: z.literal("INHERIT"),
     deliveryFee: z.never({ error: ZONE_TARIFF_FEE_NOT_ALLOWED }).optional(),
     updatedAt: isoDate,

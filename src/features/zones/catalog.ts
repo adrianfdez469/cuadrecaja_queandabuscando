@@ -19,8 +19,6 @@ import zoneIndexArtifact from "./zone-index.json";
  * of literals for (I4's lesson applied up front).
  */
 
-export const ZONE_CODE_PATTERN = /^\d{2}(\.\d{2})?$/;
-
 export type ZoneCatalogEntry = {
   code: string;
   name: string;

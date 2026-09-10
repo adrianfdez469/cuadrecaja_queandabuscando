@@ -30,7 +30,8 @@ vi.mock("@/lib/prisma", () => ({
 
 const { handleZoneTariff } = await import("./zoneTariff");
 const { SyncEventFailure } = await import("./types");
-const { ZONE_TARIFF_DELETE_NOT_SUPPORTED } = await import("@/constants/sync");
+const { ZONE_TARIFF_DELETE_NOT_SUPPORTED, ZONE_TARIFF_ZONE_UNKNOWN } =
+  await import("@/constants/sync");
 
 const BUSINESS_ID = "business-1";
 // A real, non-retired code from the committed artefact (R21: Sandino,
@@ -179,6 +180,27 @@ describe("handleZoneTariff() — R21: the guard that REJECTS, by (storeId, zoneC
     const outcome = await handleZoneTariff(payload(), "UPDATE", BUSINESS_ID);
 
     expect(outcome).toEqual({ status: "processed", touchedStoreSlug: "marca-1" });
+  });
+});
+
+describe("handleZoneTariff() — F-043 (plan.md paso 2, spec.md R7 paso 4): assertZoneKnown, AFTER the anti-stale guard and BEFORE the upsert", () => {
+  it("an unknown zoneCode fails with ZONE_TARIFF_ZONE_UNKNOWN, having already cleared the anti-stale guard, and NEVER reaches the upsert", async () => {
+    // The existing row's mark is OLDER than the payload's — this passes the
+    // R21 guard (step 3) WITHOUT returning STALE, so the only thing that can
+    // still stop the write is the NEW step 4 check, fixing the order R7
+    // demands (two different implementations could otherwise disagree on
+    // whether the zone or the anti-stale guard runs first).
+    storeFindUnique.mockResolvedValueOnce(
+      storeRow({ zoneTariffs: [{ sourceUpdatedAt: new Date("2000-01-01T00:00:00.000Z") }] }),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(
+      handleZoneTariff(payload({ zoneCode: "99.99" }), "UPDATE", BUSINESS_ID),
+    ).rejects.toThrow(ZONE_TARIFF_ZONE_UNKNOWN);
+
+    expect(zoneTariffUpsert).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 

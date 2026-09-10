@@ -121,6 +121,25 @@ describe("zone-index.json artefact integrity (C16, E22)", () => {
   it("ZONE_INDEX_VERSION (what the seeder reads) matches the artefact's own `version` field", () => {
     expect(ZONE_INDEX_VERSION).toBe(artifact.version);
   });
+
+  /**
+   * F-043 (architecture.md § AD2, plan.md paso 6): the DPA shape gains its
+   * FIRST assertion — until this feature, nothing checked that the 184
+   * committed codes actually match it, only that the schema's own
+   * `.regex(ZONE_CODE_PATTERN)` rejected a bad VALUE (removed in paso 3,
+   * moved to the handler's `isKnownZoneCode`, which never re-checks the
+   * shape). The pattern is a LOCAL constant of this test on purpose:
+   * `ZONE_CODE_PATTERN` is no longer exported from `catalog.ts` (paso 5),
+   * and re-exporting it to reuse it here would undo that decision — the
+   * only production question left is "is it in the index?", never "does it
+   * look right?" (architecture.md § AD2).
+   */
+  it("every one of the 184 committed codes matches the DPA's own shape (F-043, architecture.md § AD2) — checked here for the first time", () => {
+    const ZONE_CODE_PATTERN = /^\d{2}(\.\d{2})?$/;
+    for (const zone of artifact.zones) {
+      expect(zone.code).toMatch(ZONE_CODE_PATTERN);
+    }
+  });
 });
 
 describe("catalog.ts reader — findZone / isKnownZoneCode / isRetiredZone (C6, C9)", () => {

@@ -95,7 +95,12 @@ const IMPORTERS = listSourceFiles(SRC_DIR)
  * checked separately below, so THIS list stays about "who", not "where".
  */
 const ALLOWED = [
-  "src/features/sync/schemas.ts",
+  // F-043 (architecture.md § AD1) removed `src/features/sync/schemas.ts` from
+  // this list ON PURPOSE: the sobre no longer opines on the VALUE of a
+  // `zoneCode` (no `regex`, no `refine(isKnownZoneCode)`), only the two
+  // handlers below do. This list is the SENSOR of that decision — if this
+  // line ever comes back, someone put the `.refine` back in the sobre and
+  // reintroduced the `400` that takes 499 unrelated events down with it.
   "src/features/sync/server/handlers/store.ts",
   "src/features/sync/server/handlers/zoneTariff.ts",
   "src/features/zones/catalog.test.ts",

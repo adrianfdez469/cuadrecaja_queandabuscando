@@ -130,6 +130,39 @@ function productEvent(opts: {
   };
 }
 
+/** F-043 (plan.md paso 8, "el lado STORE"): a minimal, structurally valid
+ *  STORE payload — this file's own angle is NOT the tariff/store guard
+ *  itself (that lives in `zoneTariff.db.test.ts`'s C9 describe), but I4
+ *  (architecture.md § AD4): `handleStore` writes `Business.name`/
+ *  `baseCurrencyCode` in its FIRST line, before any guard, so a STORE event
+ *  that fails on its zoneCode still leaves that mark on THIS file's own
+ *  entity. */
+function storeEvent(opts: {
+  eventId: string;
+  session: FixtureSession;
+  storeExternalId: string;
+  updatedAt: string;
+  occurredAt?: string;
+  zoneCode?: string | null;
+}) {
+  return {
+    eventId: opts.eventId,
+    entity: "STORE",
+    operation: "UPDATE",
+    occurredAt: opts.occurredAt ?? opts.updatedAt,
+    payload: {
+      storeId: opts.storeExternalId,
+      businessId: opts.session.businessExternalId,
+      businessName: "Negocio F-043",
+      name: "Tienda F-043",
+      baseCurrency: "CUP",
+      publishToStore: true,
+      updatedAt: opts.updatedAt,
+      ...(opts.zoneCode !== undefined ? { zoneCode: opts.zoneCode } : {}),
+    },
+  };
+}
+
 /** C10/E12: 40 distinct, valid three-letter codes generated from letters —
  *  `AAA`, `AAB`, … — never real ISO currencies, so nobody reading this test
  *  mistakes the count for a curated list (spec.md § Casos límite). */
@@ -608,5 +641,45 @@ describe("BUSINESS against real Postgres, through the real POST (paso 10)", () =
 
     const row = await readBusiness(session.businessId);
     expect(row.displayCurrencies).toEqual(["CUP", "USD", "EUR"]);
+  });
+
+  it("F-043 (C3, I4): a STORE with a malformed zoneCode never gets a 400 of the lote — it fails THAT event with STORE_ZONE_UNKNOWN, and Business.name/baseCurrencyCode land anyway, because handleStore writes them BEFORE any guard runs (I4, not fixed by this feature — asserting what actually happens, not the old promise)", async () => {
+    const store = await session.createStore();
+    const eventId = `${session.token}-f043-store-malformed`;
+
+    const before = await prisma.business.findUniqueOrThrow({
+      where: { id: session.businessId },
+      select: { name: true, baseCurrencyCode: true },
+    });
+
+    const { status, body } = await post(session, [
+      storeEvent({
+        eventId,
+        session,
+        storeExternalId: store.externalId,
+        updatedAt: "2026-09-09T10:00:00.000Z",
+        zoneCode: "2101", // malformed — no dot pattern
+      }),
+    ]);
+
+    expect(status).not.toBe(400);
+    expect(status).toBe(207);
+    expect(body.results[0]).toEqual({ eventId, status: "failed", error: "STORE_ZONE_UNKNOWN" });
+
+    const after = await prisma.business.findUniqueOrThrow({
+      where: { id: session.businessId },
+      select: { name: true, baseCurrencyCode: true },
+    });
+    // I4: already applied — handleStore's very first statement, unguarded.
+    expect(after.name).toBe("Negocio F-043");
+    expect(after.baseCurrencyCode).toBe("CUP");
+    expect(after).not.toEqual(before);
+
+    // The STORE's OWN columns, in contrast, never moved — R18's whole point.
+    const storeRow = await prisma.store.findUnique({
+      where: { id: store.id },
+      select: { zoneCode: true },
+    });
+    expect(storeRow?.zoneCode).toBeNull();
   });
 });

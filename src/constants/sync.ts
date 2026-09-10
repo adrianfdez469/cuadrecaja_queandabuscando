@@ -78,17 +78,22 @@ export const BUSINESS_DISPLAY_CURRENCIES_INVALID = "BUSINESS_DISPLAY_CURRENCIES_
 export const BUSINESS_DELETE_NOT_SUPPORTED = "BUSINESS_DELETE_NOT_SUPPORTED";
 
 /**
- * F-041 R17: a `ZONE_TARIFF` (or a `STORE.zoneCode`'s schema-level check —
- * see `STORE_ZONE_UNKNOWN` below for the row-level one) whose `zoneCode` is
- * not in the committed catalog (`src/features/zones/catalog.ts`). Decided in
- * the sobre's schema, against the ARTEFACT — zero database queries (I7) —
- * so it kills the whole `400 INVALID_BATCH` lote, same class of cost the ADR
- * 0028 § Consecuencias already accepted for a malformed value (I6).
+ * F-041 R17, thrown by `assertZoneKnown` in
+ * `src/features/sync/server/handlers/zoneTariff.ts` (F-043, R7 step 4) — a
+ * `ZONE_TARIFF.zoneCode` this side does not recognise, for EITHER of two
+ * causes the sobre no longer distinguishes: absent from the committed
+ * catalog (`src/features/zones/catalog.ts`), or without the DPA's shape
+ * (`architecture.md` § AD2 — no `ZONE_CODE_MALFORMED`, one code covers both).
+ * Decided in the HANDLER, against the ARTEFACT — zero database queries (I7)
+ * — so it fails only THAT event, in `207 failed[]`, and the other events of
+ * the same lote apply. Before F-043 this was decided in the sobre's schema
+ * and killed the whole `400 INVALID_BATCH` lote (I6); that is exactly what
+ * this feature closes.
  *
- * Class for cuadrecaja's outbox (S-007 point 9): RETRYABLE. The event is not
- * malformed — it names a real zone the two catalogs have not converged on
- * yet — so the SAME event, unchanged, can end up applying once this side's
- * catalog artefact catches up. Not one of `QAB_OUTBOX_PERMANENT_ERROR_CODES`.
+ * Class for cuadrecaja's outbox (S-007 point 9): RETRYABLE. Also true when
+ * the cause is a malformed value — it never converges, so it burns the six
+ * attempts of THIS event and only this one, which is what the feature is
+ * for. Not one of `QAB_OUTBOX_PERMANENT_ERROR_CODES`.
  */
 export const ZONE_TARIFF_ZONE_UNKNOWN = "ZONE_TARIFF_ZONE_UNKNOWN";
 
@@ -121,14 +126,20 @@ export const ZONE_TARIFF_FEE_NOT_ALLOWED = "ZONE_TARIFF_FEE_NOT_ALLOWED";
 export const ZONE_TARIFF_DELETE_NOT_SUPPORTED = "ZONE_TARIFF_DELETE_NOT_SUPPORTED";
 
 /**
- * F-041 R18: a `STORE` payload's `zoneCode` is not in the committed catalog.
- * Thrown in `src/features/sync/server/handlers/store.ts`, BEFORE each of the
- * three writes it guards (same pattern as `STORE_OPENING_HOURS_INVALID`):
- * the whole event fails, none of its other fields apply, and
- * `sourceUpdatedAt` does not advance.
+ * F-041 R18, F-043 (AD4): a `STORE` payload's `zoneCode` is not in the
+ * committed catalog, OR does not have the DPA's shape — since F-043 the
+ * sobre's schema no longer rejects a malformed value either, so both causes
+ * land in this same guard and give the same byte-for-byte answer. Thrown in
+ * `src/features/sync/server/handlers/store.ts`, BEFORE each of the three
+ * writes it guards (same pattern as `STORE_OPENING_HOURS_INVALID`): the
+ * event fails, none of the STORE's other fields apply, and
+ * `sourceUpdatedAt` does not advance. It does NOT promise that nothing at
+ * all was written for this request — `handleStore` updates
+ * `Business.name`/`baseCurrencyCode` before any guard runs (I4, `store.ts:74-78`,
+ * not fixed by this feature); those two columns can already be applied.
  *
  * Class for cuadrecaja's outbox (S-007 point 9): RETRYABLE, same reasoning
- * as `ZONE_TARIFF_ZONE_UNKNOWN` above — the code names a real zone the two
- * catalogs have not converged on yet, not a malformed value.
+ * as `ZONE_TARIFF_ZONE_UNKNOWN` above — also true when the cause is a
+ * malformed value, not just an unconverged catalog.
  */
 export const STORE_ZONE_UNKNOWN = "STORE_ZONE_UNKNOWN";

@@ -353,16 +353,20 @@ function assertDeliveryConsistent(config: StoreConfigWrite, fallback: DeliveryCo
 }
 
 /**
- * F-041 R18: `zoneCode` validated against the catalog, in the HANDLER —
- * never in `storePayloadSchema` (I6: a `400` of the whole lote over one
- * store's zone would take the other 499 events down with it). Does nothing
- * when `config` does not touch `zoneCode` at all — same doctrine as
- * `assertDeliveryConsistent`: a row already carrying a stale zone must not
- * fail an unrelated event. `null` (an explicit clear, R29) is never checked
- * against the catalog — there is nothing to look up. Called HERE, right
- * before each of the three writes it guards, never once at the top
- * (architecture.md § Flujo de datos): doing so would turn the SKIPPED/STALE
- * returns above into failures the spec requires stay exactly what they are.
+ * F-041 R18, F-043 (architecture.md § AD4): `zoneCode` validated against the
+ * catalog, in the HANDLER. The sobre (`storePayloadSchema`) no longer opines
+ * on ANY shape of this field — since F-043 it is plain `z.string().nullish()`
+ * — so this guard is the ONLY place that decides whether a value is good,
+ * covering both "absent from the catalog" and "does not have the DPA's
+ * shape" with the same answer (architecture.md § AD2: one code, no
+ * `ZONE_CODE_MALFORMED`). Does nothing when `config` does not touch
+ * `zoneCode` at all — same doctrine as `assertDeliveryConsistent`: a row
+ * already carrying a stale zone must not fail an unrelated event. `null` (an
+ * explicit clear, R29) is never checked against the catalog — there is
+ * nothing to look up. Called HERE, right before each of the three writes it
+ * guards, never once at the top (architecture.md § Flujo de datos): doing so
+ * would turn the SKIPPED/STALE returns above into failures the spec requires
+ * stay exactly what they are.
  */
 function assertZoneKnown(config: StoreConfigWrite): void {
   if (config.zoneCode == null) return;

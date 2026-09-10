@@ -389,14 +389,19 @@ describe("zoneTariffPayloadSchema / syncEventSchema — the seventh branch (C3, 
     ).toBe(true);
   });
 
-  it("a zoneCode with the wrong shape (no dot pattern match) is rejected regardless of rule", () => {
+  it("F-043 (R1/R5): a zoneCode with the wrong shape (no dot pattern match) is ACCEPTED at the schema layer — the VALUE is the handler's call, never the sobre's (avoids the 400 that took 499 unrelated events down with it)", () => {
     expect(
       zoneTariffPayloadSchema.safeParse(zoneTariffBasePayload({ zoneCode: "not-a-code" })).success,
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it("a zoneCode not in the published catalog is rejected — checked against the artefact, not the base (I7)", () => {
+  it("F-043 (R1/R5): a zoneCode not in the published catalog is ALSO accepted here — checked against the artefact in the handler's assertZoneKnown, not the sobre (I7)", () => {
     const result = zoneTariffPayloadSchema.safeParse(zoneTariffBasePayload({ zoneCode: "99.99" }));
+    expect(result.success).toBe(true);
+  });
+
+  it("F-043 (R5, lectura (a) del humano): a NUMERIC zoneCode is still rejected — the TYPE stays the sobre's call, this is the only door left open to a 400 for this field", () => {
+    const result = zoneTariffPayloadSchema.safeParse(zoneTariffBasePayload({ zoneCode: 2101 }));
     expect(result.success).toBe(false);
   });
 

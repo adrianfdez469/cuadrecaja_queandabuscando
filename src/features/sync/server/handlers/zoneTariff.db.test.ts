@@ -397,11 +397,11 @@ describe("ZONE_TARIFF against real Postgres, through the real POST (paso 16)", (
     expect(await readTariffRow(store.id, "21.01")).toEqual(beforeRow);
   });
 
-  it("C6 (E9): a zoneCode not in the published catalog is 400 with its own code, kills the WHOLE batch, and writes NOTHING (I6, I7 — checked against the artefact, zero database queries)", async () => {
+  it("C1 (F-043, supersedes F-041's criterion 6): a ZONE_TARIFF whose zoneCode is not in the published catalog fails ONLY that event — 207, ZONE_TARIFF_ZONE_UNKNOWN in failed[], the PRODUCT next to it still applies, and it writes NOTHING for the tariff", async () => {
     const store = await session.createStore();
-    const zoneEventId = `${session.token}-c6-zone`;
-    const productEventId = `${session.token}-c6-product`;
-    const storeProductId = `${session.token}-c6-sp`;
+    const zoneEventId = `${session.token}-c1-zone`;
+    const productEventId = `${session.token}-c1-product`;
+    const storeProductId = `${session.token}-c1-sp`;
 
     const { status, body } = await post(session, [
       zoneTariffEvent({
@@ -421,23 +421,132 @@ describe("ZONE_TARIFF against real Postgres, through the real POST (paso 16)", (
       }),
     ]);
 
-    expect(status).toBe(400);
-    expect(body.error).toBe("INVALID_BATCH");
-    expect(
-      (body.issues as { message?: string }[] | undefined)?.some(
-        (issue) => issue.message === ZONE_TARIFF_ZONE_UNKNOWN,
-      ),
-    ).toBe(true);
+    expect(status).toBe(207);
+    expect(body.failed).toEqual([{ id: zoneEventId, error: ZONE_TARIFF_ZONE_UNKNOWN }]);
+    expect(body.ok).toContain(productEventId);
+    expect(body.ok).not.toContain(zoneEventId);
 
-    const written = await prisma.syncEvent.count({
+    const events = await prisma.syncEvent.findMany({
       where: { eventId: { in: [zoneEventId, productEventId] } },
+      select: { eventId: true, status: true },
     });
-    expect(written).toBe(0);
+    expect(events).toHaveLength(2);
+    expect(events.find((e) => e.eventId === zoneEventId)?.status).toBe("FAILED");
+    expect(events.find((e) => e.eventId === productEventId)?.status).toBe("PROCESSED");
+
     expect(await countTariffRows(store.id)).toBe(0);
     const productWritten = await prisma.storeProduct.count({
       where: { storeId: store.id, externalId: storeProductId },
     });
-    expect(productWritten).toBe(0);
+    expect(productWritten).toBe(1);
+  });
+
+  it.each(["2101", "", " 21.01"].map((zoneCode, i) => ({ zoneCode, i })))(
+    "C2 (E2): a malformed zoneCode ($zoneCode) fails ONLY that event with ZONE_TARIFF_ZONE_UNKNOWN — never 400 — the other two events of the same lote still apply",
+    async ({ zoneCode, i }) => {
+      const store = await session.createStore();
+      const zoneEventId = `${session.token}-c2-malformed-${i}`;
+      const productEventId = `${session.token}-c2-product-${i}`;
+      const goodZoneEventId = `${session.token}-c2-good-${i}`;
+      const storeProductId = `${session.token}-c2-sp-${i}`;
+
+      const { status, body } = await post(session, [
+        zoneTariffEvent({
+          eventId: zoneEventId,
+          storeExternalId: store.externalId,
+          zoneCode,
+          rule: "FEE",
+          deliveryFee: 300,
+          updatedAt: "2026-09-08T10:00:00.000Z",
+        }),
+        productEvent({
+          eventId: productEventId,
+          session,
+          storeExternalId: store.externalId,
+          storeProductId,
+          occurredAt: "2026-09-08T10:00:01.000Z",
+        }),
+        zoneTariffEvent({
+          eventId: goodZoneEventId,
+          storeExternalId: store.externalId,
+          zoneCode: "21.01",
+          rule: "FEE",
+          deliveryFee: 400,
+          updatedAt: "2026-09-08T10:00:02.000Z",
+        }),
+      ]);
+
+      expect(status).not.toBe(400);
+      expect(status).toBe(207);
+      expect(body.failed).toEqual([{ id: zoneEventId, error: ZONE_TARIFF_ZONE_UNKNOWN }]);
+      expect(body.ok).toEqual(expect.arrayContaining([productEventId, goodZoneEventId]));
+      expect(await countTariffRows(store.id)).toBe(1);
+      expect(await readTariffRow(store.id, "21.01")).not.toBeNull();
+    },
+  );
+
+  it("C7 (E8): a DELETE with an INVALID zoneCode still responds ZONE_TARIFF_DELETE_NOT_SUPPORTED — never ZONE_TARIFF_ZONE_UNKNOWN, the format check is never reached", async () => {
+    const eventId = `${session.token}-c7-delete-invalid`;
+
+    const { body } = await post(session, [
+      zoneTariffEvent({
+        eventId,
+        storeExternalId: `${session.token}-c7-delete-store`, // never queried — R20 rejects before any lookup
+        zoneCode: "2101", // malformed, on top of being a DELETE
+        rule: "NOT_SERVED",
+        updatedAt: "2026-09-08T10:00:00.000Z",
+        operation: "DELETE",
+      }),
+    ]);
+
+    expect(body.results[0]).toEqual({
+      eventId,
+      status: "failed",
+      error: ZONE_TARIFF_DELETE_NOT_SUPPORTED,
+    });
+  });
+
+  it("C7 (E9): a ZONE_TARIFF with an INVALID zoneCode on a storeId that does not exist here is skipped_not_published in ok — never failed[]", async () => {
+    const eventId = `${session.token}-c7-skipped-invalid`;
+
+    const { body } = await post(session, [
+      zoneTariffEvent({
+        eventId,
+        storeExternalId: `${session.token}-c7-nonexistent-store`,
+        zoneCode: "99.99",
+        rule: "FEE",
+        deliveryFee: 300,
+        updatedAt: "2026-09-08T10:00:00.000Z",
+      }),
+    ]);
+
+    expect(body.results[0]).toEqual({ eventId, status: "skipped_not_published" });
+    expect(body.ok).toContain(eventId);
+  });
+
+  it("C7 (E10): a ZONE_TARIFF with an INVALID zoneCode on ANOTHER business's store responds byte for byte like a nonexistent one — skipped_not_published in ok, zero rows written for that business", async () => {
+    const otherSession = await createFixtureSession();
+    try {
+      const otherStore = await otherSession.createStore();
+      const eventId = `${session.token}-c7-foreign`;
+
+      const { body } = await post(session, [
+        zoneTariffEvent({
+          eventId,
+          storeExternalId: otherStore.externalId,
+          zoneCode: "99.99",
+          rule: "FEE",
+          deliveryFee: 300,
+          updatedAt: "2026-09-08T10:00:00.000Z",
+        }),
+      ]);
+
+      expect(body.results[0]).toEqual({ eventId, status: "skipped_not_published" });
+      expect(body.ok).toContain(eventId);
+      expect(await countTariffRows(otherStore.id)).toBe(0);
+    } finally {
+      await otherSession.cleanup();
+    }
   });
 
   it("C3, the Zod discriminator quirk: a malformed `rule` is STILL 400 INVALID_BATCH, even though the issue Zod produces is its own discriminator message, not ours", async () => {
@@ -783,6 +892,96 @@ describe("ZONE_TARIFF against real Postgres, through the real POST (paso 16)", (
       });
       const row = await readStore(store.id);
       expect(row.zoneCode).toBe("21.01");
+    });
+
+    it('F-043 (C3, E3/E4): a malformed zoneCode (no dot, "2101") fails THAT event exactly like an unknown one — same error, never 400, none of its other fields apply', async () => {
+      const store = await session.createStore();
+
+      const { status, body } = await post(session, [
+        storeEvent({
+          eventId: `${session.token}-c9-malformed`,
+          session,
+          storeExternalId: store.externalId,
+          updatedAt: "2026-09-08T10:00:00.000Z",
+          zoneCode: "2101",
+          phone: "+5355550000",
+        }),
+      ]);
+
+      expect(status).not.toBe(400);
+      expect(status).toBe(207);
+      expect(body.results[0]).toEqual({
+        eventId: `${session.token}-c9-malformed`,
+        status: "failed",
+        error: "STORE_ZONE_UNKNOWN",
+      });
+
+      const row = await readStore(store.id);
+      expect(row.zoneCode).toBeNull();
+      expect(row.phone).toBeNull(); // never applied — same guard as C9's unknown case
+    });
+
+    it("F-043 (C6): zoneCode: null clears an existing column — processed, never checked against the catalog (R9)", async () => {
+      const store = await session.createStore();
+      await post(session, [
+        storeEvent({
+          eventId: `${session.token}-c6-null-seed`,
+          session,
+          storeExternalId: store.externalId,
+          updatedAt: "2026-09-08T10:00:00.000Z",
+          zoneCode: "21.01",
+        }),
+      ]);
+      expect((await readStore(store.id)).zoneCode).toBe("21.01");
+
+      const { body } = await post(session, [
+        storeEvent({
+          eventId: `${session.token}-c6-null`,
+          session,
+          storeExternalId: store.externalId,
+          updatedAt: "2026-09-08T11:00:00.000Z",
+          zoneCode: null,
+        }),
+      ]);
+
+      expect(body.results[0]).toEqual({
+        eventId: `${session.token}-c6-null`,
+        status: "processed",
+      });
+      expect((await readStore(store.id)).zoneCode).toBeNull();
+    });
+
+    it("F-043 (C6): a STORE event WITHOUT the zoneCode key leaves the column intact — 'omitir no es apagar' (R29 of F-041, unchanged)", async () => {
+      const store = await session.createStore();
+      await post(session, [
+        storeEvent({
+          eventId: `${session.token}-c6-absent-seed`,
+          session,
+          storeExternalId: store.externalId,
+          updatedAt: "2026-09-08T10:00:00.000Z",
+          zoneCode: "21.01",
+        }),
+      ]);
+      expect((await readStore(store.id)).zoneCode).toBe("21.01");
+
+      const { body } = await post(session, [
+        storeEvent({
+          eventId: `${session.token}-c6-absent`,
+          session,
+          storeExternalId: store.externalId,
+          updatedAt: "2026-09-08T11:00:00.000Z",
+          phone: "+5355551111",
+          // zoneCode deliberately not passed: storeEvent() only spreads the
+          // key when its opt is !== undefined, so the payload omits it
+          // entirely — this is "absent", not "null".
+        }),
+      ]);
+
+      expect(body.results[0]).toEqual({
+        eventId: `${session.token}-c6-absent`,
+        status: "processed",
+      });
+      expect((await readStore(store.id)).zoneCode).toBe("21.01");
     });
   });
 

@@ -1,14 +1,27 @@
 import { prisma } from "@/lib/prisma";
 import { canonicalSlug } from "@/lib/publicSlug";
-import { isRetiredZone } from "@/features/zones/catalog";
-import { ZONE_TARIFF_DELETE_NOT_SUPPORTED } from "@/constants/sync";
+import { isKnownZoneCode, isRetiredZone } from "@/features/zones/catalog";
+import { ZONE_TARIFF_DELETE_NOT_SUPPORTED, ZONE_TARIFF_ZONE_UNKNOWN } from "@/constants/sync";
 import type { ZoneTariffPayload } from "../../schemas";
 import { SKIPPED, STALE, SyncEventFailure, type HandlerOutcome } from "./types";
 
 /**
+ * F-043 (architecture.md § AD1) — private, NOT exported, twin in NAME only of
+ * `assertZoneKnown` in `store.ts`: the schema guarantees `string` here
+ * (`ZONE_TARIFF.zoneCode` is obligatory, R5), so there is no `null`/`undefined`
+ * case to tolerate, unlike `STORE`'s `config.zoneCode == null` (R9). A helper
+ * shared between the two handlers is deliberately NOT extracted — the common
+ * part is one line and the difference IS the semantics (architecture.md § AD1
+ * punto 1-2).
+ */
+function assertZoneKnown(zoneCode: string): void {
+  if (!isKnownZoneCode(zoneCode)) throw new SyncEventFailure(ZONE_TARIFF_ZONE_UNKNOWN);
+}
+
+/**
  * F-041 — the `ZONE_TARIFF` handler (architecture.md § Flujo A).
  *
- * Four steps, in this order and no other, each with its reason written:
+ * Five steps, in this order and no other, each with its reason written:
  *
  *   1. `operation === "DELETE"` -> `ZONE_TARIFF_DELETE_NOT_SUPPORTED`, BEFORE
  *      any query and before the anti-stale guard (R20). Same order as
@@ -22,7 +35,13 @@ import { SKIPPED, STALE, SyncEventFailure, type HandlerOutcome } from "./types";
  *      in `ok`.
  *   3. The guard that REJECTS (`>=` -> `STALE`), never the ORDER form of
  *      `EXCHANGE_RATE` — this table is not append-only (R21).
- *   4. The upsert, and only THEN the canonical slug. `SKIPPED`/`STALE`/a
+ *   4. **F-043 (spec.md R7 step 4)**: `assertZoneKnown` -> `ZONE_TARIFF_ZONE_UNKNOWN`
+ *      in `failed[]` of THIS event, right before the write it protects — a
+ *      `zoneCode` this side does not recognise (absent from the catalog OR
+ *      without the DPA's shape; the sobre no longer distinguishes the two,
+ *      architecture.md § AD1/AD2) must never fail the other 499 events of
+ *      the same lote.
+ *   5. The upsert, and only THEN the canonical slug. `SKIPPED`/`STALE`/a
  *      thrown failure never call `canonicalSlug` — it does not invalidate
  *      anything on those paths (R25) and it THROWS for a branch of a
  *      multi-branch brand with no `slug` of its own
@@ -85,7 +104,12 @@ export async function handleZoneTariff(
     return STALE;
   }
 
-  // 4. The upsert. `rule === "FEE"` is the only branch with a `deliveryFee`
+  // 4. F-043 R7 step 4 — right before the write it protects, same spot as
+  //    `assertZoneKnown` in `handleStore`. What it evades: a foreign-key
+  //    violation against the catalog thrown raw by Prisma (caso límite 6).
+  assertZoneKnown(payload.zoneCode);
+
+  // 5. The upsert. `rule === "FEE"` is the only branch with a `deliveryFee`
   //    (the discriminated union already guarantees this in TypeScript); the
   //    other two write `null`, which is what retracts a previous FEE (R20).
   const deliveryFee = payload.rule === "FEE" ? payload.deliveryFee : null;
