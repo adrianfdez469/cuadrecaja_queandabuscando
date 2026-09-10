@@ -280,6 +280,17 @@ principio** de la línea —nunca la palabra `Error`— es lo que ya usan
 `src/features/account/server/orderLinkObserver.ts` (F-030). Ficha:
 `.agent/playbook/console-error-dispara-guardian-servidor.md`.
 
+**Un test de tiempo que falla por un milisegundo y pasa a la siguiente corrida
+no es tuyo.** `src/features/account/server/orderIdentity.test.ts` › «`timeout`:
+the lookup never resolves, so the ceiling wins the race» (F-030) compara un
+`setTimeout` con `performance.now()`, que son dos relojes distintos y bajo carga
+discrepan: `expected 599 to be greater than or equal to 600`. Vuelve a correr la
+suite antes de tocar nada. Mordió cerrando **F-045** y **F-044**, dos features
+que no ejercitan ni `account` ni pedidos, y el reflejo de «esto lo he roto yo»
+cuesta media hora de depuración sobre código ajeno al feature que tengas
+delante. Ficha:
+`.agent/playbook/settimeout-fira-antes-que-performance-now.md`.
+
 ---
 
 ## Idioma

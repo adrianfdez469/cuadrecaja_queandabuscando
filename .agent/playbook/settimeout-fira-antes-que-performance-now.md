@@ -5,8 +5,8 @@ firma: expected 599 to be greater than or equal to 600
 etapa: test
 visto_en: F-045, F-044
 creado: 2026-09-10T05:35:00Z
-actualizado: 2026-09-10T05:35:00Z
-promovido_a_agents: no
+actualizado: 2026-09-10T13:45:00Z
+promovido_a_agents: sí
 arreglo: no es tuyo ni del feature que estés cerrando — vuelve a correr la suite; el aserto de `orderIdentity.test.ts` compara un `setTimeout` con `performance.now()`, que son dos relojes distintos y pueden discrepar un milisegundo bajo carga
 ---
 

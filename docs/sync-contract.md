@@ -1,20 +1,21 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 13.4** · 10 de septiembre de 2026 — **BORRADOR, sin publicar.** Sale
-hacia cuadrecaja para revisión mientras F-041 se termina de implementar y de
-verificar; lo que este documento describe de la v13 (`ZONE_BASED`,
-`ZONE_TARIFF`, `zoneCode`, el vector de precedencia) **no se emite todavía** —
-sigue en pie el aviso de más abajo hasta que se retire explícitamente, igual
-que se hizo con `BUSINESS` entre la v11 y la v12.2.
+**Versión 13.5** · 10 de septiembre de 2026 — **PUBLICADA.** El borrador de la
+v13 salió hacia cuadrecaja para revisión, lo revisaron sobre la **v13.4** y
+dieron su visto bueno; esta revisión lo publica y **retira el aviso de más
+abajo**: lo que este documento describe de la v13 (`ZONE_BASED`, `ZONE_TARIFF`,
+`zoneCode`, el vector de precedencia) **ya se puede emitir**, igual que se hizo
+con `BUSINESS` entre la v11 y la v12.2.
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
-existe y está verificado contra los casos de abajo, **con una excepción marcada
-a propósito**: lo que la v13 introduce (§ «Cambios respecto a la v12.2», de
-aquí abajo) está acordado y publicado **antes** de estar implementado en
-queandabuscando, para que cuadrecaja sepa a qué atenerse mientras tanto — el
-mismo camino que ya recorrió la v11 con `BUSINESS`. La entidad `BUSINESS` y sus
-dos códigos de error, que la v12 publicó con el mismo aviso, **ya están en pie**
-(F-038): podéis emitirla desde ahora. Y mientras tanto siguen
+existe y está verificado contra los casos de abajo, y desde la v13.5 **sin
+ninguna excepción**: lo que la v13 introduce (§ «Cambios respecto a la v12.2»,
+de aquí abajo) se publicó **antes** de estar implementado en queandabuscando,
+para que cuadrecaja supiera a qué atenerse mientras tanto —el mismo camino que
+ya recorrió la v11 con `BUSINESS`—, y **ya está en pie**: podéis emitir
+`ZONE_BASED` y `ZONE_TARIFF` desde ahora. La entidad `BUSINESS` y sus dos
+códigos de error, que la v12 publicó con el mismo aviso, también (F-038). Y
+siguen
 valiendo las reglas de la v10.1: una tasa nueva tarda hasta una hora en verse en
 el catálogo público, la vigente es la última que **llegó**, y un evento que
 dependía de otro que falló se aplica igual. Se avisa cuando cada una de las tres
@@ -47,6 +48,23 @@ Una corrección de tipografía o de un enlace roto es una menor: cuesta un dígi
 y evita la pregunta «¿es este el documento que leí?».
 
 ## Cambios respecto a la v12.2
+
+**v13.5 (10 de septiembre de 2026) — la v13 se publica.** cuadrecaja revisó el
+borrador sobre la **v13.4** y dio su visto bueno, así que este documento deja
+de ser un borrador y **el aviso que reservaba `ZONE_BASED` y `ZONE_TARIFF` se
+retira**: ya se pueden emitir. No cambia ni una regla, ni un campo, ni un
+código de error respecto a la v13.4 — mueve un dígito **menor** porque toda
+edición de este fichero mueve la versión (§ «Versionado de este documento»), y
+lo único que cambia es el estado de publicación y los dos avisos que dejaron de
+ser ciertos al quedar construido el lado receptor: la cabecera y el «no
+emitáis… hasta el aviso» de esta misma sección. Lo que sostiene la
+publicación, feature a feature: **F-041** (`ZONE_BASED`, la entidad
+`ZONE_TARIFF`, el catálogo de 184 zonas y la resolución por precedencia),
+**F-042** (el comprador elige su zona en el checkout y el envío se cobra por
+ella), **F-043** (un `zoneCode` desconocido falla solo su evento y no el
+lote), **F-044** (el tarifario entra en la reconciliación con su propio hash
+por sucursal) y **F-045** (un `STORE` que no se aplica deja de escribir el
+nombre y la moneda base del negocio).
 
 **v13.4 (F-044, 10 de septiembre de 2026).** ⑤ Reconciliación gana el hash del
 tarifario de envío: la respuesta de
@@ -116,12 +134,15 @@ implementó la v12.2 y no emite `ZONE_BASED` ni `ZONE_TARIFF`, y quien lee solo
 nada. Las seis entidades anteriores no cambian de forma ni de significado. Es
 la respuesta a **S-007**, cerrada de diseño con vuestro arnés el 2026-09-06.
 
-**No emitáis `ZONE_TARIFF` ni `deliveryFeeMode: "ZONE_BASED"` hasta el
-aviso.** Hasta que el lado receptor esté en pie, `entity` no admite
-`ZONE_TARIFF` y un evento así responde `400 INVALID_BATCH`, llevándose el lote
-entero por delante — el mismo aviso que la v12 llevó para `BUSINESS` y que la
-v12.2 retiró cuando F-038 quedó construido. Se avisará aquí en cuanto
-`bash .agent/verify.sh F-041 --full` esté en verde.
+**El aviso se retira aquí: ya podéis emitir `ZONE_TARIFF` y
+`deliveryFeeMode: "ZONE_BASED"`.** Donde esta sección decía «no lo emitáis
+hasta el aviso» —porque `entity` no admitía `ZONE_TARIFF` y un evento así
+respondía `400 INVALID_BATCH` llevándose el lote entero por delante— el lado
+receptor **ya está en pie**: `entity` admite `ZONE_TARIFF`
+(`src/features/sync/schemas.ts`) y `bash .agent/verify.sh F-041 --full` cerró
+en verde, que era exactamente la condición que esta sección se puso. Es el
+mismo camino que la v12 recorrió con `BUSINESS` y que la v12.2 cerró cuando
+F-038 quedó construido.
 
 **F-042 ya está construido: el mapa y el selector de zona existen.** La
 advertencia que esta sección llevaba —«entre la v13 y F-042 una tienda
@@ -1003,11 +1024,11 @@ Los dos lados comparten el mismo catálogo de 184 zonas —16 divisiones de
 primer nivel y 168 municipios— por estos tres datos, que tienen que coincidir
 byte a byte:
 
-| Dato                 | Valor                                                                                                 |
-| -------------------- | ----------------------------------------------------------------------------------------------------- |
-| Versión del catálogo | `1.0.0`                                                                                               |
-| `sha256` del fichero | `9bb89dd3564b0b202f975160f98be449efdc3c2b3d8594df6a7ec8009853b019`                                    |
-| Ruta del artefacto   | `src/features/zones/zone-index.json` en el repositorio de queandabuscando (adjunto con este borrador) |
+| Dato                 | Valor                                                                                                |
+| -------------------- | ---------------------------------------------------------------------------------------------------- |
+| Versión del catálogo | `1.0.0`                                                                                              |
+| `sha256` del fichero | `9bb89dd3564b0b202f975160f98be449efdc3c2b3d8594df6a7ec8009853b019`                                   |
+| Ruta del artefacto   | `src/features/zones/zone-index.json` en el repositorio de queandabuscando (adjunto con esta versión) |
 
 Cualquier cambio de cualquier fila mueve la versión **menor** (`1.0.0` →
 `1.1.0`); una edición distinta del Codificador de la DPA de ONEI —los códigos
@@ -3669,15 +3690,17 @@ en ningún lado registre un error.
 
 ## Cambios requeridos en cuadrecaja
 
-### De la v13 — no emitáis todavía, y qué hace falta cuando se avise
+### De la v13 — ya se puede emitir, y qué hace falta de vuestro lado
 
-**No emitáis `ZONE_TARIFF` ni `deliveryFeeMode: "ZONE_BASED"` hasta que este
-documento diga explícitamente que el lado receptor está en pie.** Mientras
-tanto, `entity` no admite `ZONE_TARIFF` y ese evento respondería
-`400 INVALID_BATCH`, llevándose el lote entero por delante — el mismo riesgo
-que `BUSINESS` tuvo entre la v11 y la v12.2.
+**El aviso está retirado desde la v13.5: `ZONE_TARIFF` y
+`deliveryFeeMode: "ZONE_BASED"` ya se pueden emitir.** Donde este documento
+decía «no lo emitáis hasta que diga explícitamente que el lado receptor está en
+pie» —porque `entity` no admitía `ZONE_TARIFF` y ese evento respondía
+`400 INVALID_BATCH` llevándose el lote entero por delante, el mismo riesgo que
+`BUSINESS` tuvo entre la v11 y la v12.2— ese momento ya llegó: lo dice la
+cabecera y lo dice § «Cambios respecto a la v12.2», entrada de la v13.5.
 
-Cuando se avise, lo que hace falta de vuestro lado:
+Esto es lo que hace falta de vuestro lado para emitirlo:
 
 1. **Una columna nueva en `Tienda`** (el nombre es propuesta vuestra, lo que
    ata el contrato es el campo del cable: `zoneCode`), opcional, con la misma
@@ -3692,8 +3715,8 @@ Cuando se avise, lo que hace falta de vuestro lado:
    `payload` de `STORE`.
 4. **El catálogo de 184 zonas**, para que vuestro selector ofrezca los mismos
    códigos que este lado valida: la ruta y el sha256 están en § «La versión
-   del catálogo geográfico», arriba, y los bytes viajan adjuntos con este
-   borrador.
+   del catálogo geográfico», arriba, y los bytes viajan adjuntos con esta
+   versión.
 5. **La función de precedencia**, para que el encargado vea, antes de guardar,
    qué va a cobrar realmente en cada municipio — municipio → su provincia →
    no servida, con las tres guardas de importe. El vector de trece casos de
