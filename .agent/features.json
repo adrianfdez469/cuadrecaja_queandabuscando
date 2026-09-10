@@ -897,7 +897,7 @@
         "docs/sync-contract.md sube de version con el hash del tarifario, coordinada con cuadrecaja antes de publicarla.",
         "bash .agent/verify.sh F-044 --full termina con codigo 0."
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Entrada anadida por indicacion expresa del humano el 2026-09-09, opcion 'feature nuevo, con hash', tras el veredicto de cuadrecaja sobre el borrador de la v13 (su punto 2 de nueve, el segundo mas grave para ellos). EL ARGUMENTO, QUE ES SUYO Y ES BUENO: el hash del § ⑤ cubre productos —precio, moneda, disponibilidad— y el tarifario queda fuera, y el tarifario es LO UNICO DEL CABLE QUE ES UN PRECIO que no tiene espejo. Si un ZONE_TARIFF se abandona tras sus seis intentos de outbox, su lado cree que lo mando, el encargado ve su tabla, y aqui se cobra otro importe PARA SIEMPRE Y SIN RUIDO. En productos eso es un catalogo viejo; aqui es dinero. SE DESCARTO la alternativa que ellos tambien ofrecian —un GET de relectura del tarifario aplicado, con el precedente de la consulta de disponibilidad— porque solo ve la divergencia quien se acuerde de mirar, mientras que el hash la detecta sin que nadie pregunte y reusa un mecanismo que las dos partes ya tienen escrito y cruzado. OJO AL CASO DE CERO FILAS: string_agg sobre cero filas da null y el coalesce de fuera es lo que lo salva, que es el fallo que ya esta fichado para el hash de productos."
     },
     {
