@@ -120,7 +120,8 @@ fl: 16, mu: 168`, una sola fila en `ZoneCatalogVersion`.
 - `bash .agent/verify.sh F-041 --full` → **PASA** (harness, typecheck, lint,
   format, test, prisma, build, theme, bundle).
 - `npm run check:harness` → verde tras corregir una ruta abreviada en
-  `.agent/progress/F-041.md` (`handlers/store.ts` → la ruta completa;
+  `.agent/progress/F-041.md` (decía handlers/store.ts, a secas, y pasó a
+  `src/features/sync/server/handlers/store.ts`;
   ficha `check-harness-falso-positivo-ruta-abreviada`).
 
 ## Deuda dejada
