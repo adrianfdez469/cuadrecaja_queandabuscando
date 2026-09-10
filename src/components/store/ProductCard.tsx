@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AVAILABILITY_LABEL, AVAILABILITY_TONE, shouldShowBadge } from "@/lib/availability";
-import { resolvePrice, type ResolvedPrice } from "@/lib/pricing";
+import { tryResolvePrice } from "@/lib/pricing";
 import { formatMoney } from "@/lib/money";
 import { priceEquivalents } from "@/lib/priceEquivalents";
 import { EQUIVALENT_CURRENCY_ATTR } from "@/constants/currency";
@@ -42,7 +42,12 @@ export function ProductCard({
   /** F-023 design.md § 1: the page's own LCP candidate (index 0 only). */
   priority?: boolean;
 }) {
-  const resolved = safeResolve(product, displayCurrency, rates);
+  const resolved = tryResolvePrice(product, {
+    targetCurrency: displayCurrency,
+    rates,
+    baseCurrency: displayCurrency,
+    promotions: product.promotions,
+  });
   // R8: derived from the CHARGED amount (resolved.price), never
   // `beforeConversion` — two products showing the same principal can never
   // show different equivalents over a stray cent.
@@ -125,26 +130,4 @@ export function ProductCard({
       </Link>
     </Card>
   );
-}
-
-/**
- * A product priced in a currency with no rate yet must not take the page down.
- * Showing "Consultar" is a worse experience than a price, and a much better one
- * than a 500.
- */
-function safeResolve(
-  product: CatalogProduct,
-  displayCurrency: string,
-  rates: Record<string, string>,
-): ResolvedPrice | null {
-  try {
-    return resolvePrice(product, {
-      targetCurrency: displayCurrency,
-      rates,
-      baseCurrency: displayCurrency,
-      promotions: product.promotions,
-    });
-  } catch {
-    return null;
-  }
 }

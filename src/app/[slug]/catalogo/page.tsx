@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   getStoreCatalog,
+  getStoreCatalogPricing,
   getStoreCategories,
   getStoreRates,
   requireStore,
@@ -16,6 +17,7 @@ import {
   parseCatalogFilters,
   type CatalogFilterContext,
 } from "@/features/catalog/catalogFilters";
+import { UNPRICED_CATALOG_CLOSURE } from "@/features/catalog/unpricedCatalog";
 import { CATALOG_ROUTE_SEGMENT } from "@/constants/catalog";
 import { publicEnv } from "@/lib/publicEnv";
 import { Container } from "@/components/ui/Container";
@@ -146,13 +148,41 @@ export default async function StoreCatalogPage({
     );
   }
 
-  const [products, rates, categories] = await Promise.all([
-    getStoreCatalog(resolution),
-    getStoreRates(resolution),
+  const [pricing, categories] = await Promise.all([
+    getStoreCatalogPricing(resolution, store.baseCurrencyCode),
     getStoreCategories(resolution),
   ]);
+  const products = pricing.catalog;
+  const rates = pricing.rates;
 
   const trail = filterTrail(branchTrailStore(resolution, store));
+
+  // F-040 (architecture.md AD7): la guarda va DESPUÉS de la rama de tienda
+  // cerrada de arriba, que no se toca — y antes del mensaje de catálogo
+  // vacío: R3 hace que las dos condiciones no puedan darse a la vez.
+  if (pricing.unpriced) {
+    return (
+      <>
+        <Container className="pt-4 pb-8">
+          <StoreTrail trail={trail} />
+          <StoreClosedNotice
+            storeName={store.name}
+            {...UNPRICED_CATALOG_CLOSURE}
+            whatsapp={store.whatsapp}
+            phone={store.phone}
+            address={store.address}
+            extraNote="Mientras tanto no se puede filtrar ni ordenar el catálogo."
+          />
+        </Container>
+        <BranchBar
+          branchName={store.name}
+          canonicalSlug={store.canonicalSlug}
+          branchCount={resolution.branchCount}
+          isOpen={false}
+        />
+      </>
+    );
+  }
 
   // E17: sin panel, mismo mensaje que /[slug], palabra por palabra.
   if (products.length === 0) {

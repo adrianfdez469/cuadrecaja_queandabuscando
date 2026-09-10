@@ -120,6 +120,25 @@ export function resolvePrice(
 }
 
 /**
+ * `resolvePrice` or `null` when there is no price to resolve — missing rate,
+ * a non-positive rate, or a non-numeric amount. THE definition of "this
+ * product has no price" that the storefront and F-040's condition share
+ * (architecture.md AD6, R1): every caller that used to wrap `resolvePrice`
+ * in its own `try/catch` now calls this instead, so "the same call" stops
+ * being a convention four copies have to remember and becomes the type.
+ */
+export function tryResolvePrice(
+  product: PriceFields,
+  options: Parameters<typeof resolvePrice>[1],
+): ResolvedPrice | null {
+  try {
+    return resolvePrice(product, options);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Effective price expressed in the currency the shopper is browsing in.
  * Products in a single store may be priced in different currencies, so a
  * comparable display price always goes through this. Implemented on

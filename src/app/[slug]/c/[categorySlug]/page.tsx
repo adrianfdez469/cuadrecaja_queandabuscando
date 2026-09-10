@@ -3,13 +3,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   getPublishedBranchesForParams,
+  getStoreCatalogPricing,
   getStoreCategories,
   getStoreCategoryView,
-  getStoreRates,
   requireStore,
 } from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
 import { branchTrailStore, catalogTrail, categoryTrail } from "@/features/storefront/trail";
+import { UNPRICED_CATALOG_CLOSURE } from "@/features/catalog/unpricedCatalog";
 import { catalogEntryHref, shouldOfferCatalogEntryLink } from "@/features/catalog/catalogFilters";
 import { CATALOG_ROUTE_SEGMENT } from "@/constants/catalog";
 import { publicEnv } from "@/lib/publicEnv";
@@ -53,6 +54,19 @@ export async function generateMetadata({
 
   const store = await requireStore(resolution);
   if (store.status !== "PUBLISHED") {
+    return { title: `${store.name} · No disponible ahora`, robots: { index: false } };
+  }
+
+  // F-040 (ficha `.agent/playbook/generatemetadata-notfound-independiente-del-guardado-muda.md`):
+  // `generateMetadata` tiene que replicar la MISMA guarda, en el MISMO
+  // orden, que ya usa el cuerpo de la página (AD7) — o un `categorySlug`
+  // que no existe bajo una tienda muda llama a `notFound()` AQUÍ aunque el
+  // cuerpo nunca llegue a hacerlo, y el cliente sustituye el HTML correcto
+  // por el `not-found.tsx` del segmento unos 300-500 ms después de
+  // hidratar (E6). Sin nombrar la categoría — misma forma que la rama de
+  // tienda cerrada de arriba.
+  const pricing = await getStoreCatalogPricing(resolution, store.baseCurrencyCode);
+  if (pricing.unpriced) {
     return { title: `${store.name} · No disponible ahora`, robots: { index: false } };
   }
 
@@ -114,11 +128,45 @@ export default async function StoreCategoryPage({ params }: PageProps<"/[slug]/c
     );
   }
 
-  const [view, rates, categories] = await Promise.all([
+  const [view, pricing, categories] = await Promise.all([
     getStoreCategoryView(resolution, categorySlug),
-    getStoreRates(resolution),
+    // F-040 (architecture.md AD5): un TERCER lector de la MISMA entrada
+    // cacheada de `getStoreCatalog` — el patrón que esta página ya ejecuta
+    // en producción entre `getStoreCategoryView` y `getStoreCategories`, así
+    // que no mueve el número de entradas ni de tags (E13).
+    getStoreCatalogPricing(resolution, store.baseCurrencyCode),
     getStoreCategories(resolution),
   ]);
+  const rates = pricing.rates;
+
+  // F-040 (architecture.md AD7): la guarda va DESPUÉS de la rama de tienda
+  // cerrada de arriba, y ANTES de `!view` — E6: /c/no-existe bajo una
+  // tienda muda enseña el aviso, nunca un 404, igual que /c/bebidas.
+  if (pricing.unpriced) {
+    const trail = catalogTrail(branchTrailStore(resolution, store));
+    return (
+      <>
+        <Container className="pt-4 pb-8">
+          <StoreTrail trail={trail} />
+          <StoreClosedNotice
+            storeName={store.name}
+            {...UNPRICED_CATALOG_CLOSURE}
+            whatsapp={store.whatsapp}
+            phone={store.phone}
+            address={store.address}
+            extraNote="Mientras tanto no se pueden ver los productos de esta categoría."
+          />
+        </Container>
+        <BranchBar
+          branchName={store.name}
+          canonicalSlug={store.canonicalSlug}
+          branchCount={resolution.branchCount}
+          isOpen={false}
+        />
+      </>
+    );
+  }
+
   // RD4: cero productos visibles ⇒ notFound(). No hay estado vacío para
   // esta vista — cubre a la vez el slug inexistente, el mal formado, el de
   // otra sucursal (E9) y el que se quedó sin productos (E5).

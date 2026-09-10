@@ -3,9 +3,14 @@ import { cache } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { after } from "next/server";
-import { getStoreCategories, getStoreRates, requireStore } from "@/features/catalog/server/queries";
+import {
+  getStoreCatalogPricing,
+  getStoreCategories,
+  requireStore,
+} from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
 import { branchTrailStore, searchTrail } from "@/features/storefront/trail";
+import { UNPRICED_CATALOG_CLOSURE } from "@/features/catalog/unpricedCatalog";
 import { searchStoreProducts, type StoreSearchResult } from "@/features/catalog/server/search";
 import { recordStoreSearchQuery } from "@/features/catalog/server/searchLog";
 import {
@@ -156,6 +161,38 @@ export default async function StoreSearchPage({
     );
   }
 
+  // F-040 (architecture.md AD10): la guarda va ANTES de leer `searchParams`
+  // — R11 se cumple por posición: ni `searchStoreProducts` ni
+  // `getStoreCategories` ni el `after()` que registra el término llegan a
+  // ejecutarse (E8), ya sea con o sin `q`. SP3(a): esta vista ESTRENA
+  // `getStoreCatalog`/`getStoreRates` vía la misma puerta que `/[slug]` ya
+  // paga (R9) — sin entrada de caché nueva, sin tag nuevo.
+  const pricing = await getStoreCatalogPricing(resolution, store.baseCurrencyCode);
+  if (pricing.unpriced) {
+    const trail = searchTrail(branchTrailStore(resolution, store), null);
+    return (
+      <>
+        <Container className="pt-4 pb-8">
+          <StoreTrail trail={trail} />
+          <StoreClosedNotice
+            storeName={store.name}
+            {...UNPRICED_CATALOG_CLOSURE}
+            whatsapp={store.whatsapp}
+            phone={store.phone}
+            address={store.address}
+            extraNote="Mientras tanto no se puede buscar en el catálogo."
+          />
+        </Container>
+        <BranchBar
+          branchName={store.name}
+          canonicalSlug={store.canonicalSlug}
+          branchCount={resolution.branchCount}
+          isOpen={false}
+        />
+      </>
+    );
+  }
+
   const query = await searchParams;
   const rawQ = firstParam(query.q);
   // Present in the URL, even if it normalizes to nothing — what tells E10's
@@ -209,7 +246,7 @@ export default async function StoreSearchPage({
   const filtered = hasAnyCatalogFilter(state);
   const basePath = `/${store.canonicalSlug}/buscar`;
 
-  const rates = await getStoreRates(resolution);
+  const rates = pricing.rates;
 
   let view:
     | { kind: "plain"; result: StoreSearchResult }

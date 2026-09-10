@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { AVAILABILITY_LABEL, AVAILABILITY_TONE, isOrderable } from "@/lib/availability";
-import { resolvePrice, type ResolvedPrice } from "@/lib/pricing";
+import { tryResolvePrice } from "@/lib/pricing";
 import { formatMoney } from "@/lib/money";
 import { priceEquivalents } from "@/lib/priceEquivalents";
 import { EQUIVALENT_CURRENCY_ATTR } from "@/constants/currency";
@@ -10,11 +10,12 @@ import { IMAGE_VARIANT_WIDTH_DETAIL } from "@/constants/media";
 import {
   getPublishedBranchesForParams,
   getStoreCatalog,
-  getStoreRates,
+  getStoreCatalogPricing,
   requireStore,
 } from "@/features/catalog/server/queries";
 import { requireResolution } from "@/features/storefront/server/resolve";
 import { branchTrailStore, catalogTrail, productTrail } from "@/features/storefront/trail";
+import { UNPRICED_CATALOG_CLOSURE } from "@/features/catalog/unpricedCatalog";
 import { Badge } from "@/components/ui/Badge";
 import { Container } from "@/components/ui/Container";
 import { ResponsiveImage } from "@/components/ui/ResponsiveImage";
@@ -138,10 +139,38 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
     );
   }
 
-  const [catalog, rates] = await Promise.all([
-    getStoreCatalog(resolution),
-    getStoreRates(resolution),
-  ]);
+  const pricing = await getStoreCatalogPricing(resolution, store.baseCurrencyCode);
+
+  // F-040 (architecture.md AD7): la guarda va DESPUÉS de la rama de tienda
+  // cerrada de arriba, que no se toca. E5: un productSlug que no existe bajo
+  // una tienda muda enseña el mismo aviso, nunca un 404 — mismo trato que
+  // ya recibe cualquier productSlug bajo una tienda SUSPENDED, arriba.
+  if (pricing.unpriced) {
+    const trail = catalogTrail(branchTrailStore(resolution, store));
+    return (
+      <>
+        <Container className="pt-4 pb-8">
+          <StoreTrail trail={trail} />
+          <StoreClosedNotice
+            storeName={store.name}
+            {...UNPRICED_CATALOG_CLOSURE}
+            whatsapp={store.whatsapp}
+            phone={store.phone}
+            address={store.address}
+          />
+        </Container>
+        <BranchBar
+          branchName={store.name}
+          canonicalSlug={store.canonicalSlug}
+          branchCount={resolution.branchCount}
+          isOpen={false}
+        />
+      </>
+    );
+  }
+
+  const catalog = pricing.catalog;
+  const rates = pricing.rates;
 
   const product = catalog.find((candidate) => candidate.slug === productSlug);
   if (!product) notFound();
@@ -149,17 +178,12 @@ export default async function ProductPage({ params }: PageProps<"/[slug]/p/[prod
   // R11: a price is part of what makes a product orderable, alongside
   // availability. A product whose price cannot be resolved (no exchange
   // rate) is not addable, even if it is technically in stock.
-  let resolved: ResolvedPrice | null;
-  try {
-    resolved = resolvePrice(product, {
-      targetCurrency: store.baseCurrencyCode,
-      rates,
-      baseCurrency: store.baseCurrencyCode,
-      promotions: product.promotions,
-    });
-  } catch {
-    resolved = null;
-  }
+  const resolved = tryResolvePrice(product, {
+    targetCurrency: store.baseCurrencyCode,
+    rates,
+    baseCurrency: store.baseCurrencyCode,
+    promotions: product.promotions,
+  });
   const price = resolved ? formatMoney(resolved.price) : null;
   // F-039 (architecture.md AD1, R8): the SAME compositor `ProductCard` calls,
   // over the CHARGED amount — never `resolved.beforeConversion`.

@@ -1,5 +1,9 @@
 import { Alert } from "@/components/ui/Alert";
-import { resolveStoreClosureHeadline, buildStoreClosureWhatsappUrl } from "@/lib/storeClosure";
+import {
+  resolveStoreClosureHeadline,
+  resolveStoreClosureClosingLine,
+  buildStoreClosureWhatsappUrl,
+} from "@/lib/storeClosure";
 
 /**
  * HD11: what a shopper sees at a closed store — 200, with the name, the
@@ -32,7 +36,9 @@ export function StoreClosedNotice({
     storeName,
     whatsapp: whatsapp ?? null,
     phone: phone ?? null,
+    disabledReasonCode,
   });
+  const closingLine = resolveStoreClosureClosingLine(disabledReasonCode);
 
   return (
     <div>
@@ -59,9 +65,7 @@ export function StoreClosedNotice({
 
       {extraNote && <p className="text-fg-muted mt-4">{extraNote}</p>}
 
-      <p className="text-fg-muted mt-6 text-sm">
-        Esta página se actualiza sola cuando la tienda vuelva a abrir.
-      </p>
+      <p className="text-fg-muted mt-6 text-sm">{closingLine}</p>
     </div>
   );
 }

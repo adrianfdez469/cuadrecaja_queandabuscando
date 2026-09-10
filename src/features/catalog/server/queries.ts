@@ -18,6 +18,7 @@ import {
   type CatalogFilterResult,
   type CatalogFilterState,
 } from "@/features/catalog/catalogFilters";
+import { isCatalogUnpriced } from "@/features/catalog/unpricedCatalog";
 
 /** Only what these reads actually need: a `BranchResolution` satisfies it,
  *  and so does a lighter object built once for `generateStaticParams`. */
@@ -445,6 +446,33 @@ export function getStoreRates(branch: RateRef): Promise<Record<string, string>> 
     tags: [storeTag(branch.canonicalSlug)],
   })(branch.businessId);
 }
+
+export type StoreCatalogPricing = {
+  catalog: CatalogProduct[];
+  rates: Record<string, string>;
+  /** R1-R3 (F-040): hay productos y ninguno resuelve precio. */
+  unpriced: boolean;
+};
+
+/**
+ * F-040 (architecture.md AD5): la cuarta proyección de la familia de la ADR
+ * 0025 — envoltorio fino sobre `getStoreCatalog` + `getStoreRates` +
+ * `isCatalogUnpriced`, cero Prisma propio, cero entradas de caché nuevas,
+ * cero tags nuevos. Las cuatro vistas de catálogo sustituyen sus dos
+ * entradas del `Promise.all` por esta; las tres que SP3(a) decidió la
+ * estrenan. Envuelta en `cache()` de React como `getStoreCategories`: dos
+ * llamadas en el mismo render derivan una vez.
+ */
+export const getStoreCatalogPricing = cache(
+  async (branch: StoreRef & RateRef, baseCurrencyCode: string): Promise<StoreCatalogPricing> => {
+    const [catalog, rates] = await Promise.all([getStoreCatalog(branch), getStoreRates(branch)]);
+    return {
+      catalog,
+      rates,
+      unpriced: isCatalogUnpriced(catalog, { targetCurrency: baseCurrencyCode, rates }),
+    };
+  },
+);
 
 type PublishedBranch = { storeId: string; canonical: PublicSlug; alias: PublicSlug | null };
 /** Etapa 2, DP4(a): a brand grouping 2+ branches gets its OWN pre-rendered
