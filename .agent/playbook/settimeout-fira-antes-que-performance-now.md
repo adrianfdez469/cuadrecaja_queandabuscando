@@ -3,7 +3,7 @@ slug: settimeout-fira-antes-que-performance-now
 sintoma: "un test de tiempo falla por un milisegundo: el reloj dice 599 donde el aserto exige 600, y a la siguiente corrida pasa"
 firma: expected 599 to be greater than or equal to 600
 etapa: test
-visto_en: F-045
+visto_en: F-045, F-044
 creado: 2026-09-10T05:35:00Z
 actualizado: 2026-09-10T05:35:00Z
 promovido_a_agents: no
