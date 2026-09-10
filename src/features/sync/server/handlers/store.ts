@@ -68,15 +68,6 @@ export async function handleStore(
   operation: "CREATE" | "UPDATE" | "DELETE",
   businessId: string,
 ): Promise<HandlerOutcome> {
-  // R8/E16: the sync no longer creates a Business — a business is born only
-  // when its token is minted (script or seed). `businessId` is the caller's
-  // OWN identity, already authenticated; this only ever updates it.
-  await prisma.business.update({
-    where: { id: businessId },
-    data: { name: payload.businessName, baseCurrencyCode: payload.baseCurrency },
-    select: { id: true },
-  });
-
   const existing = await prisma.store.findUnique({
     where: { externalId: payload.storeId },
     select: {
@@ -137,6 +128,7 @@ export async function handleStore(
     assertDeliveryConsistent(config, rowDeliveryConfig(existing));
     assertZoneKnown(config);
     const optInChanged = existing.sourceOptIn !== false;
+    await applyBusinessFields(businessId, payload);
     await prisma.store.update({
       where: { id: existing.id },
       data: {
@@ -219,6 +211,7 @@ export async function handleStore(
     if (!isCanonicalTimeZone(DEFAULT_STORE_TIMEZONE)) {
       throw new SyncEventFailure(STORE_TIMEZONE_INVALID);
     }
+    await applyBusinessFields(businessId, payload);
     // E9/HS2: the brand and its first branch are created in ONE nested
     // write. `payload.slug` travels as a DERIVATION SEED, never as a
     // proposal — a sync event must never fail over an unfortunate name
@@ -268,6 +261,7 @@ export async function handleStore(
   if (optInChanged && !isCanonicalTimeZone(existing.timezone)) {
     throw new SyncEventFailure(STORE_TIMEZONE_INVALID);
   }
+  await applyBusinessFields(businessId, payload);
   const updated = await prisma.store.update({
     where: { id: existing.id },
     data: {
@@ -301,6 +295,38 @@ export async function handleStore(
     touchedBrandSlug: existing.storefront.slug,
     touchedSlugValues: siblingTouch(existing.storefront),
   };
+}
+
+/**
+ * F-045 (R1, R2): the two BUSINESS columns that ride on a STORE event —
+ * `name` and `baseCurrencyCode`. R8/E16 of F-018 still hold and they are
+ * about WHICH ROW, not about where this runs: `businessId` is the caller's
+ * OWN authenticated identity, never the payload's own business identifier,
+ * and this is an `update`, never an `upsert` — the sync does not create businesses, they
+ * are born when their token is minted (`provisioning.ts`).
+ *
+ * WHERE it is called is the whole feature, and it is doctrine, not taste:
+ * HERE, as the LAST statement before each of the three store writes, after
+ * EVERY guard of that path — never once at the top, which is where it lived
+ * until F-045 and why an event answered `stale`, `skipped_not_published` or
+ * `failed` still moved the merchant's base currency (I4). Same rule as
+ * `assertDeliveryConsistent`/`assertZoneKnown` below, plus one they do not
+ * need: a guard added later goes ABOVE this call, never between it and the
+ * write — below it, the defect is back in miniature.
+ *
+ * `select: { id: true }` is not a leftover to clean up: nobody reads the
+ * result (someone did in 613b254, when this was an `upsert`), and it is the
+ * narrowest RETURNING Prisma will emit for an `update`.
+ */
+async function applyBusinessFields(
+  businessId: string,
+  payload: Pick<StorePayload, "businessName" | "baseCurrency">,
+): Promise<void> {
+  await prisma.business.update({
+    where: { id: businessId },
+    data: { name: payload.businessName, baseCurrencyCode: payload.baseCurrency },
+    select: { id: true },
+  });
 }
 
 /**

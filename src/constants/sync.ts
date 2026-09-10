@@ -133,10 +133,11 @@ export const ZONE_TARIFF_DELETE_NOT_SUPPORTED = "ZONE_TARIFF_DELETE_NOT_SUPPORTE
  * `src/features/sync/server/handlers/store.ts`, BEFORE each of the three
  * writes it guards (same pattern as `STORE_OPENING_HOURS_INVALID`): the
  * event fails, none of the STORE's other fields apply, and
- * `sourceUpdatedAt` does not advance. It does NOT promise that nothing at
- * all was written for this request — `handleStore` updates
- * `Business.name`/`baseCurrencyCode` before any guard runs (I4, `store.ts:74-78`,
- * not fixed by this feature); those two columns can already be applied.
+ * `sourceUpdatedAt` does not advance. Since F-045, nothing about the
+ * request is written at all: `applyBusinessFields` writes
+ * `Business.name`/`baseCurrencyCode` as the LAST statement before each of
+ * the three store writes, after every guard of that path, so a failure
+ * here never reaches it.
  *
  * Class for cuadrecaja's outbox (S-007 point 9): RETRYABLE, same reasoning
  * as `ZONE_TARIFF_ZONE_UNKNOWN` above — also true when the cause is a

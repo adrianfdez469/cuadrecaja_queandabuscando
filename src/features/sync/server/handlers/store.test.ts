@@ -119,6 +119,7 @@ describe("handleStore() — stale-write guard (AP6)", () => {
 
     expect(outcome.status).toBe("stale");
     expect(storeUpdate).not.toHaveBeenCalled();
+    expect(businessUpdate).not.toHaveBeenCalled();
   });
 
   it("applies an event newer than what is stored", async () => {
@@ -132,6 +133,7 @@ describe("handleStore() — stale-write guard (AP6)", () => {
     expect(outcome.touchedStoreSlug).toBe("tienda-demo");
     expect(outcome.touchedBrandSlug).toBe("tienda-demo");
     expect(storeUpdate).toHaveBeenCalledOnce();
+    expect(businessUpdate).toHaveBeenCalledOnce();
   });
 });
 
@@ -144,6 +146,7 @@ describe("handleStore() — el negocio nunca se crea (R8, E16)", () => {
     expect(businessUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: BUSINESS_ID } }),
     );
+    expect(businessUpdate).toHaveBeenCalledOnce();
   });
 
   it("una tienda que pertenece a otro negocio se salta, no se toca (R1, R6)", async () => {
@@ -157,6 +160,7 @@ describe("handleStore() — el negocio nunca se crea (R8, E16)", () => {
 
     expect(outcome.status).toBe("skipped_not_published");
     expect(storeUpdate).not.toHaveBeenCalled();
+    expect(businessUpdate).not.toHaveBeenCalled();
   });
 });
 
@@ -174,6 +178,7 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
     expect(data.disabledReasonCode).toBeNull();
     expect(data.disabledMessage).toBe("Cerrado por reformas");
     expect(data.sourceOptIn).toBe(false);
+    expect(businessUpdate).toHaveBeenCalledOnce();
   });
 
   it("a routine edit with the SAME publishToStore does not touch status or the disabled columns", async () => {
@@ -247,6 +252,7 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
       STORE_TIMEZONE_INVALID,
     );
     expect(storeUpdate).not.toHaveBeenCalled();
+    expect(businessUpdate).not.toHaveBeenCalled();
   });
 
   it("R12: a ROUTINE event (opt-in unchanged) on a store with an unreadable timezone does NOT fail — the gate only guards an actual flip to PUBLISHED", async () => {
@@ -292,6 +298,7 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
     expect(call.data.slug).toBe("tienda-demo");
     expect(call.data.stores.create.status).toBe("PUBLISHED");
     expect(call.data.stores.create.sourceOptIn).toBe(true);
+    expect(businessUpdate).toHaveBeenCalledOnce();
   });
 
   it("DELETE with no existing row is skipped, not an error", async () => {
@@ -301,6 +308,7 @@ describe("handleStore() — opt-in-only writes (AP5, option b)", () => {
 
     expect(outcome.status).toBe("skipped_not_published");
     expect(storeUpdate).not.toHaveBeenCalled();
+    expect(businessUpdate).not.toHaveBeenCalled();
   });
 });
 
@@ -327,6 +335,7 @@ describe("handleStore() — F-022 E10/SP3: a malformed openingHours fails the WH
       ),
     ).rejects.toThrow(STORE_OPENING_HOURS_INVALID);
     expect(storeUpdate).not.toHaveBeenCalled();
+    expect(businessUpdate).not.toHaveBeenCalled();
   });
 
   it("caso límite 9: an ABSENT openingHours is not an error — the column stays untouched", async () => {
@@ -505,6 +514,7 @@ describe("handleStore() — F-032: la configuración de compra viaja con la fila
       callHandleStore({ updatedAt: "2026-08-27T00:00:00.000Z", deliveryEnabled: true }, "UPDATE"),
     ).rejects.toThrow(STORE_DELIVERY_CONFIG_INCONSISTENT);
     expect(storeUpdate).not.toHaveBeenCalled();
+    expect(businessUpdate).not.toHaveBeenCalled();
   });
 
   it("E9: a stale event stays stale even when contradictory — anti-rancio guard runs BEFORE the consistency guard", async () => {
@@ -571,5 +581,6 @@ describe("handleStore() — F-032: la configuración de compra viaja con la fila
       SyncEventFailure,
     );
     expect(storefrontCreate).not.toHaveBeenCalled();
+    expect(businessUpdate).not.toHaveBeenCalled();
   });
 });
