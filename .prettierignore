@@ -8,3 +8,7 @@ coverage
 # F-041: bytes commiteados cuya autoridad es el sha256 publicado en
 # docs/sync-contract.md. Prettier los reindentaría y cambiaría el hash.
 src/features/zones/zone-index.json
+# F-042: el artefacto de geometría — 168 ficheros de municipio más el
+# manifiesto (architecture.md § Contratos 6). Prettier le cambiaría los bytes
+# y con ellos los hashes que el manifiesto publica.
+src/features/zones/geometry

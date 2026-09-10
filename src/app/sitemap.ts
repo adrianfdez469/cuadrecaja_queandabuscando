@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { publicEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 import { getCanonicalStoreSlugs } from "@/features/catalog/server/queries";
 
 /** R22: one URL per branch, the CANONICAL one — never a live alias, which

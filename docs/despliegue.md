@@ -91,6 +91,31 @@ clave ajena** — el catálogo migrado y vacío es indistinguible de "está bien
 hasta que llega el primer evento. Repetirlo en una versión nueva del índice
 actualiza las filas existentes en vez de duplicarlas.
 
+**⟳ F-042 — la geometría de zonas viaja CON el código, sin paso manual.** A
+diferencia del catálogo de zonas (arriba), el segundo artefacto —168
+ficheros `<code>.json` más `manifest.json` en
+`src/features/zones/geometry/`— son bytes commiteados que se despliegan como
+cualquier otro fichero de `src/`: no hay `INSERT` que correr ni versión que
+sembrar. **Lo único que hay que vigilar** es que el entorno de despliegue
+incluya ese directorio en el paquete que sirve la función serverless: la
+ruta `GET /api/zones/geometry/[slug]` lee esos 168 ficheros con un nombre
+DINÁMICO (`${code}.json`), y el trazador de ficheros de Next no descubre
+solo un `readFileSync` cuyo argumento no es un literal —
+`outputFileTracingIncludes` en `next.config.ts` ya lo declara explícitamente
+para esa ruta, pero si el entorno de despliegue usa un empaquetador propio
+(no el de Next) hay que confirmar que respete esa configuración. El síntoma
+de que no lo hizo es un **500 en producción y verde en local** — la ruta
+responde bien contra `next dev`/`next start` porque ahí lee del disco
+directamente, y solo falla cuando el paquete desplegado no incluyó el
+directorio.
+
+**Regenerar el artefacto** (raro — una vez, o cuando el índice DPA cambie de
+edición) necesita `mapshaper@0.7.61` y `osmtogeojson@2.2.12`, ya fijados
+como `devDependencies` — `npm run geometry:zones`
+(`scripts/build-zone-geometry.ts`). Tarda minutos (descarga 183 relaciones
+de OSM vía Overpass) y necesita red; no se corre en CI ni en ningún paso de
+despliegue automático.
+
 1. Crear el bucket. Por defecto se llama `store-media`
    (`SUPABASE_STORAGE_BUCKET`).
 2. `NEXT_PUBLIC_SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` en el entorno. Son
@@ -179,17 +204,19 @@ ventana de mantenimiento, no como un cambio de una línea.
 
 Todos van en el entorno del despliegue. `.env.example` los lista con su formato.
 
-| Variable                     | Para qué                                                                | Si falta o está mal                                                                      |
-| ---------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `DATABASE_URL`               | La app en marcha                                                        | No arranca                                                                               |
-| `DIRECT_URL`                 | Migraciones                                                             | `db:deploy` falla                                                                        |
-| `SSO_JWT_SECRET`             | ↔ Verifica el token de entrada del admin                                | El admin no puede entrar; se registra el motivo en el log                                |
-| `ADMIN_SESSION_SECRET`       | Firma la sesión local del admin                                         | La sesión no se puede crear                                                              |
-| `CRON_SECRET`                | Autoriza los crons                                                      | Los crons responden 401 y **nada avisa**: el reloj deja de correr                        |
-| `SUPABASE_*`                 | Imágenes y cuenta del comprador                                         | Ver §2 y §3                                                                              |
-| `SUPABASE_JWT_SECRET`        | Firma la credencial de suscripción al timbre                            | El endpoint responde `503 REALTIME_NOT_CONFIGURED`; ver §4                               |
-| `PROVISIONING_SECRET_SHA256` | ↔ Verifica el secreto con el que cuadrecaja da de alta negocios (F-034) | `POST /api/provisioning/credential` responde `503 PROVISIONING_NOT_CONFIGURED`; ver §8.1 |
-| `NEXT_PUBLIC_SITE_URL`       | **Ver abajo — es el más fácil de dejar mal**                            |                                                                                          |
+| Variable                            | Para qué                                                                | Si falta o está mal                                                                                                                                                                 |
+| ----------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                      | La app en marcha                                                        | No arranca                                                                                                                                                                          |
+| `DIRECT_URL`                        | Migraciones                                                             | `db:deploy` falla                                                                                                                                                                   |
+| `SSO_JWT_SECRET`                    | ↔ Verifica el token de entrada del admin                                | El admin no puede entrar; se registra el motivo en el log                                                                                                                           |
+| `ADMIN_SESSION_SECRET`              | Firma la sesión local del admin                                         | La sesión no se puede crear                                                                                                                                                         |
+| `CRON_SECRET`                       | Autoriza los crons                                                      | Los crons responden 401 y **nada avisa**: el reloj deja de correr                                                                                                                   |
+| `SUPABASE_*`                        | Imágenes y cuenta del comprador                                         | Ver §2 y §3                                                                                                                                                                         |
+| `SUPABASE_JWT_SECRET`               | Firma la credencial de suscripción al timbre                            | El endpoint responde `503 REALTIME_NOT_CONFIGURED`; ver §4                                                                                                                          |
+| `PROVISIONING_SECRET_SHA256`        | ↔ Verifica el secreto con el que cuadrecaja da de alta negocios (F-034) | `POST /api/provisioning/credential` responde `503 PROVISIONING_NOT_CONFIGURED`; ver §8.1                                                                                            |
+| `NEXT_PUBLIC_SITE_URL`              | **Ver abajo — es el más fácil de dejar mal**                            |                                                                                                                                                                                     |
+| `NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE` | Proveedor alternativo de teselas del mapa de zonas (F-042)              | Con esta o con `NEXT_PUBLIC_MAP_TILE_ATTRIBUTION` ausente, se sirven las teselas de OpenStreetMap con el crédito de OpenStreetMap — nunca las de un tercero bajo el crédito de otro |
+| `NEXT_PUBLIC_MAP_TILE_ATTRIBUTION`  | El crédito que acompaña al proveedor de arriba                          | Ídem — **las dos van juntas o no va ninguna** (R18)                                                                                                                                 |
 
 **`NEXT_PUBLIC_SITE_URL` merece su propio párrafo.** No es cosmético: de él
 salen el `sitemap.xml`, la URL canónica de cada tienda y —lo que más duele— **el
@@ -208,6 +235,17 @@ guarda el secreto **en claro**; queandabuscando guarda solo su **SHA-256**
 (R9 de `.agent/specs/F-034/spec.md`) — un volcado de esta configuración no
 permite llamar a la ruta de aprovisionamiento. El par de comandos para
 generar los dos valores está en §8.1.
+
+**El par de teselas es `NEXT_PUBLIC_*`: se inlinea en el BUILD, no se lee en
+caliente.** Cambiar de proveedor de teselas del mapa de zonas exige un
+despliegue nuevo, no solo reiniciar el servidor — `resolveTileLayer`
+(`src/features/zones/tiles.ts`) las lee de `publicEnv`, que a su vez las
+copia de `process.env` al arrancar. Sin las dos puestas, el mapa usa
+`https://tile.openstreetmap.org/{z}/{x}/{y}.png` con «© colaboradores de
+OpenStreetMap» — y, con independencia de esta variable, el mapa muestra
+SIEMPRE además una línea fija de «Límites municipales © colaboradores de
+OpenStreetMap (ODbL)»: los polígonos son derivados de OpenStreetMap y por
+ODbL exigen crédito aunque las teselas las sirva otro proveedor.
 
 ---
 
@@ -265,6 +303,12 @@ se entera si alguien lo borra de un panel.
    recomendada en su lugar, con el mismo precedente que la del punto 1: una
    defensa que no se despliega con el código y que ningún sensor puede
    afirmar.
+7. **Que el empaquetador del entorno de despliegue respete
+   `outputFileTracingIncludes`** (F-042, §1 arriba). Si no lo respeta, la
+   ruta de geometría del mapa de zonas responde `500` en producción y verde
+   en cualquier prueba local — el guion de humo de F-042 comprueba esto
+   contra la app YA desplegada, pero eso es después del hecho: confirmarlo
+   en un preview, antes del primer negocio `ZONE_BASED` real, es más barato.
 
 ---
 

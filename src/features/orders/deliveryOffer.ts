@@ -21,6 +21,19 @@
  * writing one in terms of the other is exactly the shortcut that made this
  * feature impossible (F-031's DA1 anticipated the day, and got the shape
  * wrong — ADR 0033).
+ *
+ * F-042 (architecture.md § AD2, § Contratos 1; nota fechada 2026-09-09 en
+ * `docs/adr/0033-cobrar-el-domicilio-y-ofrecerlo-son-dos-preguntas.md`):
+ * `isDeliveryOffered` para `ZONE_BASED` deja de contestar `false` a secas.
+ * La pregunta de verdad — "¿tiene esta tienda alguna zona con tarifa
+ * resoluble?" — necesita el tarifario, que está en Postgres, y esta función
+ * sigue siendo PURA a propósito (I4): el hecho llega YA RESUELTO como
+ * segundo parámetro OBLIGATORIO (`ZoneCoverageFact`), nunca metiendo Prisma
+ * aquí. Quien lo calcula es SIEMPRE un `server/`
+ * (`src/features/zones/server/coverage.ts`). Y `deliveryFeeForNewOrder` deja
+ * de lanzar en `ZONE_BASED` + `DELIVERY` — esa rama, inalcanzable hasta hoy,
+ * ahora se alcanza — y devuelve un resultado discriminado de tres casos en
+ * vez de un `string | null` que confundiría "sin cotizar" con "sin zona".
  */
 
 import type { DeliveryFeeMode } from "@/generated/prisma/enums";
@@ -61,14 +74,29 @@ export function hasSomethingToChargeDeliveryWith(config: DeliveryConfig): boolea
   }
 }
 
+/** F-042 (AD2) — el hecho que la fila `Store` no puede contestar sola: lo
+ *  resuelve SIEMPRE un `server/` (`loadStoreZoneCoverage`). Un objeto y no
+ *  un `boolean` suelto para que la llamada se lea sola y para que un tercer
+ *  hecho, si llega algún día, no cambie la aridad otra vez. */
+export type ZoneCoverageFact = { hasResolvableZone: boolean };
+
+/** F-042 (AD4) — la zona ya RESUELTA: su importe salió de
+ *  `resolveZoneTariff` sobre filas reales, nunca del cliente (R8, E14). */
+export type ChosenZone = { code: string; deliveryFee: string };
+
+export type NewOrderDeliveryFee =
+  | { kind: "charged"; amount: string } // "0.00" incluido: envío gratis (R10).
+  | { kind: "not_quoted" } // QUOTED_PER_ORDER + DELIVERY.
+  | { kind: "zone_required" }; // ZONE_BASED + DELIVERY sin zona resuelta.
+
 /**
  * R13 — "can delivery be offered to THIS shopper RIGHT NOW?". The shopper's
- * question. `ZONE_BASED`, until F-042 exists, answers NO: there is no
- * selector, so there is no zone to resolve — the honest answer is "cannot
- * charge this shipment today". F-042 replaces this line with its own
- * criterio 9 ("does this store have any zone with a resolvable tariff?").
+ * question. `ZONE_BASED` answers with the real question F-042 exists to ask:
+ * does this store have any zone with a resolvable tariff? `coverage` is
+ * ALWAYS computed by a `server/` (AD2) — never here, never in the client
+ * tree.
  */
-export function isDeliveryOffered(config: DeliveryConfig): boolean {
+export function isDeliveryOffered(config: DeliveryConfig, coverage: ZoneCoverageFact): boolean {
   if (!config.deliveryEnabled) return false;
   switch (config.deliveryFeeMode) {
     case "FLAT_RATE":
@@ -76,7 +104,7 @@ export function isDeliveryOffered(config: DeliveryConfig): boolean {
     case "QUOTED_PER_ORDER":
       return true;
     case "ZONE_BASED":
-      return false; // R13 — F-042 replaces this with the real question.
+      return coverage.hasResolvableZone; // F-042 — R1.
     default: {
       const exhaustive: never = config.deliveryFeeMode;
       throw new Error(`isDeliveryOffered: unhandled mode ${String(exhaustive)}`);
@@ -100,33 +128,37 @@ export function isDeliveryConfigInconsistent(config: DeliveryConfig): boolean {
  * actually decided (already degraded to `"PICKUP"` in silence when
  * `isDeliveryOffered` is false — R3 of F-010, unchanged).
  *
- * `null` = not quoted yet: only `"QUOTED_PER_ORDER"` with `"DELIVERY"`
- * returns it, and it IGNORES any residual `deliveryFee` the store row still
- * carries (§ Casos límite, "manda el modo con una deliveryFee residual").
- * `"PICKUP"` always returns `"0.00"` — E8: what is uncertain is the delivery,
- * never the order itself.
+ * F-042 (AD4): a discriminated result, not `string | null`. A `null` would
+ * have to mean two different things again — "not quoted yet"
+ * (`QUOTED_PER_ORDER`) and "no zone chosen yet" (`ZONE_BASED`) — which is
+ * exactly the kind of ambiguity R10/R11 exist to forbid. `"PICKUP"` always
+ * returns `{ kind: "charged", amount: "0.00" }` — E8: what is uncertain is
+ * the delivery, never the order itself.
  *
- * F-041 E17: `ZONE_BASED` with `"DELIVERY"` is UNREACHABLE by construction —
- * `createOrder.ts` decides `isDelivery` with `isDeliveryOffered`, which
- * answers `false` for `ZONE_BASED` until F-042, so it always passes
- * `"PICKUP"` here. If it were ever reached, a visible 500 is preferable to
- * silently charging `"0.00"` for a shipment nobody priced (the exact thing
- * R11/R13 exist to prevent).
+ * `zone` is `null` unless the caller already resolved one: the island
+ * passes the zone the shopper picked from its props; the server passes the
+ * one it just resolved against the base. Same function, two callers — R8.
  */
 export function deliveryFeeForNewOrder(
   config: DeliveryConfig,
   fulfillment: "PICKUP" | "DELIVERY",
-): string | null {
-  if (fulfillment === "PICKUP") return "0.00";
+  zone: ChosenZone | null,
+): NewOrderDeliveryFee {
+  if (fulfillment === "PICKUP") return { kind: "charged", amount: "0.00" };
   switch (config.deliveryFeeMode) {
     case "FLAT_RATE":
-      return config.deliveryFee ?? "0.00";
+      return { kind: "charged", amount: config.deliveryFee ?? "0.00" };
     case "QUOTED_PER_ORDER":
-      return null;
+      return { kind: "not_quoted" };
     case "ZONE_BASED":
-      throw new Error(
-        "deliveryFeeForNewOrder: ZONE_BASED never reaches DELIVERY before F-042 — isDeliveryOffered() already returns false for it",
-      );
+      // R9: JAMÁS `config.deliveryFee` aquí. Es residuo inerte, y cobrarlo
+      // sería el fallo silencioso más caro que este feature puede
+      // introducir. R10: la comprobación es contra `null`, no contra un
+      // falsy — un `zone.deliveryFee` de "0.00" es envío gratis y entra en
+      // `charged`.
+      return zone === null
+        ? { kind: "zone_required" }
+        : { kind: "charged", amount: zone.deliveryFee };
     default: {
       const exhaustive: never = config.deliveryFeeMode;
       throw new Error(`deliveryFeeForNewOrder: unhandled mode ${String(exhaustive)}`);

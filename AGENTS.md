@@ -219,6 +219,16 @@ the prose, not this check», que es lo que el propio mensaje pide—, y si ese
 documento no es tuyo escala a quien pueda editarlo en vez de darlo por bueno.
 Ya pasó en F-010, F-007, F-011 y F-017.
 
+**Un artefacto de bytes commiteados cuyo hash se publica va en
+`.prettierignore` desde el commit que lo crea, no después.** Prettier
+reindenta y reordena sin avisar, y eso le cambia los bytes — y con ellos el
+sha256 que un test o un documento afirma sobre él. Ya pasó dos veces:
+`src/features/zones/zone-index.json` (F-041) y
+`src/features/zones/geometry/` (F-042), los dos artefactos de la
+[ADR 0032](docs/adr/0032-catalogo-de-zonas-bytes-commiteados-y-la-base-como-espejo.md).
+La línea de `.prettierignore` lleva el motivo al lado, para que quien la lea
+sepa por qué ese directorio es la excepción.
+
 **Prettier también formatea la prosa del arnés, y ahí puede cambiar lo que
 dice.** Dos mitades del mismo problema, y son las dos trampas más repetidas del
 repo. La primera: `format:check` es lo que valida el CI, y cualquier `.md` que

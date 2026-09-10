@@ -1,8 +1,7 @@
 # 0032 — El catálogo de zonas son bytes commiteados y la base es su espejo
 
-**Propuesta** · 9 de septiembre de 2026 · F-041 — pasa a **Aceptada** cuando
-F-041 esté construido, verificado y fusionado, como hizo
-[ADR 0017](0017-frontera-de-escritura-del-panel.md) con su propia versión.
+**Aceptada** · 9 de septiembre de 2026 · F-041, completada por F-042 el mismo
+día con su segundo artefacto (§ «Nota de F-042», al final).
 
 Es la primera ADR de este repositorio sobre un **dato de referencia
 compartido** entre los dos sistemas: ni cuadrecaja ni queandabuscando son la
@@ -109,3 +108,30 @@ exactamente lo que hace que este acuerdo no sea un detalle de gusto.
 - **Mantener la versión sincronizada entre los dos repositorios cueste más de
   lo que ahorra** — el precio que `.agent/specs/propuestas/zonas-de-envio.md`
   § «El costo asumido» ya dejó escrito.
+
+## Nota de F-042 (9 de septiembre de 2026)
+
+El punto (e) de esta ADR decía que «F-042 trae el segundo [artefacto], con su
+propia procedencia y su propio mecanismo de versión» — esta nota materializa
+exactamente eso, sin contradecir nada de lo decidido arriba:
+
+- **El segundo artefacto**: `src/features/zones/geometry/` — 168 ficheros
+  `<code>.json` de grano MUNICIPIO más `manifest.json` con sus hashes,
+  recuentos y procedencia (`geometry.provenance.md`). Su versión
+  (`1.0.0`) se mueve por SEPARADO de la del índice: un polígono y un nombre
+  no cambian por lo mismo ni con la misma frecuencia.
+- **Se sirve por cobertura, concatenando bytes, nunca consultando una base
+  espacial.** `GET /api/zones/geometry/{slug}` resuelve la cobertura de esa
+  sucursal (la misma función que el checkout, una consulta) y concatena las
+  cadenas de sus ficheros de zona — cero `JSON.parse` de un byte de
+  geometría. Esa frase es también la que deja
+  [ADR 0011](0011-sin-postgis-por-ahora.md) **cerrada sin discusión**: el
+  único punto-en-polígono del sistema lo hace Leaflet en el navegador, sobre
+  datos que ese navegador ya descargó — la 0011 no se reabre y esta nota no
+  la necesita para nada.
+- **La simplificación es topológica, en una sola operación sobre las 168
+  zonas de municipio** (mapshaper, Visvalingam ponderada), con dos
+  comprobaciones que corren después del redondeo y que, si fallan, hacen que
+  el generador no escriba nada. El snap de importación real (0.0015°, ≈166 m)
+  es una desviación MEDIDA de lo estimado al diseñar (≈1 m) — ver
+  `.agent/specs/F-042/impl.md` § Desviaciones para la evidencia completa.

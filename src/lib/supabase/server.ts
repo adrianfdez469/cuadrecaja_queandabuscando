@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { publicEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 import { CUSTOMER_COOKIE } from "@/constants/account";
 import { isSupabaseAuthConfigured } from "./config";
 

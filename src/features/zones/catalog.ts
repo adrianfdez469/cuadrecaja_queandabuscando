@@ -78,3 +78,12 @@ export function isKnownZoneCode(code: string): boolean {
 export function isRetiredZone(code: string): boolean {
   return ZONE_INDEX.get(code)?.retiredAt != null;
 }
+
+/** F-042 (AD3, R2) — the 168 municipality rows, for computing a store's
+ *  coverage without a second copy of the index outside this module. Read
+ *  ONCE per render by `src/features/zones/server/coverage.ts`, never
+ *  queried: the definition of "offerable" (R1) only ever needs this array
+ *  plus the tariff rows already loaded in the SAME round-trip. */
+export function listMunicipalities(): readonly ZoneCatalogEntry[] {
+  return artifact.zones.filter((zone) => zone.level === "MUNICIPALITY");
+}

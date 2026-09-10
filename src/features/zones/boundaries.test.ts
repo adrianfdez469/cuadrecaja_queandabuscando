@@ -100,7 +100,16 @@ const ALLOWED = [
   "src/features/sync/server/handlers/zoneTariff.ts",
   "src/features/zones/catalog.test.ts",
   "src/features/zones/catalog.ts",
+  // F-042 (sdd-tester) — caso límite 16: comprueba que el manifiesto de
+  // geometría tiene EXACTAMENTE los 168 municipios de `listMunicipalities()`.
+  // Test, nunca un árbol de cliente.
+  "src/features/zones/geometry.test.ts",
   "src/features/zones/server/catalogSeed.db.test.ts",
+  // F-042 (architecture.md § AD3): la mitad de datos de la cobertura de una
+  // sucursal — lee `listMunicipalities()` para resolver los 168 municipios
+  // contra el tarifario en UNA consulta. Servidor, nunca un árbol de
+  // cliente.
+  "src/features/zones/server/coverage.ts",
   "src/features/zones/server/tariffs.db.test.ts",
   "src/features/zones/server/tariffs.ts",
 ].sort();

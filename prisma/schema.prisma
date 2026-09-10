@@ -761,6 +761,20 @@ model Order {
   contactEmail    String?
   deliveryAddress String?
 
+  /// F-042 R21 — el MUNICIPIO al que se entrega. `null` salvo en un pedido
+  /// que se cierra como DELIVERY en una tienda ZONE_BASED, igual que
+  /// `deliveryAddress`. SIN clave ajena a `Zone` a propósito
+  /// (architecture.md AD6): un pedido es un documento histórico y no puede
+  /// depender del estado presente de una tabla de referencia, y una FK
+  /// fallida aquí es una venta perdida con un 500 en la única escritura
+  /// pública. Lo que valida el código es el conjunto ofrecible, antes.
+  deliveryZoneCode String?
+  /// F-042 R19/R20 — INSTANTÁNEA del nombre del índice al crear el pedido.
+  /// Nunca derivado del código, nunca recalculado al leer: el precedente es
+  /// `rateSnapshot`, y la razón es la misma. Es el nombre VERBATIM del
+  /// índice, sin la provincia que la pantalla añada para desambiguar (R7).
+  deliveryZoneName String?
+
   status       OrderStatus       @default(PENDING)
   cancelReason String?
   /// R9, criterio 5. `null` while the order is not closed. Which of the

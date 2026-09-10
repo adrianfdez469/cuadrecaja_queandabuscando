@@ -1,5 +1,5 @@
 import { createBrowserClient } from "@supabase/ssr";
-import { publicEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 import { CUSTOMER_COOKIE } from "@/constants/account";
 import { isSupabaseAuthConfigured } from "./config";
 

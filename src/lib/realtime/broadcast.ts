@@ -1,4 +1,5 @@
-import { publicEnv, serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 import {
   REALTIME_BELL_CHANNEL_PREFIX,
   REALTIME_BELL_EMIT_TIMEOUT_MS,

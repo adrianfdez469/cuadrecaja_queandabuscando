@@ -1,6 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 import { money, multiply } from "@/lib/money";
-import { publicEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 import { canonicalSlug } from "@/lib/publicSlug";
 import { routingWhatsappNumber } from "@/lib/storeContact";
 import { buildProposalWhatsappUrl } from "../whatsapp";
@@ -33,7 +33,19 @@ export type PulledOrder = {
   code: string;
   storeExternalId: string;
   status: string;
-  contact: { name: string; phone: string; email: string | null; address: string | null };
+  contact: {
+    name: string;
+    phone: string;
+    email: string | null;
+    address: string | null;
+    /** F-042 R22 — SIEMPRE presentes, `null` cuando el pedido no lleva zona
+     *  (un pedido de recogida, uno de una tienda no `ZONE_BASED`, o uno
+     *  anterior a este feature). La misma forma que `email`/`address`. */
+    zoneCode: string | null;
+    /** R23 — no resuelve nada en ningún lado: nunca se compara, ni se
+     *  parsea, ni empareja. */
+    zoneName: string | null;
+  };
   currencyCode: string;
   subtotal: string;
   discountTotal: string;
@@ -89,6 +101,8 @@ export const PULLED_ORDER_SELECT = {
   contactPhone: true,
   contactEmail: true,
   deliveryAddress: true,
+  deliveryZoneCode: true,
+  deliveryZoneName: true,
   currencyCode: true,
   subtotal: true,
   discountTotal: true,
@@ -184,6 +198,11 @@ export function toPulledOrder(order: PulledOrderRow): PulledOrder {
       phone: order.contactPhone,
       email: order.contactEmail,
       address: order.deliveryAddress,
+      // F-042 E23/caso límite 5: leídas de las columnas de la FILA, nunca
+      // del catálogo — un pedido viejo de una zona retirada, o renombrada,
+      // sigue explicando lo que el comprador vio (R19).
+      zoneCode: order.deliveryZoneCode,
+      zoneName: order.deliveryZoneName,
     },
     currencyCode: order.currencyCode,
     subtotal: money(order.subtotal, order.currencyCode).amount,

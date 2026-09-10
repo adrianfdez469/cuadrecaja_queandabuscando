@@ -1,6 +1,6 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 13** · 9 de septiembre de 2026 — **BORRADOR, sin publicar.** Sale
+**Versión 13.1** · 9 de septiembre de 2026 — **BORRADOR, sin publicar.** Sale
 hacia cuadrecaja para revisión mientras F-041 se termina de implementar y de
 verificar; lo que este documento describe de la v13 (`ZONE_BASED`,
 `ZONE_TARIFF`, `zoneCode`, el vector de precedencia) **no se emite todavía** —
@@ -48,6 +48,15 @@ y evita la pregunta «¿es este el documento que leí?».
 
 ## Cambios respecto a la v12.2
 
+**v13.1 (F-042, 9 de septiembre de 2026, D6 de `.agent/progress/F-042.md`).**
+El borrador de la v13 sigue sin publicarse (D4/D6): mientras no salga, cada
+edición es una revisión del mismo borrador y mueve un dígito **menor**, no
+uno mayor — F-043 la dejará en v13.2. Esta revisión contesta las dos
+preguntas que § «Lo que la v13 reserva para F-042» dejó reservadas
+(`contact.zoneCode`/`contact.zoneName`, ahora en su propia sección más
+abajo) y retira la advertencia de que «entre la v13 y F-042 una tienda
+`ZONE_BASED` no ofrece domicilio» (I6): F-042 ya está construido.
+
 Sube como **mayor** —un tercer valor de `deliveryFeeMode`, una entidad nueva
 en `entity`, un campo nuevo en el `payload` de `STORE` y tres códigos de error
 son vocabulario nuevo del cable— pero es **aditiva**: quien implementó la
@@ -63,14 +72,15 @@ entero por delante — el mismo aviso que la v12 llevó para `BUSINESS` y que la
 v12.2 retiró cuando F-038 quedó construido. Se avisará aquí en cuanto
 `bash .agent/verify.sh F-041 --full` esté en verde.
 
-**Y la advertencia que solo se puede dar aquí: el mapa y el selector de zona
-llegan con F-042, no con esta versión.** Entre la v13 y F-042, una tienda
-`ZONE_BASED` **no ofrece domicilio**: no hay pantalla donde el comprador elija
-su municipio, así que no hay zona que resolver, y el pedido a domicilio
-degrada a recogida en silencio — el mismo comportamiento que ya existe hoy
-quien no ofrece domicilio en absoluto. Su tarifario, en cambio, **sí se puede
-cargar desde el primer día**: publicar la v13 sin decir esto haría que el
-primer negocio que la use crea que apagó el domicilio.
+**F-042 ya está construido: el mapa y el selector de zona existen.** La
+advertencia que esta sección llevaba —«entre la v13 y F-042 una tienda
+`ZONE_BASED` no ofrece domicilio»— se retira aquí explícitamente (I6 de
+`.agent/specs/F-042/spec.md`): dejarla puesta le diría al primer negocio que
+la lea que su domicilio sigue apagado, cuando ya no es cierto. Una tienda
+`ZONE_BASED` con al menos una zona con tarifa resoluble **sí ofrece
+domicilio** desde el checkout de queandabuscando, con el municipio elegido
+por el comprador y el importe resuelto por el servidor — ver § «Lo que la
+v13 reserva para F-042», ahora contestada, más abajo.
 
 ### `ZONE_BASED`, el tercer valor de `deliveryFeeMode`
 
@@ -208,23 +218,47 @@ aplica —tampoco un `phone` corregido que viajara en el mismo evento— y
 `STORE_OPENING_HOURS_INVALID`/`STORE_TIMEZONE_INVALID` desde la v9. Con un
 `zoneCode` del catálogo, `processed` normal y la columna queda escrita.
 
-### Lo que la v13 reserva para F-042 (dos menores de S-007 sobre `contact`)
+### `contact.zoneCode` y `contact.zoneName` (F-042, v13.1)
 
-`contact` sigue teniendo exactamente las mismas cuatro claves de siempre; la
-v13 **no le añade ninguna**. Dos de los cinco menores de S-007 preguntan por
-`contact.zoneCode`/`contact.zoneName`, que es un campo del pedido que solo
-existirá cuando F-042 lo defina — aquí no se implementa, por diseño (plan.md
-§ Qué queda fuera). Lo que sí se puede decir ya es que **ninguna de las dos
-preguntas está contestada por esta versión**, para que ningún schema Zod del
-otro lado asuma una respuesta a partir de su silencio:
+Las dos preguntas que la v13 dejó reservadas aquí ya están contestadas:
+`contact` gana estas DOS claves nuevas, siempre dentro de las cuatro de
+siempre (`name`, `phone`, `email`, `address`).
 
-- **¿`contact.zoneCode`/`contact.zoneName` son opcionales siempre, u
-  obligatorios en un pedido de una tienda `ZONE_BASED`?** Queda para F-042,
-  junto con el resto del schema del comprador.
-- **¿`contact.zoneCode` puede ser alguna vez un código de PROVINCIA, o
-  siempre de MUNICIPIO?** También para F-042: depende de cómo resuelva el
-  paso intermedio de su selector (provincia → municipio, § «Cómo elige el
-  comprador su zona» de `.agent/solicitudes.md`), que aquí no se diseña.
+```jsonc
+"contact": {
+  "name": "Ana Pérez",
+  "phone": "+5355555555",
+  "email": null,
+  "address": "Calle 23 esq. L, Vedado",
+  "zoneCode": "23.01", // SIEMPRE presente. null cuando el pedido no lleva zona
+  "zoneName": "Playa", // SIEMPRE presente. null en el mismo caso
+}
+```
+
+- **SIEMPRE presentes, `string | null`.** Igual que `email`/`address`: un
+  pedido de recogida, uno de una tienda que no es `ZONE_BASED`, o uno
+  anterior a este feature, trae las dos claves valiendo `null` — nunca
+  ausentes. Un lector que ya espera la clave no se rompe con un pedido sin
+  zona.
+- **Obligatorias DE HECHO** en un pedido a domicilio de una tienda
+  `ZONE_BASED`: ese camino nunca deja `Order.deliveryFee` sin cotizar (ver
+  más abajo), así que las dos siempre tienen valor ahí.
+- **`contact.zoneCode` es SIEMPRE un municipio**, nunca un código de
+  provincia ni de primer nivel: el comprador elige de una lista de 168
+  municipios (incluida la Isla de la Juventud como `40.01`); un código de
+  provincia es un filtro de esa lista, no algo que se pueda enviar.
+- **`contact.zoneName` es de lectura humana y NO resuelve nada.** Es una
+  INSTANTÁNEA del nombre del catálogo al momento del pedido — nunca se
+  compara, se parsea ni empareja contra nada. Si el catálogo renombra
+  `23.01` después, este pedido sigue diciendo el nombre que el comprador
+  vio. El precio, la cobertura y el emparejamiento salen siempre de
+  `contact.zoneCode`.
+
+**En un pedido a domicilio de una tienda `ZONE_BASED`, `deliveryFeePending`
+es SIEMPRE `false` y el importe ya está resuelto.** `ZONE_BASED` y
+`QUOTED_PER_ORDER` son valores excluyentes del mismo `deliveryFeeMode`: no
+hay configuración que dé lugar a los dos a la vez, así que un pedido
+`ZONE_BASED` nunca llega con el envío sin cotizar.
 
 ### La precedencia, con letra
 

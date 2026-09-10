@@ -17,7 +17,7 @@ import {
   type CatalogFilterContext,
 } from "@/features/catalog/catalogFilters";
 import { CATALOG_ROUTE_SEGMENT } from "@/constants/catalog";
-import { publicEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 import { Container } from "@/components/ui/Container";
 import { Alert } from "@/components/ui/Alert";
 import { StoreSearchBox } from "@/components/store/StoreSearchBox";

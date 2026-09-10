@@ -20,6 +20,15 @@ const nextConfig: NextConfig = {
   // Next 16 — the `eslint` config key was removed — so `npm run lint` is a
   // separate step, in CI and in the pre-commit hook.
   typescript: { ignoreBuildErrors: false },
+  // F-042 (architecture.md § AD1(e), riesgo 5): la ruta de geometría lee
+  // `src/features/zones/geometry/<code>.json` con un nombre de fichero
+  // DINÁMICO (`${code}.json`), y el trazado de Next no descubre solo un
+  // `readFileSync` cuyo argumento no es un literal — sin esto, la ruta
+  // respondería 500 en producción y verde en local, la peor forma de
+  // fallar (docs/despliegue.md § 7).
+  outputFileTracingIncludes: {
+    "/api/zones/geometry/\\[slug\\]": ["./src/features/zones/geometry/**/*"],
+  },
 };
 
 export default nextConfig;

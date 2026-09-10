@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { backTarget, breadcrumbList, type Trail } from "@/features/storefront/trail";
 import { jsonLdScriptContent } from "@/lib/jsonLd";
-import { publicEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 
 /**
  * The navigation trail (design.md § Decisiones 1-5, architecture.md §

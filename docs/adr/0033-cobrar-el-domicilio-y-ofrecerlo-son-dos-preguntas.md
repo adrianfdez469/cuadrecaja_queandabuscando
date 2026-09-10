@@ -1,8 +1,7 @@
 # 0033 — Con qué cobrar el domicilio y ofrecerlo a un comprador son dos preguntas distintas
 
-**Propuesta** · 9 de septiembre de 2026 · F-041 — pasa a **Aceptada** cuando
-F-041 esté construido, verificado y fusionado, como hizo
-[ADR 0017](0017-frontera-de-escritura-del-panel.md) con su propia versión.
+**Aceptada** · 9 de septiembre de 2026 · F-041, reabierta y cerrada por F-042
+el mismo día (§ «Nota de F-042», al final).
 
 **Estrecha el invariante (e) de
 [ADR 0028](0028-configuracion-de-compra-del-pos.md)**, así que no puede ser una
@@ -106,3 +105,30 @@ entran en el mismo ciclo de cotización.
   comentario que cita esta ADR.
 - **Aparezca un modo de envío nuevo.** `npm run typecheck` lo señala antes de
   que se le pueda escapar a nadie.
+
+## Nota de F-042 (9 de septiembre de 2026)
+
+Se reabre exactamente por el disparador que el punto de arriba dejó escrito,
+y se cierra el mismo día (architecture.md § AD2, § AD4 de F-042): no
+contradice nada de lo decidido arriba, lo **completa**.
+
+- **`isDeliveryOffered` para `ZONE_BASED` deja de contestar `false` a
+  secas.** Gana un segundo parámetro OBLIGATORIO, `ZoneCoverageFact`
+  (`{ hasResolvableZone: boolean }`), resuelto SIEMPRE por un `server/`
+  (`src/features/zones/server/coverage.ts`) — nunca por esta función, que
+  sigue siendo pura y sin Prisma. La rama contesta la pregunta de verdad:
+  «¿tiene esta tienda alguna zona con tarifa resoluble?» (R1 de
+  `.agent/specs/F-042/spec.md`).
+- **`deliveryFeeForNewOrder` deja de lanzar en `ZONE_BASED` + `"DELIVERY"`.**
+  La rama que este documento marcó «inalcanzable por construcción» ahora SE
+  ALCANZA — F-042 es precisamente lo que la alcanza — y en vez de un `500`
+  visible devuelve un resultado discriminado de tres casos (`charged`,
+  `not_quoted`, `zone_required`), para que el `409`/`400` de la ruta pública
+  distinga «falta la zona» de «esa zona no está servida».
+- **El `deliveryFee` residual de la columna `Store` sigue sin cobrarse
+  NUNCA en `ZONE_BASED`.** Es la parte de esta ADR que F-042 más podría
+  romper por descuido (R9 de su spec) y la que sus tests verifican
+  explícitamente.
+- **Lo que esta ADR no decidía (arriba) ya está decidido**: el selector de
+  zona, el mapa y `contact.zoneCode`/`zoneName` son F-042, construidos y
+  documentados en `.agent/specs/F-042/`.

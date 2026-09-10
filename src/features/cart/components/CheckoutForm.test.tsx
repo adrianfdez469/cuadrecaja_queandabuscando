@@ -115,7 +115,16 @@ async function enviarActivado() {
 
 describe("CheckoutForm — foco en el resumen de errores", () => {
   it("mueve el foco al resumen en el PRIMER envío inválido", async () => {
-    render(<CheckoutForm storeId={STORE_ID} storeSlug="tienda-demo" />);
+    render(
+      <CheckoutForm
+        storeId={STORE_ID}
+        storeSlug="tienda-demo"
+        deliveryOffered={false}
+        deliveryFeeMode="FLAT_RATE"
+        deliveryFlatFee={null}
+        zoneCoverage={null}
+      />,
+    );
 
     // Enviar con todos los campos vacíos: nombre y teléfono son obligatorios.
     const enviar = await enviarActivado();
@@ -128,7 +137,16 @@ describe("CheckoutForm — foco en el resumen de errores", () => {
   });
 
   it("sigue moviéndolo en el segundo envío inválido", async () => {
-    render(<CheckoutForm storeId={STORE_ID} storeSlug="tienda-demo" />);
+    render(
+      <CheckoutForm
+        storeId={STORE_ID}
+        storeSlug="tienda-demo"
+        deliveryOffered={false}
+        deliveryFeeMode="FLAT_RATE"
+        deliveryFlatFee={null}
+        zoneCoverage={null}
+      />,
+    );
 
     const enviar = await enviarActivado();
     fireEvent.click(enviar);
@@ -211,7 +229,16 @@ describe("CheckoutForm — envío cotizado (F-031)", () => {
   });
 
   it("el radio de domicilio existe, su descripción no lleva dígitos, el envío no es una cifra y el total es parcial (criterio 1)", async () => {
-    render(<CheckoutForm storeId={STORE_ID_QUOTED} storeSlug="tienda-demo" />);
+    render(
+      <CheckoutForm
+        storeId={STORE_ID_QUOTED}
+        storeSlug="tienda-demo"
+        deliveryOffered={true}
+        deliveryFeeMode="QUOTED_PER_ORDER"
+        deliveryFlatFee={null}
+        zoneCoverage={null}
+      />,
+    );
     await enviarActivado();
 
     const radio = screen.getByRole("radio", { name: /envío a domicilio/i });
@@ -236,7 +263,16 @@ describe("CheckoutForm — envío cotizado (F-031)", () => {
   });
 
   it("volver a retiro devuelve el resumen a 'Total' y 'Envío $0.00', sin residuos", async () => {
-    render(<CheckoutForm storeId={STORE_ID_QUOTED} storeSlug="tienda-demo" />);
+    render(
+      <CheckoutForm
+        storeId={STORE_ID_QUOTED}
+        storeSlug="tienda-demo"
+        deliveryOffered={true}
+        deliveryFeeMode="QUOTED_PER_ORDER"
+        deliveryFlatFee={null}
+        zoneCoverage={null}
+      />,
+    );
     await enviarActivado();
 
     fireEvent.click(screen.getByRole("radio", { name: /envío a domicilio/i }));
@@ -347,7 +383,16 @@ describe("CheckoutForm — el equivalente no toca lo que se cobra (C13)", () => 
   });
 
   it("pinta el equivalente en USD y aun así envía el expectedTotal de siempre, en CUP", async () => {
-    render(<CheckoutForm storeId={STORE_ID_EQUIVALENT} storeSlug="tienda-demo" />);
+    render(
+      <CheckoutForm
+        storeId={STORE_ID_EQUIVALENT}
+        storeSlug="tienda-demo"
+        deliveryOffered={false}
+        deliveryFeeMode="FLAT_RATE"
+        deliveryFlatFee={null}
+        zoneCoverage={null}
+      />,
+    );
     const enviar = await enviarActivado();
 
     // DH3: el equivalente aproximado del total se ve antes de enviar nada.

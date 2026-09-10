@@ -81,7 +81,12 @@ function toResponse(result: CreateOrderResult): NextResponse {
       );
     case "price_changed":
       return NextResponse.json(
-        { error: "PRICE_CHANGED", lines: result.lines, total: result.total },
+        {
+          error: "PRICE_CHANGED",
+          lines: result.lines,
+          total: result.total,
+          ...(result.delivery ? { delivery: result.delivery } : {}),
+        },
         { status: 409, headers: NO_STORE },
       );
     case "too_many_orders":
@@ -91,6 +96,17 @@ function toResponse(result: CreateOrderResult): NextResponse {
           status: 429,
           headers: { ...NO_STORE, "Retry-After": String(result.retryAfterSeconds) },
         },
+      );
+    // F-042 (architecture.md § AD7, § Contratos 5).
+    case "delivery_zone_required":
+      return NextResponse.json(
+        { error: "DELIVERY_ZONE_REQUIRED" },
+        { status: 400, headers: NO_STORE },
+      );
+    case "delivery_zone_not_served":
+      return NextResponse.json(
+        { error: "DELIVERY_ZONE_NOT_SERVED", zoneCode: result.zoneCode },
+        { status: 409, headers: NO_STORE },
       );
     case "failed":
       return NextResponse.json(

@@ -5,6 +5,7 @@
  * up in a public URL that people type and share, so normalisation matters more
  * here than in an internal system.
  */
+import { stripDiacritics } from "./text";
 
 const MAX_LENGTH = 80;
 
@@ -45,11 +46,9 @@ export const RESERVED_SLUGS: readonly string[] = [
 const RESERVED = new Set(RESERVED_SLUGS);
 
 export function slugify(input: string): string {
-  const slug = input
-    .normalize("NFD")
-    // Strip combining marks: "Café" -> "Cafe". ñ decomposes to n + tilde, so
-    // this handles it without a special case.
-    .replace(/[̀-ͯ]/g, "")
+  // F-042 (R6): the diacritics-stripping trick is now shared with
+  // `src/lib/text.ts`, so it is written exactly once.
+  const slug = stripDiacritics(input)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
