@@ -8,6 +8,7 @@ import {
   BUSINESS_DELETE_NOT_SUPPORTED,
   BUSINESS_DISPLAY_CURRENCIES_INVALID,
 } from "@/constants/sync";
+import { slugify } from "@/lib/slug";
 
 /**
  * F-038 (plan.md paso 10; spec.md C1-C10, E13, E16, E17; architecture.md §
@@ -702,5 +703,361 @@ describe("BUSINESS against real Postgres, through the real POST (paso 10)", () =
       select: { zoneCode: true },
     });
     expect(storeRow?.zoneCode).toBeNull();
+  });
+});
+
+/**
+ * F-045 (plan.md paso 4; architecture.md § AD5): the seven scenarios of
+ * criterios 2(a), 2(b), 3, 4 and 5 that need their OWN describe, not the
+ * `BUSINESS` one above — a fresh `FixtureSession` per test, not per file,
+ * because every `it` here reads the SAME row "before" and "after" the same
+ * request, and a mark left by a sibling test would silently change what
+ * "igual" means for the next one.
+ *
+ * Anti-vacuidad (AD5.3): the fixture already leaves `baseCurrencyCode: "CUP"`
+ * — `storeEvent`'s own default — so every event that must NOT write travels
+ * with `baseCurrency: "USD"` and a `businessName` carrying `RECHAZADO`/
+ * `VIEJO` plus the session's `token`, never the same pair the row already
+ * holds.
+ */
+describe("F-045: a STORE that does not apply does not touch Business.name/baseCurrencyCode", () => {
+  let session: FixtureSession;
+
+  beforeEach(async () => {
+    session = await createFixtureSession();
+  });
+
+  afterEach(async () => {
+    await prisma.syncEvent.deleteMany({ where: { businessId: session.businessExternalId } });
+    await session.cleanup();
+  });
+
+  it("criterio 2(a): STORE_OPENING_HOURS_INVALID leaves the two columns untouched", async () => {
+    const store = await session.createStore();
+    const before = await readBusinessIdentity(session.businessId);
+    const eventId = `${session.token}-f045-hours`;
+
+    const { status, body } = await post(session, [
+      storeEvent({
+        eventId,
+        session,
+        storeExternalId: store.externalId,
+        updatedAt: "2026-09-10T10:00:00.000Z",
+        businessName: `RECHAZADO ${session.token}`,
+        baseCurrency: "USD",
+        extra: {
+          // Missing "sun" — the same malformed calendar store.test.ts uses.
+          openingHours: {
+            version: 1,
+            days: { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [] },
+          },
+        },
+      }),
+    ]);
+
+    expect(status).toBe(207);
+    expect(body.results[0]).toEqual({
+      eventId,
+      status: "failed",
+      error: "STORE_OPENING_HOURS_INVALID",
+    });
+
+    const after = await readBusinessIdentity(session.businessId);
+    expect(after).toEqual(before);
+  });
+
+  it("criterio 2(b): STORE_DELIVERY_CONFIG_INCONSISTENT in its 207 form leaves the two columns untouched", async () => {
+    // Defaults of a brand-new row: deliveryEnabled false, FLAT_RATE,
+    // deliveryFee null — a bare `deliveryEnabled: true` becomes inconsistent
+    // only when MIXED with what the row already holds (the 400 form would
+    // need deliveryFeeMode/deliveryFee in the SAME payload, which the
+    // envelope's `.refine()` would reject before reaching this handler).
+    const store = await session.createStore();
+    const before = await readBusinessIdentity(session.businessId);
+    const eventId = `${session.token}-f045-delivery`;
+
+    const { status, body } = await post(session, [
+      storeEvent({
+        eventId,
+        session,
+        storeExternalId: store.externalId,
+        updatedAt: "2026-09-10T10:00:00.000Z",
+        businessName: `RECHAZADO ${session.token}`,
+        baseCurrency: "USD",
+        extra: { deliveryEnabled: true },
+      }),
+    ]);
+
+    expect(status).toBe(207);
+    expect(body.results[0]).toEqual({
+      eventId,
+      status: "failed",
+      error: "STORE_DELIVERY_CONFIG_INCONSISTENT",
+    });
+
+    const after = await readBusinessIdentity(session.businessId);
+    expect(after).toEqual(before);
+  });
+
+  it("criterio 3: a stale STORE responds stale inside ok, and the two columns keep the NEW values", async () => {
+    const store = await session.createStore();
+    const freshEventId = `${session.token}-f045-stale-fresh`;
+    const staleEventId = `${session.token}-f045-stale-old`;
+
+    const { body: freshBody } = await post(session, [
+      storeEvent({
+        eventId: freshEventId,
+        session,
+        storeExternalId: store.externalId,
+        updatedAt: "2026-09-10T12:00:00.000Z",
+        businessName: "Nombre NUEVO",
+        baseCurrency: "USD",
+      }),
+    ]);
+    expect(freshBody.results[0]).toEqual({ eventId: freshEventId, status: "processed" });
+    expect(await readBusinessIdentity(session.businessId)).toEqual({
+      name: "Nombre NUEVO",
+      baseCurrencyCode: "USD",
+    });
+
+    // Older than the fresh event above — the stale-write guard of
+    // `store.ts:107-112` rejects it BEFORE `applyBusinessFields` ever runs.
+    const { status, body } = await post(session, [
+      storeEvent({
+        eventId: staleEventId,
+        session,
+        storeExternalId: store.externalId,
+        updatedAt: "2026-09-10T11:00:00.000Z",
+        businessName: "Nombre VIEJO",
+        baseCurrency: "CUP",
+      }),
+    ]);
+
+    expect(status).toBe(207);
+    expect(body.ok).toContain(staleEventId);
+    expect(body.results[0]).toEqual({ eventId: staleEventId, status: "stale" });
+
+    const storeRow = await prisma.store.findUnique({
+      where: { id: store.id },
+      select: { sourceUpdatedAt: true },
+    });
+    expect(storeRow?.sourceUpdatedAt).toEqual(new Date("2026-09-10T12:00:00.000Z"));
+
+    const after = await readBusinessIdentity(session.businessId);
+    expect(after).toEqual({ name: "Nombre NUEVO", baseCurrencyCode: "USD" });
+  });
+
+  it("criterio 4(a): a STORE for another business's branch responds skipped_not_published and does not touch this business's identity", async () => {
+    const otherSession = await createFixtureSession();
+    try {
+      const otherStore = await otherSession.createStore();
+      const before = await readBusinessIdentity(session.businessId);
+      const eventId = `${session.token}-f045-other-business`;
+
+      const { status, body } = await post(session, [
+        storeEvent({
+          eventId,
+          session,
+          storeExternalId: otherStore.externalId,
+          updatedAt: "2026-09-10T10:00:00.000Z",
+          businessName: `RECHAZADO ${session.token}`,
+          baseCurrency: "USD",
+        }),
+      ]);
+
+      expect(status).toBe(207);
+      expect(body.results[0]).toEqual({ eventId, status: "skipped_not_published" });
+
+      const after = await readBusinessIdentity(session.businessId);
+      expect(after).toEqual(before);
+    } finally {
+      await prisma.syncEvent.deleteMany({
+        where: { businessId: otherSession.businessExternalId },
+      });
+      await otherSession.cleanup();
+    }
+  });
+
+  it("criterio 4(b): unpublishing a branch that does not exist responds skipped_not_published and does not touch the business identity", async () => {
+    const before = await readBusinessIdentity(session.businessId);
+    const eventId = `${session.token}-f045-unpublish-missing`;
+
+    const { status, body } = await post(session, [
+      storeEvent({
+        eventId,
+        session,
+        storeExternalId: `${session.token}-store-does-not-exist`,
+        updatedAt: "2026-09-10T10:00:00.000Z",
+        businessName: `RECHAZADO ${session.token}`,
+        baseCurrency: "USD",
+        extra: { publishToStore: false },
+      }),
+    ]);
+
+    expect(status).toBe(207);
+    expect(body.results[0]).toEqual({ eventId, status: "skipped_not_published" });
+
+    const after = await readBusinessIdentity(session.businessId);
+    expect(after).toEqual(before);
+  });
+
+  it("criterio 5(a): a STORE that DOES apply keeps writing in the three paths that apply — alta, actualización, despublicación", async () => {
+    // Alta: no Store row exists yet for this externalId — goes through
+    // `createStorefrontWithStore`. `slug` travels so the derived value is
+    // unique per session (AD5 punto 4).
+    const altaSlug = `${session.token}-alta`;
+    const altaEventId = `${session.token}-f045-alta`;
+    const { status: altaStatus, body: altaBody } = await post(session, [
+      storeEvent({
+        eventId: altaEventId,
+        session,
+        storeExternalId: `${session.token}-store-alta`,
+        updatedAt: "2026-09-10T10:00:00.000Z",
+        businessName: "Negocio ALTA",
+        baseCurrency: "USD",
+        extra: { slug: altaSlug },
+      }),
+    ]);
+    expect(altaStatus).toBe(207);
+    expect(altaBody.results[0]).toEqual({ eventId: altaEventId, status: "processed" });
+    expect(await readBusinessIdentity(session.businessId)).toEqual({
+      name: "Negocio ALTA",
+      baseCurrencyCode: "USD",
+    });
+
+    // Actualización y despublicación caen sobre la MISMA sucursal, con
+    // `sourceUpdatedAt` creciente: la misma fecha respondería `stale` en el
+    // segundo evento y mediría otra cosa (AD5).
+    const store = await session.createStore();
+
+    const updateEventId = `${session.token}-f045-actualizacion`;
+    const { status: updateStatus, body: updateBody } = await post(session, [
+      storeEvent({
+        eventId: updateEventId,
+        session,
+        storeExternalId: store.externalId,
+        updatedAt: "2026-09-10T11:00:00.000Z",
+        businessName: "Negocio ACTUALIZACION",
+        baseCurrency: "EUR",
+      }),
+    ]);
+    expect(updateStatus).toBe(207);
+    expect(updateBody.results[0]).toEqual({ eventId: updateEventId, status: "processed" });
+    expect(await readBusinessIdentity(session.businessId)).toEqual({
+      name: "Negocio ACTUALIZACION",
+      baseCurrencyCode: "EUR",
+    });
+
+    const unpublishEventId = `${session.token}-f045-despublicacion`;
+    const { status: unpublishStatus, body: unpublishBody } = await post(session, [
+      storeEvent({
+        eventId: unpublishEventId,
+        session,
+        storeExternalId: store.externalId,
+        updatedAt: "2026-09-10T12:00:00.000Z",
+        businessName: "Negocio DESPUBLICACION",
+        baseCurrency: "GBP",
+        extra: { publishToStore: false },
+      }),
+    ]);
+    expect(unpublishStatus).toBe(207);
+    expect(unpublishBody.results[0]).toEqual({ eventId: unpublishEventId, status: "processed" });
+    expect(await readBusinessIdentity(session.businessId)).toEqual({
+      name: "Negocio DESPUBLICACION",
+      baseCurrencyCode: "GBP",
+    });
+
+    // AD5 punto 4: `createStorefrontWithStore` deja un `Slug` huérfano —
+    // `session.cleanup()` no lo borra (la FK es SetNull) — así que se borra
+    // aquí, antes de `afterEach`. `slugify` reproduce la misma transformación
+    // que `uniqueSlug` le aplicó al derivar de `altaSlug` (los guiones bajos
+    // del token se vuelven guiones).
+    await prisma.slug.deleteMany({ where: { value: slugify(altaSlug) } });
+  });
+
+  it("criterio 5(b): a mixed batch, BUENO first and MALO second, ends with BUENO's value", async () => {
+    const goodStore = await session.createStore();
+    const badStore = await session.createStore();
+    const goodEventId = `${session.token}-f045-mixed-good-1`;
+    const badEventId = `${session.token}-f045-mixed-bad-1`;
+
+    const { status, body } = await post(session, [
+      storeEvent({
+        eventId: goodEventId,
+        session,
+        storeExternalId: goodStore.externalId,
+        updatedAt: "2026-09-10T10:00:00.000Z",
+        businessName: "BUENO",
+        baseCurrency: "USD",
+      }),
+      storeEvent({
+        eventId: badEventId,
+        session,
+        storeExternalId: badStore.externalId,
+        updatedAt: "2026-09-10T10:00:00.000Z",
+        businessName: "MALO",
+        baseCurrency: "CUP",
+        zoneCode: "2101", // malformed — no dot pattern (STORE_ZONE_UNKNOWN)
+      }),
+    ]);
+
+    expect(status).toBe(207);
+    expect(body.results.find((r) => r.eventId === goodEventId)).toEqual({
+      eventId: goodEventId,
+      status: "processed",
+    });
+    expect(body.results.find((r) => r.eventId === badEventId)).toEqual({
+      eventId: badEventId,
+      status: "failed",
+      error: "STORE_ZONE_UNKNOWN",
+    });
+
+    expect(await readBusinessIdentity(session.businessId)).toEqual({
+      name: "BUENO",
+      baseCurrencyCode: "USD",
+    });
+  });
+
+  it("criterio 5(b): a mixed batch, MALO first and BUENO second, still ends with BUENO's value", async () => {
+    const goodStore = await session.createStore();
+    const badStore = await session.createStore();
+    const goodEventId = `${session.token}-f045-mixed-good-2`;
+    const badEventId = `${session.token}-f045-mixed-bad-2`;
+
+    const { status, body } = await post(session, [
+      storeEvent({
+        eventId: badEventId,
+        session,
+        storeExternalId: badStore.externalId,
+        updatedAt: "2026-09-10T10:00:00.000Z",
+        businessName: "MALO",
+        baseCurrency: "CUP",
+        zoneCode: "2101", // malformed — no dot pattern (STORE_ZONE_UNKNOWN)
+      }),
+      storeEvent({
+        eventId: goodEventId,
+        session,
+        storeExternalId: goodStore.externalId,
+        updatedAt: "2026-09-10T10:00:00.000Z",
+        businessName: "BUENO",
+        baseCurrency: "USD",
+      }),
+    ]);
+
+    expect(status).toBe(207);
+    expect(body.results.find((r) => r.eventId === badEventId)).toEqual({
+      eventId: badEventId,
+      status: "failed",
+      error: "STORE_ZONE_UNKNOWN",
+    });
+    expect(body.results.find((r) => r.eventId === goodEventId)).toEqual({
+      eventId: goodEventId,
+      status: "processed",
+    });
+
+    expect(await readBusinessIdentity(session.businessId)).toEqual({
+      name: "BUENO",
+      baseCurrencyCode: "USD",
+    });
   });
 });
