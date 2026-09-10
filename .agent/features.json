@@ -913,7 +913,7 @@
         "Un STORE de una sucursal de otro negocio y un STORE que despublica una sucursal inexistente responden skipped_not_published y no mueven ninguna de las dos columnas, verificado leyendolas despues.",
         "Un STORE que si se aplica las sigue escribiendo en los tres caminos —alta de sucursal nueva, actualizacion de una publicada y despublicacion de una existente—, verificado leyendo las dos columnas tras cada uno; y en un lote con un STORE bueno y otro que falla, el valor final es el del bueno, sea cual sea el orden de los dos eventos en el lote.",
         "El numero de escrituras no sube: contadas con el mock de src/features/sync/server/handlers/store.test.ts, un STORE que se aplica llama a business.update una vez, y uno que devuelve stale, skipped_not_published o failed lo llama cero veces.",
-        "docs/sync-contract.md sube a v13.3 retirando la salvedad de I4 del § de zoneCode en el payload de STORE y de la fila de STORE_ZONE_UNKNOWN, con su entrada en 'Cambios respecto a la v12.2'; grep -c 'Business.name' docs/sync-contract.md da 0.",
+        "docs/sync-contract.md sube a v13.3 retirando la salvedad de I4 del § de zoneCode en el payload de STORE y de la fila de STORE_ZONE_UNKNOWN, con su entrada en 'Cambios respecto a la v12.2'; grep -c 'Business.name' docs/sync-contract.md da 0 y grep -c 'I4' docs/sync-contract.md da 0 — el segundo grep porque el primero no ve la salvedad del § de zoneCode, escrita en prosa, y sin él el criterio se cumpliria sin haberla tocado (SI7, editado por el humano el 2026-09-10 con el feature sin empezar).",
         "bash .agent/verify.sh F-045 --full termina con codigo 0."
       ],
       "passes": false,
