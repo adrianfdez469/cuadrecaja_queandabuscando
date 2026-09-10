@@ -4,7 +4,7 @@ import {
   createFixtureSession,
   type FixtureSession,
 } from "@/features/marketplace/server/dbFixtures";
-import { DEPENDENCY_FAILED_IN_BATCH } from "@/constants/sync";
+import { DEPENDENCY_FAILED_IN_BATCH, ZONE_TARIFF_DELETE_NOT_SUPPORTED } from "@/constants/sync";
 
 /**
  * F-037 (spec.md C1-C8, I2, I3; architecture.md § AD6, fila 3; plan.md paso
@@ -518,5 +518,64 @@ describe("F-037 dependency cascade against real Postgres, through the real POST 
       });
       await currencySession.cleanup();
     }
+  });
+
+  it("F-043 (architecture.md § AD5, plan.md paso 10): two INDEPENDENTLY failing events with DISTINCT error messages in the same batch each keep their OWN error — markFailed groups the updateMany by message, not by event, and a batch that spans two groups must not mix them up", async () => {
+    // Lever 1 (this file's own, replacement lever 1): a CATEGORY inside the
+    // blocked "Bebidas" slug family fails for real, with a message this
+    // repo never wrote (`generateCategorySlug` exhausting its candidates).
+    const catEventId = `${session.token}-ad5-cat`;
+    // A ZONE_TARIFF DELETE fails with the exact constant
+    // ZONE_TARIFF_DELETE_NOT_SUPPORTED (R20) — a completely unrelated code
+    // path, with no dependency on the CATEGORY above: the two events do not
+    // reference each other at all, so any mix-up between their two
+    // SyncEvent rows can only come from the GROUPING inside markFailed.
+    const zoneEventId = `${session.token}-ad5-zone`;
+
+    const events = [
+      categoryEvent({
+        eventId: catEventId,
+        session,
+        categoryId: `${session.token}-ad5-cat-id`,
+        occurredAt: "2026-09-05T09:00:00.000Z",
+      }),
+      {
+        eventId: zoneEventId,
+        entity: "ZONE_TARIFF",
+        operation: "DELETE",
+        occurredAt: "2026-09-05T09:00:00.000Z",
+        payload: {
+          storeId: `${session.token}-ad5-store`, // never queried — R20 rejects before any lookup
+          zoneCode: "21.01",
+          rule: "NOT_SERVED",
+          updatedAt: "2026-09-05T09:00:00.000Z",
+        },
+      },
+    ];
+
+    const { status, body } = await post(session, events);
+
+    expect(status).toBe(207);
+    expect(body.failed).toHaveLength(2);
+
+    const zoneFailure = body.failed.find((f) => f.id === zoneEventId);
+    expect(zoneFailure?.error).toBe(ZONE_TARIFF_DELETE_NOT_SUPPORTED);
+    const catFailure = body.failed.find((f) => f.id === catEventId);
+    expect(catFailure?.error).toBeDefined();
+    expect(catFailure?.error).not.toBe(ZONE_TARIFF_DELETE_NOT_SUPPORTED);
+
+    // The read this file already relies on for C8 (dependencyCascade.db.test.ts,
+    // "the dragged event's OWN SyncEvent row is FAILED with the exact
+    // constant") — applied here to BOTH rows, each with its OWN message,
+    // which is exactly what a grouped updateMany could get wrong.
+    const [catRow, zoneRow] = await Promise.all([
+      prisma.syncEvent.findUnique({ where: { eventId: catEventId } }),
+      prisma.syncEvent.findUnique({ where: { eventId: zoneEventId } }),
+    ]);
+    expect(catRow?.status).toBe("FAILED");
+    expect(zoneRow?.status).toBe("FAILED");
+    expect(zoneRow?.error).toBe(ZONE_TARIFF_DELETE_NOT_SUPPORTED);
+    expect(catRow?.error).toBe(catFailure?.error);
+    expect(catRow?.error).not.toBe(zoneRow?.error);
   });
 });

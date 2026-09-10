@@ -11,7 +11,7 @@ import { requireResolution } from "@/features/storefront/server/resolve";
 import { branchTrailStore, brandTrailStore, catalogTrail } from "@/features/storefront/trail";
 import { catalogEntryHref, shouldOfferCatalogEntryLink } from "@/features/catalog/catalogFilters";
 import { CATALOG_ROUTE_SEGMENT } from "@/constants/catalog";
-import { publicEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 import { CATALOG_EAGER_IMAGE_COUNT } from "@/constants/media";
 import { Container } from "@/components/ui/Container";
 import { Alert } from "@/components/ui/Alert";

@@ -10,10 +10,17 @@ import {
 } from "@/constants/orders";
 import type { CreateOrderRequest } from "../schemas";
 import type { PriceChangedLine, QuoteLineReason, UnavailableLine } from "../types";
-import { deliveryFeeForNewOrder, isDeliveryOffered, type DeliveryConfig } from "../deliveryOffer";
+import {
+  deliveryFeeForNewOrder,
+  isDeliveryOffered,
+  type ChosenZone,
+  type DeliveryConfig,
+} from "../deliveryOffer";
 import { isUniqueViolation } from "./prismaErrors";
 import { getOrderByCode, orderWhatsappUrl } from "./read";
 import { loadStoreForOrder, quoteCart, type OrderableLine, type OrderStore } from "./quote";
+import { loadStoreZoneCoverage } from "@/features/zones/server/coverage";
+import type { OfferableZone } from "@/features/zones/coverage";
 
 /**
  * Creación del pedido.
@@ -48,8 +55,20 @@ export type CreateOrderResult =
       disabledAt: Date | null;
     }
   | { kind: "items_unavailable"; lines: UnavailableLine[] }
-  | { kind: "price_changed"; lines: PriceChangedLine[]; total: string }
+  | {
+      kind: "price_changed";
+      lines: PriceChangedLine[];
+      total: string;
+      /** F-042 E15/C13: presente solo cuando el desajuste incluye el
+       *  envío. */
+      delivery?: { was: string | null; now: string };
+    }
   | { kind: "too_many_orders"; retryAfterSeconds: number }
+  // F-042 (architecture.md § AD7, § Flujo C): los dos desenlaces nuevos del
+  // paso 4.2, antes de tocar la comparación de totales — un pedido con la
+  // zona mal no gasta una ranura del límite de abuso.
+  | { kind: "delivery_zone_required" }
+  | { kind: "delivery_zone_not_served"; zoneCode: string }
   | { kind: "failed" };
 
 type MergedItem = { storeProductId: string; qty: number; expectedUnitPrice?: string };
@@ -179,15 +198,70 @@ export async function createOrder(
     deliveryFeeMode: store.deliveryFeeMode,
     deliveryFee: store.deliveryFee,
   };
-  const isDelivery = body.fulfillment === "DELIVERY" && isDeliveryOffered(deliveryConfig);
-  const deliveryFeeAmount = deliveryFeeForNewOrder(
+
+  // 4.1 (F-042, architecture.md § Flujo C) — solo se consulta el tarifario
+  // cuando el modo lo pide; para cualquier otro modo no se consulta nada.
+  const isZoneBased = store.deliveryFeeMode === "ZONE_BASED";
+  const zoneCoverage = isZoneBased ? await loadStoreZoneCoverage(prisma, store.id) : null;
+  const hasResolvableZone = (zoneCoverage?.length ?? 0) > 0;
+
+  // 4.2 — en una tienda ZONE_BASED, un DELIVERY nunca se degrada a PICKUP
+  // en silencio (E20): incluso sin NINGUNA zona resoluble, la respuesta es
+  // el error propio, no un pedido de mostrador que nadie pidió. Por eso
+  // esta rama mira `body.fulfillment` directamente, sin pasar por
+  // `isDeliveryOffered` — la vieja regla de R3 ("sin oferta, se trata como
+  // PICKUP") sigue viva para FLAT_RATE/QUOTED_PER_ORDER, más abajo, pero
+  // ZONE_BASED contesta siempre uno de tres desenlaces (architecture.md
+  // § AD7): sin código, DELIVERY_ZONE_REQUIRED (E17, E20); código presente
+  // pero no ofrecible por ESTA tienda —inventado, retirado, de primer
+  // nivel, NOT_SERVED o de otra tienda: los cinco son el MISMO hecho (E16,
+  // E18, caso límite 14)—, DELIVERY_ZONE_NOT_SERVED; presente y ofrecible,
+  // se resuelve.
+  let resolvedZone: OfferableZone | null = null;
+  if (body.fulfillment === "DELIVERY" && isZoneBased) {
+    if (!body.zoneCode) return { kind: "delivery_zone_required" };
+    const zone = zoneCoverage?.find((z) => z.code === body.zoneCode) ?? null;
+    if (!zone) return { kind: "delivery_zone_not_served", zoneCode: body.zoneCode };
+    resolvedZone = zone;
+  }
+  const chosenZone: ChosenZone | null = resolvedZone
+    ? { code: resolvedZone.code, deliveryFee: resolvedZone.deliveryFee }
+    : null;
+
+  // Para FLAT_RATE/QUOTED_PER_ORDER, R3 de siempre: sin oferta, se trata
+  // como PICKUP. Para ZONE_BASED, `resolvedZone` ya decidió arriba —
+  // `isDeliveryOffered` con `hasResolvableZone` coincide con esa decisión
+  // por construcción (un `resolvedZone` no nulo implica una cobertura no
+  // vacía).
+  const isDelivery =
+    body.fulfillment === "DELIVERY" && isDeliveryOffered(deliveryConfig, { hasResolvableZone });
+
+  const deliveryFeeResult = deliveryFeeForNewOrder(
     deliveryConfig,
     isDelivery ? "DELIVERY" : "PICKUP",
+    chosenZone,
   );
-  // F-031 E2/R3: `null` = not quoted yet — only a QUOTED_PER_ORDER store's
-  // DELIVERY order gets here. Never confused with a genuine `0.00` (R1).
-  const deliveryFee: Money | null =
-    deliveryFeeAmount === null ? null : money(deliveryFeeAmount, store.currencyCode);
+  // F-031 E2/R3: "not_quoted" — only a QUOTED_PER_ORDER store's DELIVERY
+  // order gets here. Never confused with a genuine `0.00` (R1). "zone_required"
+  // is provably unreachable here: whenever isDelivery && ZONE_BASED, the
+  // block above already resolved `chosenZone` or returned before this line.
+  let deliveryFee: Money | null;
+  switch (deliveryFeeResult.kind) {
+    case "charged":
+      deliveryFee = money(deliveryFeeResult.amount, store.currencyCode);
+      break;
+    case "not_quoted":
+      deliveryFee = null;
+      break;
+    case "zone_required":
+      throw new Error(
+        "createOrder: deliveryFeeForNewOrder returned zone_required after the zone was already resolved — this is unreachable by construction",
+      );
+    default: {
+      const exhaustive: never = deliveryFeeResult;
+      throw new Error(`createOrder: unhandled delivery fee result ${String(exhaustive)}`);
+    }
+  }
   const deliveryAddress = isDelivery ? (body.deliveryAddress ?? null) : null;
 
   // R29: total = subtotal - discountTotal + deliveryFee. discountTotal is
@@ -226,7 +300,15 @@ export async function createOrder(
           now: line.unitPrice.amount,
         }));
 
-    return { kind: "price_changed", lines, total: total.amount };
+    // F-042 E15/C13: presente solo cuando el cliente mandó
+    // `expectedDeliveryFee` Y el envío es lo que cambió — "el envío pasó de
+    // 300 a 350" en vez de "los precios cambiaron".
+    const delivery =
+      body.expectedDeliveryFee !== undefined && deliveryFeeResult.kind === "charged"
+        ? { was: body.expectedDeliveryFee, now: deliveryFeeResult.amount }
+        : undefined;
+
+    return { kind: "price_changed", lines, total: total.amount, delivery };
   }
 
   const phone = body.contact.phone;
@@ -297,6 +379,12 @@ export async function createOrder(
           contactPhone: phone,
           contactEmail: body.contact.email ?? null,
           deliveryAddress,
+          // F-042 R19/R20/R21: solo cuando se cierra DELIVERY en una tienda
+          // ZONE_BASED — `resolvedZone` solo se asigna en ese exacto camino
+          // (arriba). El nombre es una INSTANTÁNEA del índice tomada AHORA,
+          // nunca derivada del código al leer (precedente: `rateSnapshot`).
+          deliveryZoneCode: resolvedZone?.code ?? null,
+          deliveryZoneName: resolvedZone?.name ?? null,
           status: "PENDING",
           currencyCode: store.currencyCode,
           subtotal: quote.subtotal.amount,

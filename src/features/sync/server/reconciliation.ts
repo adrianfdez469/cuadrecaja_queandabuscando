@@ -1,7 +1,10 @@
-import { createHash } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { compareUtf8Keys, utf8SortKey } from "@/lib/byteOrder";
+import {
+  byteOrderedEntries,
+  md5OfEntries,
+  tariffReconciliation,
+} from "@/features/sync/reconciliationHash";
 
 /**
  * The four columns the hash is computed over, and nothing more (R9, I3): the
@@ -40,53 +43,71 @@ export function reconciliationEntry(row: ReconciliationRow): string {
 }
 
 /**
- * Hash the published catalogue of one store.
+ * Prisma's `select` for the shipping tariff half of the hash (F-044, R3-R10):
+ * `TariffRow` of `src/features/zones/precedence.ts` is exactly this shape,
+ * so the rows `zoneTariff.findMany` returns need no mapping before
+ * `tariffReconciliation` consumes them.
+ */
+const TARIFF_SELECT = {
+  zoneCode: true,
+  rule: true,
+  deliveryFee: true,
+} as const;
+
+/**
+ * Hash the published catalogue AND the shipping tariff of one store
+ * (F-044): both hashes describe the same `Store`, resolved exactly once.
  *
- * The input is deliberately the source-side identity, price and availability —
- * exactly the fields the sync is responsible for. Admin-owned fields
- * (description, images, overrides) are excluded, because they legitimately
- * differ between the two systems and would make every store look divergent.
+ * The catalogue's input is deliberately the source-side identity, price and
+ * availability — exactly the fields the sync is responsible for. Admin-owned
+ * fields (description, images, overrides) are excluded, because they
+ * legitimately differ between the two systems and would make every store
+ * look divergent.
  *
- * Row order is fixed by byte order of `externalId` (R8), computed in Node
- * rather than delegated to `ORDER BY`: two collations over the same bytes
- * give different hashes, and the two databases belong to two different
- * organisations. The sort below calls `utf8SortKey`/`compareUtf8Keys`
- * directly (`src/lib/byteOrder.ts`, architecture.md D1) — the same two
- * primitives `compareUtf8Bytes` is defined in terms of — so the astral-pair
- * test in `byteOrder.test.ts` covers this exact code path, not a
- * lookalike: a regression to `.sort()` or `.localeCompare()` here would stop
- * using either import and fail to compile as unused, not just drift quietly
- * from what is tested.
+ * Row order for both hashes is fixed by byte order (R8, products; R8 of
+ * F-044, tariff), computed in Node rather than delegated to `ORDER BY`: two
+ * collations over the same bytes give different hashes, and the two
+ * databases belong to two different organisations. Both go through the
+ * SAME `byteOrderedEntries`/`md5OfEntries` skeleton
+ * (`src/features/sync/reconciliationHash.ts`, architecture.md D1) — not two
+ * lookalike implementations.
+ *
+ * The two `findMany` below run with `Promise.all`, NEVER inside a
+ * `$transaction` (R16, AGENTS.md § Cosas que muerden: the pooler runs in
+ * transaction mode and a `$transaction` over the shared client deadlocks
+ * against the pool). `Promise.all` over two independent statements opens no
+ * transaction: two round-trips in parallel, paid once, at the cost of the
+ * slower of the two rather than their sum.
  */
 export async function storeReconciliationHash(
   businessId: string,
   storeExternalId: string,
-): Promise<{ products: number; hash: string } | null> {
+): Promise<{ products: number; hash: string; tariffs: number; tariffHash: string } | null> {
   const store = await prisma.store.findFirst({
     where: { externalId: storeExternalId, businessId },
     select: { id: true },
   });
   if (!store) return null;
 
-  const products = await prisma.storeProduct.findMany({
-    where: { storeId: store.id, deletedAt: null },
-    select: RECONCILIATION_SELECT,
-  });
+  const [products, tariffRows] = await Promise.all([
+    prisma.storeProduct.findMany({
+      where: { storeId: store.id, deletedAt: null },
+      select: RECONCILIATION_SELECT,
+    }),
+    prisma.zoneTariff.findMany({
+      where: { storeId: store.id },
+      select: TARIFF_SELECT,
+    }),
+  ]);
 
-  // The sort key is precomputed once per row with `utf8SortKey` (not
-  // re-encoded inside the comparator on every pairwise call): measured over
-  // 100,000 UUIDs, 132ms with a precomputed key against 312ms encoding
-  // inside the comparator (architecture.md § Contratos).
-  const withKey = products.map((product) => ({
-    product,
-    key: utf8SortKey(product.externalId),
-  }));
-  withKey.sort((a, b) => compareUtf8Keys(a.key, b.key));
+  const entries = byteOrderedEntries(
+    products,
+    (product) => product.externalId,
+    reconciliationEntry,
+  );
+  const hash = md5OfEntries(entries);
 
-  const digest = createHash("md5");
-  for (const { product } of withKey) {
-    digest.update(reconciliationEntry(product));
-  }
+  const { tariffs, tariffHash } = tariffReconciliation(tariffRows);
 
-  return { products: products.length, hash: digest.digest("hex") };
+  return { products: products.length, hash, tariffs, tariffHash };
 }

@@ -78,7 +78,16 @@ afterEach(() => {
 
 async function renderCheckoutForm() {
   const { CheckoutForm } = await import("./CheckoutForm");
-  render(<CheckoutForm storeId={STORE_ID} storeSlug="tienda-demo" />);
+  render(
+    <CheckoutForm
+      storeId={STORE_ID}
+      storeSlug="tienda-demo"
+      deliveryOffered={false}
+      deliveryFeeMode="FLAT_RATE"
+      deliveryFlatFee={null}
+      zoneCoverage={null}
+    />,
+  );
 }
 
 describe("CheckoutForm — autocompletado del perfil (E12-E16)", () => {

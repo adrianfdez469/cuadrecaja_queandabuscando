@@ -38,13 +38,28 @@ beforeEach(() => {
 });
 
 describe("GET /api/internal/reconciliation", () => {
-  it("responde 200 con { products, hash } cuando la tienda existe", async () => {
-    storeReconciliationHash.mockResolvedValue({ products: 15, hash: "a".repeat(32) });
+  it("responde 200 con { products, hash, tariffs, tariffHash } cuando la tienda existe (F-044, I5)", async () => {
+    storeReconciliationHash.mockResolvedValue({
+      products: 15,
+      hash: "a".repeat(32),
+      tariffs: 4,
+      tariffHash: "b".repeat(32),
+    });
 
     const response = await get("?storeId=seed-tienda-1");
     expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body).toEqual({ products: 15, hash: "a".repeat(32) });
+    const text = await response.text();
+    const body = JSON.parse(text) as Record<string, unknown>;
+    expect(body).toEqual({
+      products: 15,
+      hash: "a".repeat(32),
+      tariffs: 4,
+      tariffHash: "b".repeat(32),
+    });
+    // F-044, architecture.md § Contratos 1: the key order is NOT cosmetic —
+    // `scripts/check-reconciliation.mjs --empty` compares the raw body with
+    // `JSON.stringify`, which is ordered by insertion.
+    expect(Object.keys(body)).toEqual(["products", "hash", "tariffs", "tariffHash"]);
     expect(storeReconciliationHash).toHaveBeenCalledWith(CALLER.businessId, "seed-tienda-1");
   });
 

@@ -5,7 +5,7 @@ import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { ResponsiveImage } from "@/components/ui/ResponsiveImage";
 import { PRODUCT_MAX_IMAGES } from "@/constants/media";
-import { publicEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 import { deriveImageVariants } from "@/lib/imageVariants";
 
 type FileState = {

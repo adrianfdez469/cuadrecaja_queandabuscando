@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
-import { publicEnv, serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 
 /**
  * The only module that talks to the Supabase Storage API (HD1, R17).

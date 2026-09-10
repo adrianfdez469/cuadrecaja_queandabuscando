@@ -14,6 +14,7 @@ import {
   recordCanonicalBarcodes,
 } from "../src/features/sync/server/canonicalBarcodes";
 import { mintSyncToken } from "../src/lib/syncAuth";
+import { seedZoneCatalog } from "../src/features/zones/server/catalogSeed";
 import { OPENING_HOURS_VERSION } from "../src/constants/storeHours";
 import type { OpeningHours } from "../src/lib/openingHours";
 import { detectImageMime, extensionForMime, isAllowedImageMime } from "../src/lib/imageType";
@@ -322,6 +323,13 @@ const OTHER_BUSINESS_PRODUCTS: SeedProduct[] = [
 
 async function main() {
   console.log("Seeding…");
+
+  // F-041 (I8): the zone catalog is reference data, not demo data — seeded
+  // FIRST and unconditionally, so every `ZONE_TARIFF`/`Store.zoneCode`
+  // fixture below has something to reference. Idempotent; the CI already
+  // proves it by running `npm run seed` twice (criterio 11).
+  const zoneCatalog = await seedZoneCatalog(prisma);
+  console.log("Zone catalog seeded:", zoneCatalog);
 
   for (const currency of CURRENCIES) {
     await prisma.currency.upsert({

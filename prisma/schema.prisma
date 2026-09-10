@@ -41,9 +41,13 @@ enum CheckoutMode {
 /// F-031. How this store's delivery fee gets decided. Read when an order is
 /// CREATED (E14) and never re-read afterwards. Written by cuadrecaja through
 /// the sync starting F-032; F-031 only reads it.
+/// F-041: third value. A store in ZONE_BASED never charges the column's own
+/// `deliveryFee` (R11) — the tarifario decides, through a ZONE_TARIFF row —
+/// and until F-042 ships no domicilio is offered at all (R13, ADR 0033).
 enum DeliveryFeeMode {
   FLAT_RATE
   QUOTED_PER_ORDER
+  ZONE_BASED
 }
 
 enum OrderStatus {
@@ -93,6 +97,8 @@ enum SyncEntity {
   CURRENCY
   EXCHANGE_RATE
   BUSINESS
+  /// F-041. The zone tariff, v13.
+  ZONE_TARIFF
 }
 
 enum SyncOperation {
@@ -117,6 +123,23 @@ enum SlugKind {
   STOREFRONT
   STORE
   RESERVED
+}
+
+/// F-041. The level of a zone is a DECLARED field, never deduced from the
+/// length or the prefix of its code (R3). The real case is the Isla de la
+/// Juventud: first-level `40`, municipality `40.01`.
+enum ZoneLevel {
+  FIRST_LEVEL
+  MUNICIPALITY
+}
+
+/// F-041 R15. A three-value discriminant, not two flags: `FEE` requires an
+/// amount, `NOT_SERVED` and `INHERIT` forbid one, and `INHERIT` is the ONLY
+/// retraction mechanism there is (R20), at every level.
+enum ZoneTariffRule {
+  FEE
+  NOT_SERVED
+  INHERIT
 }
 
 // ---------------------------------------------------------------------------
@@ -314,6 +337,12 @@ model Store {
   /// silently reopen a store the admin closed for vacation.
   sourceOptIn     Boolean?
 
+  /// F-041 R29 — the store's COMPUTABLE zone, validated against the
+  /// catalog. "Omitir no es apagar" (ADR 0028 (d)): absent leaves the column
+  /// intact, an explicit `null` clears it. `city`/`province` stay PRESENTATION
+  /// text; neither is derived from the other and disagreeing is not an error.
+  zoneCode String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -325,10 +354,87 @@ model Store {
   orders        Order[]
   adminAccess   AdminStoreAccess[]
   searchQueries StoreSearchQuery[]
+  zone          Zone?              @relation(fields: [zoneCode], references: [code])
+  zoneTariffs   ZoneTariff[]
 
   @@index([businessId])
   @@index([storefrontId])
   @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Zones (F-041) — the shipping catalog and its tariff
+// ---------------------------------------------------------------------------
+
+/// F-041 — the zone catalog INDEX, mirror of the committed artefact
+/// (src/features/zones/zone-index.json). The AUTHORITY is the artefact's own
+/// bytes: this table exists for `ZoneTariff`/`Store.zoneCode` referential
+/// integrity and so a person can query the catalog with SQL. Rows are NEVER
+/// deleted (R4): a retired code is marked with `retiredAt` — the same
+/// pattern as `Slug.retiredAt` — and never reused, because a reused code
+/// would leave an old tariff row resolving with a different meaning.
+model Zone {
+  code  String    @id
+  name  String
+  level ZoneLevel
+  /// Present on every municipality row, `null` on every first-level row. The
+  /// escalón above in the precedence (R26) — read by the pure function
+  /// through the INDEX, never by a query.
+  provinceCode String?
+  /// OSM relation id. NOT unique: the Isla de la Juventud appears twice
+  /// (`40` and `40.01`) pointing at the same relation — 184 rows, 183
+  /// relations (I9). Never travels on the wire.
+  osmRelationId String
+  /// The name this zone had in OSM at generation time, so a regeneration can
+  /// tell "a live id that renamed" from "a new id".
+  osmName   String
+  retiredAt DateTime?
+
+  province       Zone?        @relation("ZoneProvince", fields: [provinceCode], references: [code])
+  municipalities Zone[]       @relation("ZoneProvince")
+  tariffs        ZoneTariff[]
+  stores         Store[]
+
+  @@index([provinceCode])
+}
+
+/// F-041 — the version of the index applied to THIS database. One row per
+/// seeded version; the current one reads with ONE query
+/// (`orderBy: { appliedAt: "desc" }`, criterio 11). `sha256` is the hash of
+/// the exact bytes that were seeded.
+model ZoneCatalogVersion {
+  version     String   @id
+  sha256      String
+  generatedAt DateTime
+  zoneCount   Int
+  appliedAt   DateTime @default(now())
+}
+
+/// F-041 — one branch's tariff. One row per `(storeId, zoneCode)`. Does NOT
+/// accept `DELETE` over the wire (R20): `INHERIT` is the retraction. Dies
+/// with the branch through two paths (R22): the FK cascade below, for the
+/// day a `Store` row is truly deleted, and the explicit delete in the
+/// APPLIED path of a `STORE` `operation: "DELETE"`, which today SUSPENDS the
+/// row instead of deleting it (`handlers/store.ts`, I1).
+model ZoneTariff {
+  storeId  String
+  zoneCode String
+  rule     ZoneTariffRule
+  /// NULLABLE because `NOT_SERVED` and `INHERIT` carry no amount (R27): all
+  /// three guards are representable here even though the wire's schema
+  /// rejects them. Same domain and moneda as `Store.deliveryFee` — the
+  /// business's base currency, with no currency column of its own (R16).
+  deliveryFee Decimal? @db.Decimal(14, 2)
+  /// `payload.updatedAt`. NOT NULL: this table is born with this feature, so
+  /// there is no backfill to spare — unlike `Store.sourceUpdatedAt`.
+  sourceUpdatedAt DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  zone  Zone  @relation(fields: [zoneCode], references: [code])
+
+  @@id([storeId, zoneCode])
 }
 
 // ---------------------------------------------------------------------------
@@ -654,6 +760,20 @@ model Order {
   contactPhone    String
   contactEmail    String?
   deliveryAddress String?
+
+  /// F-042 R21 — el MUNICIPIO al que se entrega. `null` salvo en un pedido
+  /// que se cierra como DELIVERY en una tienda ZONE_BASED, igual que
+  /// `deliveryAddress`. SIN clave ajena a `Zone` a propósito
+  /// (architecture.md AD6): un pedido es un documento histórico y no puede
+  /// depender del estado presente de una tabla de referencia, y una FK
+  /// fallida aquí es una venta perdida con un 500 en la única escritura
+  /// pública. Lo que valida el código es el conjunto ofrecible, antes.
+  deliveryZoneCode String?
+  /// F-042 R19/R20 — INSTANTÁNEA del nombre del índice al crear el pedido.
+  /// Nunca derivado del código, nunca recalculado al leer: el precedente es
+  /// `rateSnapshot`, y la razón es la misma. Es el nombre VERBATIM del
+  /// índice, sin la provincia que la pantalla añada para desambiguar (R7).
+  deliveryZoneName String?
 
   status       OrderStatus       @default(PENDING)
   cancelReason String?

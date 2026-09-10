@@ -8,6 +8,7 @@ import { Client } from "pg";
 import { afterAll, beforeAll } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { sweepStaleFixtures } from "@/features/marketplace/server/dbFixtures";
+import { seedZoneCatalog } from "@/features/zones/server/catalogSeed";
 
 /**
  * The precondition is noisy, never a skip (F-015 plan.md PP1, architecture.md
@@ -47,6 +48,22 @@ beforeAll(async () => {
 
   // Restos de una ejecución muerta antes de que este archivo cree las suyas.
   await sweepStaleFixtures();
+
+  // El catálogo de zonas es DATO DE REFERENCIA, no dato de demostración: hay
+  // una FK contra `Zone` desde `ZoneTariff.zoneCode` y desde `Store.zoneCode`,
+  // así que sin él las pruebas de zonas no fallan por lo que miden, sino con
+  // «Foreign key constraint violated on the constraint: Store_zoneCode_fkey».
+  //
+  // Se siembra AQUÍ y no se da por sembrado porque el CI corre `npm run seed`
+  // DESPUÉS de `npm test` (.github/workflows/ci.yml, etapa «Seed is
+  // idempotent»): contra la base recién migrada del CI la tabla está vacía,
+  // aunque en la base local de cualquiera lleve tiempo llena. Es la misma
+  // decisión que `prisma/seed.ts` ya toma en su primera línea —«seeded FIRST
+  // and unconditionally»— y por el mismo motivo.
+  //
+  // Es barato y es idempotente: un solo `INSERT … ON CONFLICT DO UPDATE` con
+  // las 184 filas del artefacto, un round trip, el mismo que corre el seed.
+  await seedZoneCatalog(prisma);
 });
 
 afterAll(async () => {

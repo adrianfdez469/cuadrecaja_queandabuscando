@@ -9,8 +9,11 @@ import type { EventStatus, SyncEventInput } from "./schemas";
  * decision is made from what THIS batch already saw.
  */
 
-/** The two entities whose failure can block others (R3). */
-export type DependencySource = Extract<SyncEventInput["entity"], "CATEGORY" | "CURRENCY">;
+/** The entities whose failure can block others (R3). F-041 SP3/R23 adds
+ *  `STORE`: a `ZONE_TARIFF` needs its branch's `STORE` to have applied
+ *  cleanly in the SAME lote, or the tariff is silently lost the moment the
+ *  POS sees it in `ok` (§ Riesgos, R23). */
+export type DependencySource = Extract<SyncEventInput["entity"], "CATEGORY" | "CURRENCY" | "STORE">;
 
 /**
  * A composite key: the entity pair is PART of the key (E16), so
@@ -41,8 +44,9 @@ export type DependencyRole = {
  * | `CURRENCY`      | `CURRENCY:` + `payload.code`          | `null`                                                              |
  * | `PRODUCT`       | `null`                                | `CATEGORY:` + `payload.localCategoryId`; `null` if falsy (R5)      |
  * | `EXCHANGE_RATE` | `null`                                | `CURRENCY:` + `payload.currency`                                   |
- * | `STORE`         | `null`                                | `null`                                                              |
+ * | `STORE`         | `STORE:` + `payload.storeId` (F-041)  | `null`                                                              |
  * | `BUSINESS`      | `null`                                | `null` (F-038 R12)                                                  |
+ * | `ZONE_TARIFF`   | `null`                                | `STORE:` + `payload.storeId` (F-041 SP3/R23)                       |
  *
  * No row has both columns filled (R11): neither `PRODUCT` nor
  * `EXCHANGE_RATE` is ever a `provides`, so a dependent never itself blocks
@@ -63,14 +67,20 @@ export function dependencyRoleOf(event: SyncEventInput): DependencyRole {
     case "EXCHANGE_RATE":
       return { provides: null, requires: `CURRENCY:${event.payload.currency}` };
     case "STORE":
-      return { provides: null, requires: null };
+      // F-041 SP3/R23: now PROVIDES. Its key is `payload.storeId` — the
+      // POS's own externalId, the same one a `ZONE_TARIFF` of that branch
+      // carries too, so the comparison is byte for byte without resolving
+      // anything against the base (R7 of F-037).
+      return { provides: `STORE:${event.payload.storeId}`, requires: null };
     case "BUSINESS":
       // F-038 R12: no order dependency of any kind — `displayCurrencies` is
       // a single column of a single row, unrelated to the CATEGORY/CURRENCY
       // cascade. This `case` exists so the exhaustive `never` guard below
       // does not have to name BUSINESS, even though the role it plays is
-      // exactly the same as STORE's.
+      // exactly the same as STORE's used to be.
       return { provides: null, requires: null };
+    case "ZONE_TARIFF":
+      return { provides: null, requires: `STORE:${event.payload.storeId}` };
     default: {
       const exhaustive: never = event;
       throw new Error(`dependencyRoleOf: unhandled entity ${JSON.stringify(exhaustive)}`);

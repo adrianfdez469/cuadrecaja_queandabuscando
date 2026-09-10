@@ -5,7 +5,7 @@ import {
   CUSTOMER_HINT_COOKIE,
   CUSTOMER_HINT_MAX_AGE_DAYS,
 } from "@/constants/account";
-import { publicEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 import { isSupabaseAuthConfigured } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {

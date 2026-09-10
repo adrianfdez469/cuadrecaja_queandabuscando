@@ -1,12 +1,18 @@
 # Contrato de integración cuadrecaja ↔ queandabuscando
 
-**Versión 12.2** · 8 de septiembre de 2026
+**Versión 13.4** · 10 de septiembre de 2026 — **BORRADOR, sin publicar.** Sale
+hacia cuadrecaja para revisión mientras F-041 se termina de implementar y de
+verificar; lo que este documento describe de la v13 (`ZONE_BASED`,
+`ZONE_TARIFF`, `zoneCode`, el vector de precedencia) **no se emite todavía** —
+sigue en pie el aviso de más abajo hasta que se retire explícitamente, igual
+que se hizo con `BUSINESS` entre la v11 y la v12.2.
 
 Este documento es lo que el equipo de cuadrecaja implementa. El lado receptor ya
 existe y está verificado contra los casos de abajo, **con una excepción marcada
-a propósito**: lo que la v11 introduce (§ «Cambios respecto a la v10.1») está
-acordado y publicado **antes** de estar implementado en queandabuscando, para
-que cuadrecaja sepa a qué atenerse mientras tanto. La entidad `BUSINESS` y sus
+a propósito**: lo que la v13 introduce (§ «Cambios respecto a la v12.2», de
+aquí abajo) está acordado y publicado **antes** de estar implementado en
+queandabuscando, para que cuadrecaja sepa a qué atenerse mientras tanto — el
+mismo camino que ya recorrió la v11 con `BUSINESS`. La entidad `BUSINESS` y sus
 dos códigos de error, que la v12 publicó con el mismo aviso, **ya están en pie**
 (F-038): podéis emitirla desde ahora. Y mientras tanto siguen
 valiendo las reglas de la v10.1: una tasa nueva tarda hasta una hora en verse en
@@ -39,6 +45,975 @@ delante es lo que implementó.
 
 Una corrección de tipografía o de un enlace roto es una menor: cuesta un dígito
 y evita la pregunta «¿es este el documento que leí?».
+
+## Cambios respecto a la v12.2
+
+**v13.4 (F-044, 10 de septiembre de 2026).** ⑤ Reconciliación gana el hash del
+tarifario de envío: la respuesta de
+`GET /api/internal/reconciliation?storeId=` pasa de `{products, hash}` a
+`{products, hash, tariffs, tariffHash}`, dos campos aditivos en la misma
+llamada, con el mismo `404 UNKNOWN_STORE` y el mismo `400 MISSING_STORE_ID` de
+siempre. `tariffs` cuenta las filas de `ZONE_TARIFF` de esa sucursal cuyo
+`rule` es `FEE` o `NOT_SERVED` — las de `rule: "INHERIT"` no entran, porque
+para la resolución de la tarifa `INHERIT` y «no hay fila» son el mismo
+veredicto — y `tariffHash` es el md5 de su concatenación canónica, con su
+propio pseudocódigo, su SQL espejo y su vector de prueba en § ⑤ más abajo.
+**Quien ignore los dos campos nuevos sigue siendo un lector correcto**: los
+dos campos viejos no cambian de nombre, de tipo ni de valor. Como los dos
+campos son aditivos y el borrador de la v13 sigue sin publicarse, esta
+revisión mueve un dígito **menor** (v13.1 F-042, v13.2 F-043, v13.3 F-045),
+no uno mayor; el día que la v13 se publique, su párrafo de publicación
+—más abajo— ya nombra `tariffs` y `tariffHash` entre lo que gana la
+respuesta de ⑤. La divergencia del tarifario **solo alerta**: no hay query
+convergente para él ni acción de recuperación de este lado — ver § ⑤,
+«La divergencia del tarifario».
+
+**v13.3 (F-045, 10 de septiembre de 2026).** Un `STORE` que responde `failed`,
+`stale` o `skipped_not_published` no escribe **nada**, ni siquiera el nombre
+del negocio o su moneda base: hasta esta revisión, esas dos columnas se
+escribían como la primera sentencia del handler, antes de cualquier guarda, así
+que un evento rechazado —o una reentrega vieja de un evento que ya se había
+aplicado— podía retroceder la moneda del catálogo en silencio. No exige
+cambiar nada en el POS: ni el sobre, ni la respuesta, ni ningún código
+cambian, porque ninguno de los dos lados podía observar esas dos columnas
+desde el otro extremo. De paso, deja de tener esa salvedad implícita lo que
+`STORE_OPENING_HOURS_INVALID` y `STORE_DELIVERY_CONFIG_INCONSISTENT` prometían
+desde la v9 —«ninguno de sus campos se aplica»/«no escribe nada»—: hasta esta
+revisión esas dos filas no eran del todo exactas por la misma causa, y esta
+revisión las vuelve verdad sin tocar ni una palabra de ninguna de las dos.
+
+**v13.2 (F-043, 9 de septiembre de 2026).** Un `zoneCode` que este lado no
+reconoce — ausente del catálogo publicado **o sin la forma del DPA** — deja de
+tumbar el lote entero con `400 INVALID_BATCH` y pasa a fallar **solo ese
+evento**, en `207 failed[]` con su propio código
+(`ZONE_TARIFF_ZONE_UNKNOWN`/`STORE_ZONE_UNKNOWN`, ya reintentables desde la
+v13). El motivo, medido en el código de cuadrecaja y no supuesto: un `400` le
+suma un intento a **todas** las filas del lote en `planOutboxAck`
+(`src/lib/qab/outboxAck.ts` de su repositorio), no a la culpable, y con
+`QAB_OUTBOX_MAX_ATTEMPTS = 6` una sola divergencia de un municipio quemaba los
+seis intentos de cada `PRODUCT`/`STORE` que viajara con ella. Para quien ya
+implementó la v13.1 esto es estrictamente mejor y no exige cambiar nada que ya
+funcionara: un código que ya se trataba como reintentable lo sigue siendo, y
+deja de arrastrar al resto del lote. Cierra el criterio 6 de F-041 y la
+incoherencia I6 que tenía con `STORE.zoneCode` (misma clase de dato malo,
+antes con dos respuestas distintas).
+
+**v13.1 (F-042, 9 de septiembre de 2026, D6 de `.agent/progress/F-042.md`).**
+El borrador de la v13 sigue sin publicarse (D4/D6): mientras no salga, cada
+edición es una revisión del mismo borrador y mueve un dígito **menor**, no
+uno mayor — F-043 la dejará en v13.2. Esta revisión contesta las dos
+preguntas que § «Lo que la v13 reserva para F-042» dejó reservadas
+(`contact.zoneCode`/`contact.zoneName`, ahora en su propia sección más
+abajo) y retira la advertencia de que «entre la v13 y F-042 una tienda
+`ZONE_BASED` no ofrece domicilio» (I6): F-042 ya está construido.
+
+Sube como **mayor** —un tercer valor de `deliveryFeeMode`, una entidad nueva
+en `entity`, un campo nuevo en el `payload` de `STORE`, tres códigos de error y
+—F-044— dos campos nuevos en la respuesta de ⑤ Reconciliación (`tariffs`,
+`tariffHash`) son vocabulario nuevo del cable— pero es **aditiva**: quien
+implementó la v12.2 y no emite `ZONE_BASED` ni `ZONE_TARIFF`, y quien lee solo
+`products`/`hash` de ⑤, sigue siendo un lector correcto y no tiene que tocar
+nada. Las seis entidades anteriores no cambian de forma ni de significado. Es
+la respuesta a **S-007**, cerrada de diseño con vuestro arnés el 2026-09-06.
+
+**No emitáis `ZONE_TARIFF` ni `deliveryFeeMode: "ZONE_BASED"` hasta el
+aviso.** Hasta que el lado receptor esté en pie, `entity` no admite
+`ZONE_TARIFF` y un evento así responde `400 INVALID_BATCH`, llevándose el lote
+entero por delante — el mismo aviso que la v12 llevó para `BUSINESS` y que la
+v12.2 retiró cuando F-038 quedó construido. Se avisará aquí en cuanto
+`bash .agent/verify.sh F-041 --full` esté en verde.
+
+**F-042 ya está construido: el mapa y el selector de zona existen.** La
+advertencia que esta sección llevaba —«entre la v13 y F-042 una tienda
+`ZONE_BASED` no ofrece domicilio»— se retira aquí explícitamente (I6 de
+`.agent/specs/F-042/spec.md`): dejarla puesta le diría al primer negocio que
+la lea que su domicilio sigue apagado, cuando ya no es cierto. Una tienda
+`ZONE_BASED` con al menos una zona con tarifa resoluble **sí ofrece
+domicilio** desde el checkout de queandabuscando, con el municipio elegido
+por el comprador y el importe resuelto por el servidor — ver § «Lo que la
+v13 reserva para F-042», ahora contestada, más abajo.
+
+### `ZONE_BASED`, el tercer valor de `deliveryFeeMode`
+
+Igual que los otros dos, sale del enum — no hay nada que migrar en vuestro
+lado si todavía no lo emitís. `deliveryFeeMode: "ZONE_BASED"` con
+`deliveryEnabled: true` **se acepta y se guarda**, aunque el negocio no haya
+cargado ningún `ZONE_TARIFF` todavía: lo que cierra el domicilio ahí no es el
+`deliveryFee` de la fila —que en este modo **nunca se cobra**, igual que ya se
+ignora en `QUOTED_PER_ORDER`— sino el tarifario, que llega por la entidad de
+abajo y puede cambiar sin ningún evento `STORE`.
+
+### Respuesta al P7 de S-007: `ZONE_BASED` con `deliveryFee` puesto, y el tarifario vacío
+
+Dos huecos que vuestra pantalla de validación previa de F-016 necesita, leídos
+del código que de verdad corre —no de lo que pareciera razonable— antes de
+contestar.
+
+**Un `STORE` con `deliveryFeeMode: "ZONE_BASED"` y un `deliveryFee` puesto: se
+acepta, se guarda, y el importe se ignora — no es incoherente y no tumba el
+lote.** `storePayloadSchema.refine` (`src/features/sync/schemas.ts`) solo
+compara `deliveryFeeMode === "FLAT_RATE"` contra un `deliveryFee` nulo; no
+existe ninguna regla equivalente para `ZONE_BASED`, así que el evento pasa el
+`400` del sobre sin más. En el aplicador,
+`hasSomethingToChargeDeliveryWith` (`src/features/orders/deliveryOffer.ts`)
+devuelve `true` para `ZONE_BASED` **incondicionalmente**, sin mirar
+`config.deliveryFee` en absoluto — es la misma rama que ya ignora la columna
+para decidir si el domicilio es coherente—, así que
+`isDeliveryConfigInconsistent` nunca se dispara por esto. El valor se escribe
+en la columna `Store.deliveryFee` (el handler no filtra qué campos persistir
+por modo) pero ningún camino de precio lo vuelve a leer: ni `deliveryOffer.ts`
+ni `quote.ts` consultan `deliveryFee` cuando el modo es `ZONE_BASED`. Un
+residuo inerte, no un error — el mismo trato que ya recibe un `deliveryFee`
+que sobra en `QUOTED_PER_ORDER`.
+
+**Una tienda `ZONE_BASED` con domicilio habilitado y CERO filas de tarifario
+es LEGAL.** Es la decisión SP2 del humano de este lado, dicha aquí con letra:
+se acepta y se guarda sin ningún `ZONE_TARIFF`, y simplemente **no ofrece
+domicilio** hasta que exista al menos una fila que decida — hoy eso es
+siempre, porque F-042 (el selector) no existe todavía; el día que exista,
+seguirá siendo cierto zona por zona, para cualquier municipio o provincia sin
+fila que decida por él.
+
+**El pie de plomo que pedisteis, para vuestra pantalla de F-016.** Cambiar
+`deliveryFeeMode` de `FLAT_RATE` a `ZONE_BASED` **apaga el domicilio en el
+acto**, y sigue apagado hasta que el comerciante cargue tarifario: no hay
+período de gracia ni valor heredado del modo anterior. Es lo que vuestra
+pantalla tiene que decirle al comerciante ANTES de guardar el cambio, no
+después de que el primer pedido a domicilio se pierda solo.
+
+### La entidad `ZONE_TARIFF`
+
+La séptima del outbox, y habla de una tarifa de una sucursal para una zona —
+nunca del negocio ni de un producto.
+
+#### `payload` de `ZONE_TARIFF` (v13)
+
+```jsonc
+{
+  "storeId": "uuid-de-la-Tienda-en-el-POS", // el mismo externalId que STORE
+  "zoneCode": "23.05", // tiene que existir en el catálogo publicado, verbatim
+  "rule": "FEE", // FEE | NOT_SERVED | INHERIT
+  "deliveryFee": 300.0, // obligatorio con FEE, PROHIBIDO en las otras dos
+  "updatedAt": "2026-09-08T14:03:00.000Z", // guarda anti-rancio
+}
+```
+
+| Campo         | Tipo     | Obligatorio | Notas                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------- | -------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `storeId`     | `string` | **sí**      | El mismo `externalId` que ya usáis en `STORE`. **Sin `businessId`**: la identidad la da el token, y `storeId` ya ata la fila al negocio                                                                                                                                                                                                                                                          |
+| `zoneCode`    | `string` | **sí**      | Forma DPA **verbatim**, con punto: `^\d{2}$` para primer nivel, `^\d{2}\.\d{2}$` para municipio — desde la v13.2, esa forma la comprueba el APLICADOR, no el sobre. Tiene que existir en el catálogo publicado (§ «La versión del catálogo» abajo); si no está en el catálogo **o no tiene esta forma**, `207 failed[]` con `ZONE_TARIFF_ZONE_UNKNOWN` de **ese evento**, nunca un `400` de lote |
+| `rule`        | `enum`   | **sí**      | `FEE` \| `NOT_SERVED` \| `INHERIT`. Discriminante de tres valores, nunca dos banderas                                                                                                                                                                                                                                                                                                            |
+| `deliveryFee` | `number` | Depende     | **Obligatorio** con `rule: "FEE"` (no negativo, múltiplo de `0.01`, tope `999999999999.99` — mismo dominio que `STORE.deliveryFee`, misma moneda: la base del negocio, sin campo de moneda propio). **PROHIBIDO** con `NOT_SERVED`/`INHERIT` — presente, incluido un `null` explícito, es `400 ZONE_TARIFF_FEE_NOT_ALLOWED`                                                                      |
+| `updatedAt`   | ISO 8601 | **sí**      | Guarda anti-rancio, como en `STORE`/`PRODUCT`/`CATEGORY`/`BUSINESS`: un evento con `updatedAt` menor o igual al guardado no escribe y da `stale`                                                                                                                                                                                                                                                 |
+
+**`operation`: `CREATE` y `UPDATE` son el mismo upsert. `DELETE` se rechaza
+siempre**, con `ZONE_TARIFF_DELETE_NOT_SUPPORTED` en `failed[]`, **antes** de
+cualquier comprobación de fecha — es lo primero que ocurre, antes incluso de
+mirar si el evento es rancio. **`INHERIT` es el único mecanismo de retracción
+que existe**, en todos los niveles, incluida una fila de provincia: para
+retirar una regla, mandad `rule: "INHERIT"` con un `updatedAt` posterior, nunca
+un `DELETE`. La razón: un borrado deja la fila sin marca contra la que
+comparar, y un `UPDATE` rancio que llegara después la resucitaría con un
+importe viejo — en un tarifario eso sería un importe cobrado de más o de
+menos, no un problema cosmético.
+
+**Una zona retirada del catálogo (R4) sigue aceptando tarifa.** El evento se
+guarda con `processed` normal; que no se ofrezca al comprador es cosa del
+selector de F-042.
+
+**Una tarifa cuyo `STORE` falló en el mismo lote no se aplica a medias.** Si
+el `STORE` de esa sucursal falló antes en el mismo lote (calendario mal
+formado, por ejemplo), sus `ZONE_TARIFF` vuelven en `failed[]` con
+`DEPENDENCY_FAILED_IN_BATCH` — **nunca** como `skipped_not_published`, que
+viajaría en `ok` y os haría dar esas tarifas por entregadas para siempre. Ver
+«La cascada `STORE → ZONE_TARIFF`» abajo.
+
+**Un `storeId` de otro negocio es indistinguible de uno inexistente (S-007,
+uno de los cinco menores), comprobado ejecutando y no solo leyendo el
+código.** El `storeId` de ⑤ Reconciliación —que desde F-044 también resuelve
+`tariffs`/`tariffHash`, no solo `products`/`hash`— responde `404 UNKNOWN_STORE`
+en los dos casos; el
+outbox de `ZONE_TARIFF` es un evento, no un `GET`, así que el mecanismo es
+otro pero la propiedad es la misma: `handleZoneTariff`
+(`src/features/sync/server/handlers/zoneTariff.ts`) hace
+`if (!store || store.businessId !== businessId) return SKIPPED`, la MISMA
+rama para «no existe» y para «existe pero es de otro negocio». Ejecutado
+contra Postgres real, con dos negocios de prueba: el negocio B enviando un
+`ZONE_TARIFF` sobre la tienda del negocio A responde `207` con
+`{"eventId":"...","status":"skipped_not_published"}` en `ok` — el mismo
+resultado, byte a byte, que un `storeId` que no existe en absoluto (E11) — y
+la tabla `ZoneTariff` de la tienda del negocio A queda en cero filas nuevas.
+
+### `zoneCode` en el `payload` de `STORE`
+
+Un campo nuevo, opcional, en la configuración de la tienda:
+
+```jsonc
+{
+  // … el resto del payload de STORE, sin cambios …
+  "zoneCode": "23.05", // opcional; tiene que existir en el catálogo si viene
+}
+```
+
+**Tiene la MISMA semántica de omisión que las cinco columnas de compra de la
+v7** (`checkoutMode`, `deliveryEnabled`, `deliveryFee`, `deliveryFeeMode`,
+`orderExpiryHours`), **no la de los nueve campos de contacto**: ausente deja
+la columna **intacta**, `null` explícito la **borra**. Es configuración
+computable que todavía no emitís, no un dato de presentación como `city`/
+`province` — que siguen siendo texto libre y no se derivan de `zoneCode` ni al
+revés; que contradigan a `zoneCode` no es un error.
+
+**Un `zoneCode` que no existe en el catálogo, o que no tiene la forma del
+DPA (desde la v13.2: el sobre ya no comprueba ninguna de las dos), falla ESE
+evento entero**, con `STORE_ZONE_UNKNOWN` en `207 failed[]`: ninguno de sus
+otros campos se aplica —tampoco un `phone` corregido, tampoco el nombre del
+negocio ni su moneda base, que viajan en este mismo evento (v13.3)— y
+`sourceUpdatedAt` no avanza. Es el mismo patrón que ya tiene
+`STORE_OPENING_HOURS_INVALID`/`STORE_TIMEZONE_INVALID` desde la v9. Con un
+`zoneCode` del catálogo, `processed` normal y la columna queda escrita.
+
+### `contact.zoneCode` y `contact.zoneName` (F-042, v13.1)
+
+Las dos preguntas que la v13 dejó reservadas aquí ya están contestadas:
+`contact` gana estas DOS claves nuevas, siempre dentro de las cuatro de
+siempre (`name`, `phone`, `email`, `address`).
+
+```jsonc
+"contact": {
+  "name": "Ana Pérez",
+  "phone": "+5355555555",
+  "email": null,
+  "address": "Calle 23 esq. L, Vedado",
+  "zoneCode": "23.01", // SIEMPRE presente. null cuando el pedido no lleva zona
+  "zoneName": "Playa", // SIEMPRE presente. null en el mismo caso
+}
+```
+
+- **SIEMPRE presentes, `string | null`.** Igual que `email`/`address`: un
+  pedido de recogida, uno de una tienda que no es `ZONE_BASED`, o uno
+  anterior a este feature, trae las dos claves valiendo `null` — nunca
+  ausentes. Un lector que ya espera la clave no se rompe con un pedido sin
+  zona.
+- **Obligatorias DE HECHO** en un pedido a domicilio de una tienda
+  `ZONE_BASED`: ese camino nunca deja `Order.deliveryFee` sin cotizar (ver
+  más abajo), así que las dos siempre tienen valor ahí.
+- **`contact.zoneCode` es SIEMPRE un municipio**, nunca un código de
+  provincia ni de primer nivel: el comprador elige de una lista de 168
+  municipios (incluida la Isla de la Juventud como `40.01`); un código de
+  provincia es un filtro de esa lista, no algo que se pueda enviar.
+- **`contact.zoneName` es de lectura humana y NO resuelve nada.** Es una
+  INSTANTÁNEA del nombre del catálogo al momento del pedido — nunca se
+  compara, se parsea ni empareja contra nada. Si el catálogo renombra
+  `23.01` después, este pedido sigue diciendo el nombre que el comprador
+  vio. El precio, la cobertura y el emparejamiento salen siempre de
+  `contact.zoneCode`.
+
+**En un pedido a domicilio de una tienda `ZONE_BASED`, `deliveryFeePending`
+es SIEMPRE `false` y el importe ya está resuelto.** `ZONE_BASED` y
+`QUOTED_PER_ORDER` son valores excluyentes del mismo `deliveryFeeMode`: no
+hay configuración que dé lugar a los dos a la vez, así que un pedido
+`ZONE_BASED` nunca llega con el envío sin cotizar.
+
+### La precedencia, con letra
+
+Cuando alguien —vuestro POS o F-042 de este lado— necesita saber qué tarifa
+aplica a una zona, la regla es:
+
+- **Si la zona es un MUNICIPIO**: su propia fila decide si tiene una y esa
+  fila no es `INHERIT`. Si no decide (no tiene fila, o la tiene con
+  `INHERIT`), decide la fila de **su provincia declarada**, con la misma
+  regla. Si tampoco decide, la zona **no está servida**.
+- **Si la zona es de PRIMER NIVEL** (una provincia, o la Isla de la
+  Juventud): solo su propia fila decide. **No hay segundo escalón** — ni
+  siquiera si el código, por su forma, pareciera pertenecer a otra provincia.
+- **Una fila `FEE` sin importe NO decide** (cae al escalón de arriba). **Una
+  fila `FEE` con importe `0` SÍ decide**: es envío gratis, no «no servida».
+  **Un importe negativo no decide** (además de rechazarse en el propio
+  evento).
+- Gana siempre lo más específico. Ninguna fila de otra provincia participa
+  nunca en la resolución de una zona.
+
+Este algoritmo **lo implementan los dos lados**: vuestro POS necesita
+enseñarle al encargado, antes de guardar su tarifario, qué va a cobrar
+realmente — y el vector de abajo es lo que prueba que las dos implementaciones
+coinciden, caso por caso y camino completo, no solo en el importe final.
+
+### El vector de precedencia de `ZONE_TARIFF` (v13)
+
+Trece casos —diez de precedencia (`V1`-`V10`) y tres de las guardas de importe
+(`G1`-`G3`)—, **calculados ejecutando la función pura** sobre el fixture de
+abajo, nunca transcritos a mano. `zone` es la zona consultada, declarada con
+su `code`/`level`/`provinceCode` — nunca deducida de la forma del código.
+`rows` son las filas del tarifario relevantes, en la forma del `payload`
+(importe como número). `expected.deliveryFee` es una cadena de dos decimales o
+`null`, nunca un número. `expected.path` son los escalones **consultados**, en
+orden, cada uno con lo que dijo (`FEE`, `FEE_WITHOUT_AMOUNT`, `FEE_NEGATIVE`,
+`NOT_SERVED`, `INHERIT`, `ABSENT`) y si decidió.
+
+**Estos trece no son necesariamente los únicos que cruzasteis el 2026-09-06**:
+si vuestra implementación tiene casos que aquí no están, mandadlos y se
+publica la **unión**, nunca la intersección — ningún caso se quita de este
+bloque para que la cuenta cuadre.
+
+#### Vector de precedencia de ZONE_TARIFF (v13)
+
+```json
+{
+  "version": "1",
+  "fixture": {
+    "zones": [
+      {
+        "code": "03.05",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      },
+      {
+        "code": "03.03",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      },
+      {
+        "code": "03.04",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      },
+      {
+        "code": "03.07",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      },
+      {
+        "code": "04.02",
+        "level": "MUNICIPALITY",
+        "provinceCode": "04"
+      },
+      {
+        "code": "04.05",
+        "level": "MUNICIPALITY",
+        "provinceCode": "04"
+      },
+      {
+        "code": "05.03",
+        "level": "MUNICIPALITY",
+        "provinceCode": "05"
+      },
+      {
+        "code": "05.04",
+        "level": "MUNICIPALITY",
+        "provinceCode": "05"
+      },
+      {
+        "code": "06.01",
+        "level": "MUNICIPALITY",
+        "provinceCode": "06"
+      },
+      {
+        "code": "03.40",
+        "level": "FIRST_LEVEL",
+        "provinceCode": "03"
+      },
+      {
+        "code": "03.09",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      },
+      {
+        "code": "03.10",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      },
+      {
+        "code": "03.11",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      }
+    ],
+    "rows": [
+      {
+        "zoneCode": "03.05",
+        "rule": "NOT_SERVED"
+      },
+      {
+        "zoneCode": "03.03",
+        "rule": "INHERIT"
+      },
+      {
+        "zoneCode": "03",
+        "rule": "FEE",
+        "deliveryFee": 300
+      },
+      {
+        "zoneCode": "03.07",
+        "rule": "FEE",
+        "deliveryFee": 150
+      },
+      {
+        "zoneCode": "04.02",
+        "rule": "FEE",
+        "deliveryFee": 200
+      },
+      {
+        "zoneCode": "04",
+        "rule": "NOT_SERVED"
+      },
+      {
+        "zoneCode": "05.03",
+        "rule": "FEE",
+        "deliveryFee": 250
+      },
+      {
+        "zoneCode": "05",
+        "rule": "INHERIT"
+      },
+      {
+        "zoneCode": "03.09",
+        "rule": "FEE"
+      },
+      {
+        "zoneCode": "03.10",
+        "rule": "FEE",
+        "deliveryFee": 0
+      },
+      {
+        "zoneCode": "03.11",
+        "rule": "FEE",
+        "deliveryFee": -50
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "V1",
+      "zone": {
+        "code": "03.05",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      },
+      "rows": [
+        {
+          "zoneCode": "03.05",
+          "rule": "NOT_SERVED"
+        }
+      ],
+      "expected": {
+        "served": false,
+        "deliveryFee": null,
+        "decidedBy": "03.05",
+        "path": [
+          {
+            "code": "03.05",
+            "level": "MUNICIPALITY",
+            "verdict": "NOT_SERVED",
+            "decides": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "V2",
+      "zone": {
+        "code": "03.03",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      },
+      "rows": [
+        {
+          "zoneCode": "03.03",
+          "rule": "INHERIT"
+        },
+        {
+          "zoneCode": "03",
+          "rule": "FEE",
+          "deliveryFee": 300
+        }
+      ],
+      "expected": {
+        "served": true,
+        "deliveryFee": "300.00",
+        "decidedBy": "03",
+        "path": [
+          {
+            "code": "03.03",
+            "level": "MUNICIPALITY",
+            "verdict": "INHERIT",
+            "decides": false
+          },
+          {
+            "code": "03",
+            "level": "FIRST_LEVEL",
+            "verdict": "FEE",
+            "decides": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "V3",
+      "zone": {
+        "code": "03.04",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      },
+      "rows": [
+        {
+          "zoneCode": "03",
+          "rule": "FEE",
+          "deliveryFee": 300
+        }
+      ],
+      "expected": {
+        "served": true,
+        "deliveryFee": "300.00",
+        "decidedBy": "03",
+        "path": [
+          {
+            "code": "03.04",
+            "level": "MUNICIPALITY",
+            "verdict": "ABSENT",
+            "decides": false
+          },
+          {
+            "code": "03",
+            "level": "FIRST_LEVEL",
+            "verdict": "FEE",
+            "decides": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "V4",
+      "zone": {
+        "code": "03.07",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      },
+      "rows": [
+        {
+          "zoneCode": "03.07",
+          "rule": "FEE",
+          "deliveryFee": 150
+        }
+      ],
+      "expected": {
+        "served": true,
+        "deliveryFee": "150.00",
+        "decidedBy": "03.07",
+        "path": [
+          {
+            "code": "03.07",
+            "level": "MUNICIPALITY",
+            "verdict": "FEE",
+            "decides": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "V5",
+      "zone": {
+        "code": "04.02",
+        "level": "MUNICIPALITY",
+        "provinceCode": "04"
+      },
+      "rows": [
+        {
+          "zoneCode": "04.02",
+          "rule": "FEE",
+          "deliveryFee": 200
+        }
+      ],
+      "expected": {
+        "served": true,
+        "deliveryFee": "200.00",
+        "decidedBy": "04.02",
+        "path": [
+          {
+            "code": "04.02",
+            "level": "MUNICIPALITY",
+            "verdict": "FEE",
+            "decides": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "V6",
+      "zone": {
+        "code": "04.05",
+        "level": "MUNICIPALITY",
+        "provinceCode": "04"
+      },
+      "rows": [
+        {
+          "zoneCode": "04",
+          "rule": "NOT_SERVED"
+        }
+      ],
+      "expected": {
+        "served": false,
+        "deliveryFee": null,
+        "decidedBy": "04",
+        "path": [
+          {
+            "code": "04.05",
+            "level": "MUNICIPALITY",
+            "verdict": "ABSENT",
+            "decides": false
+          },
+          {
+            "code": "04",
+            "level": "FIRST_LEVEL",
+            "verdict": "NOT_SERVED",
+            "decides": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "V7",
+      "zone": {
+        "code": "05.03",
+        "level": "MUNICIPALITY",
+        "provinceCode": "05"
+      },
+      "rows": [
+        {
+          "zoneCode": "05.03",
+          "rule": "FEE",
+          "deliveryFee": 250
+        },
+        {
+          "zoneCode": "05",
+          "rule": "INHERIT"
+        }
+      ],
+      "expected": {
+        "served": true,
+        "deliveryFee": "250.00",
+        "decidedBy": "05.03",
+        "path": [
+          {
+            "code": "05.03",
+            "level": "MUNICIPALITY",
+            "verdict": "FEE",
+            "decides": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "V8",
+      "zone": {
+        "code": "05.04",
+        "level": "MUNICIPALITY",
+        "provinceCode": "05"
+      },
+      "rows": [
+        {
+          "zoneCode": "05",
+          "rule": "INHERIT"
+        }
+      ],
+      "expected": {
+        "served": false,
+        "deliveryFee": null,
+        "decidedBy": null,
+        "path": [
+          {
+            "code": "05.04",
+            "level": "MUNICIPALITY",
+            "verdict": "ABSENT",
+            "decides": false
+          },
+          {
+            "code": "05",
+            "level": "FIRST_LEVEL",
+            "verdict": "INHERIT",
+            "decides": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "V9",
+      "zone": {
+        "code": "06.01",
+        "level": "MUNICIPALITY",
+        "provinceCode": "06"
+      },
+      "rows": [],
+      "expected": {
+        "served": false,
+        "deliveryFee": null,
+        "decidedBy": null,
+        "path": [
+          {
+            "code": "06.01",
+            "level": "MUNICIPALITY",
+            "verdict": "ABSENT",
+            "decides": false
+          },
+          {
+            "code": "06",
+            "level": "FIRST_LEVEL",
+            "verdict": "ABSENT",
+            "decides": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "V10",
+      "zone": {
+        "code": "03.40",
+        "level": "FIRST_LEVEL",
+        "provinceCode": "03"
+      },
+      "rows": [],
+      "expected": {
+        "served": false,
+        "deliveryFee": null,
+        "decidedBy": null,
+        "path": [
+          {
+            "code": "03.40",
+            "level": "FIRST_LEVEL",
+            "verdict": "ABSENT",
+            "decides": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "G1",
+      "zone": {
+        "code": "03.09",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      },
+      "rows": [
+        {
+          "zoneCode": "03.09",
+          "rule": "FEE"
+        },
+        {
+          "zoneCode": "03",
+          "rule": "FEE",
+          "deliveryFee": 300
+        }
+      ],
+      "expected": {
+        "served": true,
+        "deliveryFee": "300.00",
+        "decidedBy": "03",
+        "path": [
+          {
+            "code": "03.09",
+            "level": "MUNICIPALITY",
+            "verdict": "FEE_WITHOUT_AMOUNT",
+            "decides": false
+          },
+          {
+            "code": "03",
+            "level": "FIRST_LEVEL",
+            "verdict": "FEE",
+            "decides": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "G2",
+      "zone": {
+        "code": "03.10",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      },
+      "rows": [
+        {
+          "zoneCode": "03.10",
+          "rule": "FEE",
+          "deliveryFee": 0
+        }
+      ],
+      "expected": {
+        "served": true,
+        "deliveryFee": "0.00",
+        "decidedBy": "03.10",
+        "path": [
+          {
+            "code": "03.10",
+            "level": "MUNICIPALITY",
+            "verdict": "FEE",
+            "decides": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "G3",
+      "zone": {
+        "code": "03.11",
+        "level": "MUNICIPALITY",
+        "provinceCode": "03"
+      },
+      "rows": [
+        {
+          "zoneCode": "03.11",
+          "rule": "FEE",
+          "deliveryFee": -50
+        },
+        {
+          "zoneCode": "03",
+          "rule": "FEE",
+          "deliveryFee": 300
+        }
+      ],
+      "expected": {
+        "served": true,
+        "deliveryFee": "300.00",
+        "decidedBy": "03",
+        "path": [
+          {
+            "code": "03.11",
+            "level": "MUNICIPALITY",
+            "verdict": "FEE_NEGATIVE",
+            "decides": false
+          },
+          {
+            "code": "03",
+            "level": "FIRST_LEVEL",
+            "verdict": "FEE",
+            "decides": true
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+### El hash del bloque JSON de arriba (S-007, punto 6)
+
+Cuadrecaja no puede leer este documento desde su propio proceso de pruebas:
+el contrato vive en el repositorio de queandabuscando, ellos resuelven la
+ruta por `QAB_DOCS_PATH` (que no está en su CI) y su propia regla prohíbe que
+un test adivine una ruta que falte — un test que se salta a sí mismo cuando
+la variable no está puesta es decorativo. La solución: este documento publica
+el hash del bloque, y su copia commiteada del vector se fija contra ESE
+número, nunca contra el fichero. Se conserva la propiedad que importa —una
+copia editada a mano dentro de su repositorio deja de coincidir y su
+prueba falla— sin exigirles un fichero que no está en su disco.
+
+**Sobre qué bytes exactos se calcula, para que sea reproducible en los dos
+lados:** el hash es un `sha256` en hexadecimal, calculado sobre el texto que
+cae **entre** el delimitador de apertura ` ```json\n` (sin incluirlo) y el
+delimitador de cierre `\n``` ` de arriba (sin incluirlo) — ni una línea más,
+ni una menos. Es literalmente el grupo 1 que captura
+`/```json\n([\s\S]*?)\n```/` en `src/features/zones/precedence.test.ts`, que
+ya usa esa misma expresión para leer el vector y ejecutarlo. Sin ninguna
+normalización: ni recorte de espacios, ni recodificación de fin de línea, ni
+reserialización del JSON con otro `stringify` — un solo espacio de
+indentación que cambie en el bloque de arriba mueve este hash.
+
+**sha256 del bloque JSON del vector (v13):**
+`0a4fbe39e79054ffcd47b42450f1deeb35d823644b610b7602c147ff0e175bc0`
+
+`precedence.test.ts` recalcula este mismo hash sobre el mismo bloque que ya
+lee para ejecutar el vector, y lo compara contra la línea de arriba: si el
+vector cambia sin que este número se actualice con él, esa prueba falla
+**aquí**, no solo en cuadrecaja.
+
+### Los tres códigos de error nuevos
+
+Los tres van a § «Vocabulario de errores» de abajo, con su fila, y con su
+clase para el outbox (S-007, punto 9): **permanente** (falla igual en los
+`QAB_OUTBOX_MAX_ATTEMPTS` reintentos porque el dato hay que corregirlo en el
+POS antes de reenviar, el mismo criterio que ya clasifica
+`STORE_DELIVERY_CONFIG_INCONSISTENT`) o **reintentable** (el mismo evento,
+sin cambiar un solo byte, puede terminar aplicándose cuando los dos catálogos
+converjan — no es un dato mal formado, es un desacuerdo momentáneo entre dos
+copias del mismo catálogo; también lo es un código **mal formado**, que nunca
+converge y por eso agota los seis reintentos de ESE evento y de ninguno más —
+decisión F-043). Un cuarto, `ZONE_TARIFF_FEE_NOT_ALLOWED`, vive
+dentro de `issues[].message` de un `400` del sobre — no es un código del
+vocabulario que se compara byte a byte, es el texto que explica cuál de las
+dos reglas de `rule` rompió, y su clase es **permanente**: el mismo
+`payload`, con el mismo `deliveryFee` puesto donde `rule` lo prohíbe, falla
+igual la próxima vez — hace falta que el POS quite el campo o cambie la
+regla antes de reenviar.
+
+| Código                             | Cuándo                                                                                                                                                          | Dónde                        | Clase (S-007, punto 9)                                                                                                                                  |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ZONE_TARIFF_ZONE_UNKNOWN`         | `zoneCode` de un `ZONE_TARIFF` que no está en el catálogo publicado **o que no tiene la forma del DPA** (v13.2, F-043: el sobre ya no distingue las dos causas) | `207 failed[]` de ese evento | **Reintentable** — el mismo evento aplica cuando los catálogos converjan; con un código mal formado agota los reintentos de ESE evento y de ninguno más |
+| `ZONE_TARIFF_DELETE_NOT_SUPPORTED` | `operation: "DELETE"` en un `ZONE_TARIFF` — no es una operación que esta entidad soporte                                                                        | `207 failed[]` de ese evento | **Permanente** — un `DELETE` nunca se vuelve válido; hay que reenviar `INHERIT`                                                                         |
+| `STORE_ZONE_UNKNOWN`               | `zoneCode` de un `STORE` que no está en el catálogo publicado **o que no tiene la forma del DPA** (v13.2, F-043)                                                | `207 failed[]` de ese evento | **Reintentable** — el mismo evento aplica cuando los catálogos converjan; con un código mal formado agota los reintentos de ESE evento y de ninguno más |
+
+**Ejemplo, `ZONE_TARIFF_ZONE_UNKNOWN`, ese evento en `failed[]` y los demás
+del lote aplicados (v13.2, F-043):**
+
+```jsonc
+// petición: un lote de 500 eventos, uno de ellos con zoneCode: "99.99"
+// respuesta:
+{
+  "ok": [/* los otros 499 eventos, cada uno "processed", "skipped" o "duplicate" */],
+  "failed": [{ "id": "el-eventId-de-ese-ZONE_TARIFF", "error": "ZONE_TARIFF_ZONE_UNKNOWN" }],
+}
+// los otros 499 eventos se aplican; solo ese tarifario queda sin escribir, y
+// vuelve a intentarse en la siguiente entrega del mismo eventId (R4)
+```
+
+Antes de la v13.2 esto era un `400` que se llevaba los otros 499 eventos por
+delante, el mismo precio que la ADR 0028 § Consecuencias aceptó para un valor
+mal formado de `STORE` (I6 de `architecture.md` de F-043). Medido en el código
+de vuestro outbox y no supuesto: ese `400` os sumaba un intento a **todas**
+las filas del lote en `planOutboxAck`, no a la culpable, y con
+`QAB_OUTBOX_MAX_ATTEMPTS = 6` una sola divergencia de un municipio quemaba los
+seis intentos de cada `PRODUCT`/`STORE` que viajara con ella — la razón de ser
+de esta revisión. Ver `docs/adr/0034-lo-que-valida-el-sobre-y-lo-que-valida-el-aplicador.md`.
+
+### La cascada `STORE → ZONE_TARIFF`
+
+**Nueva fila en la tabla de dependencias intra-lote** que ya documenta
+`DEPENDENCY_FAILED_IN_BATCH` (§ «Cambios respecto a la v10.1» ③): desde la
+v13, `STORE` también **provee** una clave de dependencia, con la que
+`ZONE_TARIFF` de esa misma sucursal **requiere**.
+
+| Entidad         | Provee                         | Requiere                        |
+| --------------- | ------------------------------ | ------------------------------- |
+| `CATEGORY`      | `CATEGORY:` + `categoryId`     | —                               |
+| `CURRENCY`      | `CURRENCY:` + `code`           | —                               |
+| `PRODUCT`       | —                              | `CATEGORY:` + `localCategoryId` |
+| `EXCHANGE_RATE` | —                              | `CURRENCY:` + `currency`        |
+| `STORE`         | `STORE:` + `storeId` **(v13)** | —                               |
+| `ZONE_TARIFF`   | —                              | `STORE:` + `storeId` **(v13)**  |
+
+**Lo que cambia para vosotros:** un `STORE` de una sucursal nueva que falla
+(un calendario mal formado, por ejemplo) hace que los `ZONE_TARIFF` de esa
+misma sucursal que viajan **en el mismo lote, detrás de él**, vuelvan en
+`failed[]` con `DEPENDENCY_FAILED_IN_BATCH` en vez de aplicarse contra una
+sucursal que no llegó a existir. **No cambia nada si el `STORE` y sus
+`ZONE_TARIFF` viajan en lotes distintos**: ahí sigue el comportamiento de
+siempre (`skipped_not_published` si la sucursal todavía no existe).
+
+### La versión del catálogo geográfico
+
+Los dos lados comparten el mismo catálogo de 184 zonas —16 divisiones de
+primer nivel y 168 municipios— por estos tres datos, que tienen que coincidir
+byte a byte:
+
+| Dato                 | Valor                                                                                                 |
+| -------------------- | ----------------------------------------------------------------------------------------------------- |
+| Versión del catálogo | `1.0.0`                                                                                               |
+| `sha256` del fichero | `9bb89dd3564b0b202f975160f98be449efdc3c2b3d8594df6a7ec8009853b019`                                    |
+| Ruta del artefacto   | `src/features/zones/zone-index.json` en el repositorio de queandabuscando (adjunto con este borrador) |
+
+Cualquier cambio de cualquier fila mueve la versión **menor** (`1.0.0` →
+`1.1.0`); una edición distinta del Codificador de la DPA de ONEI —los códigos
+no son estables entre ediciones— mueve la **mayor**. El hash es el árbitro: si
+alguna vez los dos catálogos no coinciden, es este número el que lo delata, no
+una discusión sobre qué se generó cuándo.
 
 ## Cambios respecto a la v12.1
 
@@ -272,6 +1247,15 @@ detectar. Va aquí porque la v11 se abría igualmente.
 
 ### Lo que NO entra en la v11, y está en conversación
 
+**Las dos mitades de este bloque ya se publicaron.** S-008
+(`displayCurrencies`) es contrato desde la v11/v12 (§ «Cambios respecto a la
+v11», arriba de esta misma sección en el documento). **S-007 deja de ser
+conversación y pasa a ser contrato con la v13**: la entidad `ZONE_TARIFF`, el
+tercer valor `ZONE_BASED`, `zoneCode` y el vector de precedencia están
+especificados en § «Cambios respecto a la v12.2», al principio de este
+documento — lo que sigue aquí es el registro histórico de qué seguía sin
+resolver cuando se escribió la v11, no el estado actual.
+
 S-007 (envío por zonas: `ZONE_BASED`, tarifario por zona, `contact.zoneCode`) y
 S-008 (`displayCurrencies`) **no se especifican en esta versión**. No hay campo,
 ni enum, ni entidad, ni ruta: nada de este bloque es implementable todavía. Está
@@ -304,7 +1288,13 @@ Lo que este lado ya puede afirmar:
   lado es un selector jerárquico —provincia → municipio— como camino primario,
   sin geometría, y el mapa detrás de una carga diferida si se demuestra que hace
   falta. Es el mismo argumento con el que la solicitud descarta el GPS: la zona la
-  elige la persona.
+  elige la persona. **SUPERADO el 2026-09-06 (S-007, punto 9 menor de la
+  revisión del 2026-09-09): no se adoptó.** Lo acordado es lista con
+  escritura predictiva como camino primario y **mapa como desempate**, no
+  detrás de una carga diferida condicionada a demostrar que hace falta — ver
+  `.agent/solicitudes.md` § «Cómo elige el comprador su zona, que era el
+  punto en disputa». Este bullet queda como registro histórico de la primera
+  propuesta de este lado, no como la forma acordada.
 - **Las cuatro preguntas abiertas, contestadas como propuesta:** una zona sin
   tarifa es «no entregamos ahí» y la tienda declara las que sirve; los modos son
   **excluyentes**, que es lo único consistente con lo anterior; un `zoneCode` que
@@ -312,6 +1302,13 @@ Lo que este lado ya puede afirmar:
   puede seleccionar; y la versión del catálogo se publica **en este documento**,
   que es donde los dos lados ya miran para saber si hablan de lo mismo. De
   acuerdo también con sembrar desde OpenStreetMap y con no meter Google Maps.
+  **SUPERADO.** Lo del catálogo/OSM se mantuvo. El `400` indiferenciado no:
+  desde la v13.2 (**F-043**, que cerró el punto más grave del veredicto de
+  cuadrecaja del 2026-09-09, su punto 1) ni `STORE.zoneCode` ni
+  `ZONE_TARIFF.zoneCode` desconocidos —o mal formados— tumban el lote: los dos
+  son `207 failed[]` con su propio código (`STORE_ZONE_UNKNOWN`,
+  `ZONE_TARIFF_ZONE_UNKNOWN`), reintentables, de **ese** evento y de ninguno
+  más.
 - **`displayCurrencies`: sí a la señal explícita, y el problema abierto es
   dónde.** Derivarla de las tasas no vale, por lo que dice la solicitud —no hay
   forma de borrar una tasa— y por algo peor que está en este mismo documento: la
@@ -323,7 +1320,12 @@ Lo que este lado ya puede afirmar:
   patrón —con su coste conocido: N sucursales repiten la lista y la escribe la
   que llegue la última— o abrir una entidad `BUSINESS`. Con `ZONE_TARIFF`
   entrando en la misma conversación, la propuesta de este lado es repetir el
-  patrón.
+  patrón. **SUPERADO el 2026-09-06: no se adoptó.** Se abrió la entidad
+  `BUSINESS` en su lugar (v12/v12.1, § «La entidad `BUSINESS` y
+  `displayCurrencies`» arriba), exactamente el otro brazo de esta misma
+  disyuntiva — el argumento que lo cerró está en `.agent/solicitudes.md` §
+  «Dónde vive `displayCurrencies`». Este bullet es el registro de qué se
+  propuso primero, no la forma publicada.
 - **El redondeo de los equivalentes ya cumple lo que pedía la solicitud.** La
   conversión de queandabuscando va del importe al ancla CUP y de ahí al destino
   en una sola división, con redondeo half-up alejándose del cero sobre enteros
@@ -514,7 +1516,7 @@ sea válido.
    el enum `Availability` de tres valores (ya desde antes de esta versión).
 
 **La tabla de propiedad de campos** (más abajo, en «`payload` de `STORE`»)
-deja de tener cinco filas y pasa a tener **las 31 columnas de `Store` y las
+deja de tener cinco filas y pasa a tener **las 32 columnas de `Store` y las
 23 de `StoreProduct`**, cada una con su dueño exacto y qué hace un evento que
 la toca — incluida `timezone`, del punto 4. Las cinco filas de la v7 se
 conservan con su texto tal cual («cuadrecaja (desde v7)»); esto no es una
@@ -855,7 +1857,7 @@ toca ninguna ruta.
 | `GET`  | `/api/internal/orders?ids=a,b` (lateral)               | —                                  | 200 `{ orders, nextCursor: null, nextAfter: null }`                              |
 | `POST` | `/api/internal/orders/status`                          | `{ orderId, status, reason? }`     | 200 `{ ok: true }`                                                               |
 | `POST` | `/api/internal/orders/proposal`                        | ver § ③④ «Proponer un cambio» (v5) | 200 ver § ③④                                                                     |
-| `GET`  | `/api/internal/reconciliation?storeId=`                | —                                  | 200 `{ products, hash }`                                                         |
+| `GET`  | `/api/internal/reconciliation?storeId=`                | —                                  | 200 `{ products, hash, tariffs, tariffHash }` (v13.4, F-044)                     |
 | `GET`  | `/api/internal/slug-availability?slug=&name=&storeId=` | —                                  | 200 `{ candidate, available, reason, resolvedSlug, url, storeKnown, reserving }` |
 
 **La octava ruta, `POST /api/provisioning/credential` (v10), vive fuera de
@@ -865,6 +1867,16 @@ negocio, y su vocabulario de errores es el suyo — nunca el de la tabla de
 abajo. Ver § «Aprovisionamiento de negocios».
 
 ### Vocabulario de errores (v9)
+
+**Clase de cada código, para el outbox (S-007, punto 9), desde la v13.** Las
+filas de `207 failed[]` y de `400` de lote de este vocabulario que son nuevas
+de la v13 llevan su propia clase escrita al final de la celda «Cuándo»:
+**permanente** (el mismo `payload` falla igual las `QAB_OUTBOX_MAX_ATTEMPTS`
+veces — hay que corregir el dato en el POS antes de reenviar) o
+**reintentable** (el mismo evento, sin cambiar nada, puede terminar
+aplicándose cuando algo externo a él cambie — aquí, que los dos catálogos de
+zonas converjan). Las filas anteriores a la v13 no se re-etiquetan aquí: no
+es parte de lo que pidió esta ronda y no cambia su comportamiento.
 
 Válido para las siete rutas de arriba — **no** para
 `POST /api/provisioning/credential` (v10), que tiene su propio vocabulario
@@ -882,28 +1894,35 @@ la v9 (F-022), las dos como `207 failed[]`, nunca como `400` de lote; y
 único de la tabla que **no** dice que el evento estuviera mal; y
 `BUSINESS_DISPLAY_CURRENCIES_INVALID` y `BUSINESS_DELETE_NOT_SUPPORTED` son de
 la v12, las dos como `207 failed[]` y las dos propias de la entidad `BUSINESS`.
+`ZONE_TARIFF_ZONE_UNKNOWN`, `ZONE_TARIFF_DELETE_NOT_SUPPORTED` y
+`STORE_ZONE_UNKNOWN` son de la v13, las tres como `207 failed[]` — desde la
+v13.2 (F-043) también `ZONE_TARIFF_ZONE_UNKNOWN`, que en la v13/v13.1
+(F-041) todavía era `400` de **lote**.
 
-| Código | Cuerpo                                                                                  | Cuándo                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `503`  | `{"error":"SYNC_NOT_CONFIGURED"}`                                                       | Ningún negocio tiene un token acuñado todavía                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `401`  | `{"error":"UNAUTHORIZED"}`                                                              | Sin cabecera, esquema distinto de `Bearer`, token vacío/corto, o token que no resuelve ningún negocio                                                                                                                                                                                                                                                                                                                                                                           |
-| `400`  | `{"error":"INVALID_BATCH","issues":[...]}`                                              | **Nuevo (v4).** El cuerpo no cumple el schema — incluida la clave `barcode` (singular) en cualquier `payload` de `PRODUCT`. Rechaza el **lote entero**, ninguna `SyncEvent` queda escrita, ni siquiera la de los demás eventos del mismo lote que sí eran válidos                                                                                                                                                                                                               |
-| `403`  | `{"error":"BUSINESS_INACTIVE"}`                                                         | El token es válido pero ese negocio está dado de baja                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `403`  | `{"error":"BUSINESS_MISMATCH"}`                                                         | El `businessId` del cuerpo (① o ②) no es el del negocio autenticado — el lote entero se rechaza, no se aplica nada                                                                                                                                                                                                                                                                                                                                                              |
-| `404`  | `{"error":"UNKNOWN_ORDER"}`                                                             | El `orderId` no existe **o pertenece a otro negocio** — el mismo código en los dos casos, a propósito                                                                                                                                                                                                                                                                                                                                                                           |
-| `404`  | `{"error":"UNKNOWN_STORE"}`                                                             | El `storeId` de ⑤ no existe **o pertenece a otro negocio**                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `409`  | `{"error":"ORDER_NOT_PROPOSABLE","status"}`                                             | **Nuevo (v5).** `POST /orders/proposal` sobre un pedido que no está en `PULLED`, `CONFIRMED` ni `AWAITING_CUSTOMER`. Nada se escribe; `status` trae el estado actual                                                                                                                                                                                                                                                                                                            |
-| `400`  | `{"error":"CURRENCY_MISMATCH"}`                                                         | **Nuevo (v5).** La propuesta llega en una moneda distinta de `Order.currencyCode`                                                                                                                                                                                                                                                                                                                                                                                               |
-| `409`  | `{"error":"ORDER_DELIVERY_NOT_QUOTED"}`                                                 | **Nuevo (v6).** `POST /orders/status` llevando a `READY`, `IN_TRANSIT` o `DELIVERED` un pedido con `deliveryFeePending: true`. Nada se escribe. Cotiza primero por `POST /orders/proposal` y espera que el comprador apruebe                                                                                                                                                                                                                                                    |
-| `400`  | `{"error":"MISSING_STORE_ID"}`                                                          | **Aclaración, no cambio (F-014).** Falta el parámetro `storeId` en ⑤, o llega vacío. Ya lo devuelve el endpoint hoy; esta fila lo documenta                                                                                                                                                                                                                                                                                                                                     |
-| `400`  | `{"error":"INVALID_BATCH","issues":[{"message":"STORE_DELIVERY_CONFIG_INCONSISTENT"}]}` | **Nuevo (v7, F-032).** Un `payload` de `STORE` que por sí solo ya es contradictorio: `deliveryEnabled: true` + `deliveryFeeMode: "FLAT_RATE"` + `deliveryFee: null`. Rechaza el lote entero, igual que cualquier otro `INVALID_BATCH`                                                                                                                                                                                                                                           |
-| `207`  | `"failed":[{"id":"...","error":"STORE_DELIVERY_CONFIG_INCONSISTENT"}]`                  | **Nuevo (v7, F-032).** El mismo invariante, pero solo visible al mezclar el `payload` con la fila ya guardada — no es un `400`, es el evento reportado `failed` dentro del `207` de siempre. No escribe nada; reintentarlo sin corregir el POS falla otra vez                                                                                                                                                                                                                   |
-| `400`  | `{"error":"INVALID_QUERY","issues":[{"path":[...],"message":"..."}]}`                   | **Documentado en v8 (F-033), la ruta lo emite desde F-007.** Propia de `GET /api/internal/orders`. `path` nombra el parámetro con forma inválida (`status`, `ids`, `after`, `limit`, `since`); `path: []` cuando el problema es la COMBINACIÓN de parámetros, con `message` uno de `SINCE_WITH_LATERAL_READ`, `STATUS_WITH_IDS`, `AFTER_WITHOUT_STATUS`, `LIMIT_WITH_IDS` o `IDS_LIMIT_EXCEEDED` (este último con `path: ["ids"]`) — ver § ③④ Pedidos, «Las lecturas laterales» |
-| `207`  | `"failed":[{"id":"...","error":"STORE_OPENING_HOURS_INVALID"}]`                         | **Nuevo (v9, F-022).** Un `payload` de `STORE` cuyo `openingHours` no cumple el formato de § «`payload` de `STORE`». Rechaza **ese evento**, nunca el lote: `SyncEvent.status = "FAILED"`, ninguno de sus campos se aplica —tampoco un `name` o un `phone` que viajaran con él— y el resto del lote sí se aplica. Reintentadlo cuando el calendario sea válido                                                                                                                  |
-| `207`  | `"failed":[{"id":"...","error":"STORE_TIMEZONE_INVALID"}]`                              | **Nuevo (v9, F-022).** Al publicar o republicar una tienda (`publishToStore: true` cuando el opt-in cambia), su `timezone` no es un identificador IANA que queandabuscando reconozca. `timezone` es del panel — no lo dispara nada que el `payload` del POS envíe hoy —, y se corrige a mano en queandabuscando, nunca desde el POS                                                                                                                                             |
-| `207`  | `"failed":[{"id":"...","error":"BUSINESS_DISPLAY_CURRENCIES_INVALID"}]`                 | **Nuevo (v12).** Algún miembro de `displayCurrencies` no tiene la forma de un código de moneda. Rechaza **ese evento**, nunca el lote: el resto se aplica y la lista guardada queda como estaba. Corregidlo y reenviadlo — reintentarlo sin corregir falla otra vez                                                                                                                                                                                                             |
-| `207`  | `"failed":[{"id":"...","error":"BUSINESS_DELETE_NOT_SUPPORTED"}]`                       | **Nuevo (v12).** Un evento `BUSINESS` con `operation: "DELETE"`. No hay nada que borrar: la lista completa viaja en cada evento y vaciarla es enviar `[]`. Se rechaza en vez de ignorarse en silencio, a diferencia de `CURRENCY` y `EXCHANGE_RATE`                                                                                                                                                                                                                             |
-| `207`  | `"failed":[{"id":"...","error":"DEPENDENCY_FAILED_IN_BATCH"}]`                          | **Nuevo (v11).** El evento es correcto: falló **otro** evento anterior del mismo lote del que este depende (`CATEGORY` → sus `PRODUCT`, `CURRENCY` → sus `EXCHANGE_RATE`), así que no se aplica en absoluto en vez de aplicarse a medias. Reintentadlo **tal cual**, con su `updatedAt` original, cuando la dependencia entre — § «Cambios respecto a la v10.1» ③                                                                                                               |
+| Código | Cuerpo                                                                                  | Cuándo                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------ | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `503`  | `{"error":"SYNC_NOT_CONFIGURED"}`                                                       | Ningún negocio tiene un token acuñado todavía                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `401`  | `{"error":"UNAUTHORIZED"}`                                                              | Sin cabecera, esquema distinto de `Bearer`, token vacío/corto, o token que no resuelve ningún negocio                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `400`  | `{"error":"INVALID_BATCH","issues":[...]}`                                              | **Nuevo (v4).** El cuerpo no cumple el schema — incluida la clave `barcode` (singular) en cualquier `payload` de `PRODUCT`. Rechaza el **lote entero**, ninguna `SyncEvent` queda escrita, ni siquiera la de los demás eventos del mismo lote que sí eran válidos                                                                                                                                                                                                                                                                                                       |
+| `403`  | `{"error":"BUSINESS_INACTIVE"}`                                                         | El token es válido pero ese negocio está dado de baja                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `403`  | `{"error":"BUSINESS_MISMATCH"}`                                                         | El `businessId` del cuerpo (① o ②) no es el del negocio autenticado — el lote entero se rechaza, no se aplica nada                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `404`  | `{"error":"UNKNOWN_ORDER"}`                                                             | El `orderId` no existe **o pertenece a otro negocio** — el mismo código en los dos casos, a propósito                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `404`  | `{"error":"UNKNOWN_STORE"}`                                                             | El `storeId` de ⑤ no existe **o pertenece a otro negocio**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `409`  | `{"error":"ORDER_NOT_PROPOSABLE","status"}`                                             | **Nuevo (v5).** `POST /orders/proposal` sobre un pedido que no está en `PULLED`, `CONFIRMED` ni `AWAITING_CUSTOMER`. Nada se escribe; `status` trae el estado actual                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `400`  | `{"error":"CURRENCY_MISMATCH"}`                                                         | **Nuevo (v5).** La propuesta llega en una moneda distinta de `Order.currencyCode`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `409`  | `{"error":"ORDER_DELIVERY_NOT_QUOTED"}`                                                 | **Nuevo (v6).** `POST /orders/status` llevando a `READY`, `IN_TRANSIT` o `DELIVERED` un pedido con `deliveryFeePending: true`. Nada se escribe. Cotiza primero por `POST /orders/proposal` y espera que el comprador apruebe                                                                                                                                                                                                                                                                                                                                            |
+| `400`  | `{"error":"MISSING_STORE_ID"}`                                                          | **Aclaración, no cambio (F-014).** Falta el parámetro `storeId` en ⑤, o llega vacío. Ya lo devuelve el endpoint hoy; esta fila lo documenta                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `400`  | `{"error":"INVALID_BATCH","issues":[{"message":"STORE_DELIVERY_CONFIG_INCONSISTENT"}]}` | **Nuevo (v7, F-032).** Un `payload` de `STORE` que por sí solo ya es contradictorio: `deliveryEnabled: true` + `deliveryFeeMode: "FLAT_RATE"` + `deliveryFee: null`. Rechaza el lote entero, igual que cualquier otro `INVALID_BATCH`                                                                                                                                                                                                                                                                                                                                   |
+| `207`  | `"failed":[{"id":"...","error":"STORE_DELIVERY_CONFIG_INCONSISTENT"}]`                  | **Nuevo (v7, F-032).** El mismo invariante, pero solo visible al mezclar el `payload` con la fila ya guardada — no es un `400`, es el evento reportado `failed` dentro del `207` de siempre. No escribe nada; reintentarlo sin corregir el POS falla otra vez                                                                                                                                                                                                                                                                                                           |
+| `400`  | `{"error":"INVALID_QUERY","issues":[{"path":[...],"message":"..."}]}`                   | **Documentado en v8 (F-033), la ruta lo emite desde F-007.** Propia de `GET /api/internal/orders`. `path` nombra el parámetro con forma inválida (`status`, `ids`, `after`, `limit`, `since`); `path: []` cuando el problema es la COMBINACIÓN de parámetros, con `message` uno de `SINCE_WITH_LATERAL_READ`, `STATUS_WITH_IDS`, `AFTER_WITHOUT_STATUS`, `LIMIT_WITH_IDS` o `IDS_LIMIT_EXCEEDED` (este último con `path: ["ids"]`) — ver § ③④ Pedidos, «Las lecturas laterales»                                                                                         |
+| `207`  | `"failed":[{"id":"...","error":"STORE_OPENING_HOURS_INVALID"}]`                         | **Nuevo (v9, F-022).** Un `payload` de `STORE` cuyo `openingHours` no cumple el formato de § «`payload` de `STORE`». Rechaza **ese evento**, nunca el lote: `SyncEvent.status = "FAILED"`, ninguno de sus campos se aplica —tampoco un `name` o un `phone` que viajaran con él— y el resto del lote sí se aplica. Reintentadlo cuando el calendario sea válido                                                                                                                                                                                                          |
+| `207`  | `"failed":[{"id":"...","error":"STORE_TIMEZONE_INVALID"}]`                              | **Nuevo (v9, F-022).** Al publicar o republicar una tienda (`publishToStore: true` cuando el opt-in cambia), su `timezone` no es un identificador IANA que queandabuscando reconozca. `timezone` es del panel — no lo dispara nada que el `payload` del POS envíe hoy —, y se corrige a mano en queandabuscando, nunca desde el POS                                                                                                                                                                                                                                     |
+| `207`  | `"failed":[{"id":"...","error":"BUSINESS_DISPLAY_CURRENCIES_INVALID"}]`                 | **Nuevo (v12).** Algún miembro de `displayCurrencies` no tiene la forma de un código de moneda. Rechaza **ese evento**, nunca el lote: el resto se aplica y la lista guardada queda como estaba. Corregidlo y reenviadlo — reintentarlo sin corregir falla otra vez                                                                                                                                                                                                                                                                                                     |
+| `207`  | `"failed":[{"id":"...","error":"BUSINESS_DELETE_NOT_SUPPORTED"}]`                       | **Nuevo (v12).** Un evento `BUSINESS` con `operation: "DELETE"`. No hay nada que borrar: la lista completa viaja en cada evento y vaciarla es enviar `[]`. Se rechaza en vez de ignorarse en silencio, a diferencia de `CURRENCY` y `EXCHANGE_RATE`                                                                                                                                                                                                                                                                                                                     |
+| `207`  | `"failed":[{"id":"...","error":"DEPENDENCY_FAILED_IN_BATCH"}]`                          | **Nuevo (v11), y desde la v13 también dispara un `STORE`.** El evento es correcto: falló **otro** evento anterior del mismo lote del que este depende (`CATEGORY` → sus `PRODUCT`, `CURRENCY` → sus `EXCHANGE_RATE`, y desde la v13, `STORE` → sus `ZONE_TARIFF`), así que no se aplica en absoluto en vez de aplicarse a medias. Reintentadlo **tal cual**, con su `updatedAt` original, cuando la dependencia entre — § «Cambios respecto a la v10.1» ③ y § «Cambios respecto a la v12.2», «La cascada `STORE → ZONE_TARIFF`»                                         |
+| `207`  | `"failed":[{"id":"...","error":"ZONE_TARIFF_ZONE_UNKNOWN"}]`                            | **v13 (F-041), y desde la v13.2 (F-043) ya no es un `400` de lote.** Un `ZONE_TARIFF` cuyo `zoneCode` no existe en el catálogo publicado **o no tiene la forma del DPA** (el sobre ya no distingue las dos causas). Rechaza **ese evento**, nunca el lote — comprobado contra el artefacto commiteado, sin tocar la base. **Clase (S-007, punto 9): reintentable** — el mismo evento, sin cambiar un byte, puede aplicar cuando los dos catálogos converjan; con un código mal formado agota los reintentos de ESE evento y de ninguno más                              |
+| `207`  | `"failed":[{"id":"...","error":"ZONE_TARIFF_DELETE_NOT_SUPPORTED"}]`                    | **Nuevo (v13, F-041).** Un `ZONE_TARIFF` con `operation: "DELETE"`. No hay nada que borrar: `INHERIT` es la única forma de retirar una regla, en todos los niveles. Se comprueba **antes** de cualquier otra cosa, incluida la guarda anti-rancio. **Clase (S-007, punto 9): permanente** — un `DELETE` no se arregla reintentando; hay que reenviar `INHERIT`                                                                                                                                                                                                          |
+| `207`  | `"failed":[{"id":"...","error":"STORE_ZONE_UNKNOWN"}]`                                  | **Nuevo (v13, F-041; gana la causa "mal formado" en la v13.2, F-043).** Un `STORE` cuyo `zoneCode` no existe en el catálogo publicado **o no tiene la forma del DPA**. Rechaza **ese evento entero**: ninguno de sus otros campos se aplica y `sourceUpdatedAt` no avanza (v13.3: tampoco el nombre del negocio ni su moneda base). Con un `zoneCode` del catálogo, `processed` normal. **Clase (S-007, punto 9): reintentable** — el mismo evento aplica cuando los catálogos converjan; con un código mal formado agota los reintentos de ESE evento y de ninguno más |
 
 Un recurso de otro negocio nunca responde distinto de uno inexistente: ni
 `/orders/status`, ni `/reconciliation`, ni `/slug-availability` (que además
@@ -1194,47 +2213,49 @@ anterior de este párrafo describía un comportamiento que el código nunca tuvo
 ##### Tabla de propiedad de campos (F-022, criterio 4)
 
 Quién es dueño de cada columna de `Store` y de `StoreProduct` y qué hace un
-evento que la toca — las **31** de `Store` (30 de siempre más `timezone`) y
-las **23** de `StoreProduct`, 54 filas en total. Hasta la v8 esta tabla solo
-traía los cinco campos de configuración de compra de F-032, con una nota
-diciendo que el resto quedaba pendiente para esta versión; esas cinco filas
-se conservan con su texto tal cual («cuadrecaja (desde v7)»).
+evento que la toca — las **32** de `Store` (30 de siempre más `timezone` y,
+desde F-041, `zoneCode`) y las **23** de `StoreProduct`, 55 filas en total.
+Hasta la v8 esta tabla solo traía los cinco campos de configuración de compra
+de F-032, con una nota diciendo que el resto quedaba pendiente para esta
+versión; esas cinco filas se conservan con su texto tal cual («cuadrecaja
+(desde v7)»).
 
-**`Store`** — 31 columnas:
+**`Store`** — 32 columnas:
 
-| Campo                | Dueño                                         | Un evento `STORE` que lo trae                                                                                                                                                                                                                                                    |
-| -------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                 | plataforma                                    | Nada: la fila se localiza por `storeId` (el `externalId` interno), el `id` no viaja                                                                                                                                                                                              |
-| `businessId`         | plataforma                                    | Nada. El negocio sale del token autenticado, no del `payload`; una tienda cuyo `storeId` es de otro negocio se ignora                                                                                                                                                            |
-| `storefrontId`       | plataforma (registro de marcas)               | Se fija al crear y no se mueve. Solo lo mueve el panel cuando el negocio agrupa dos tiendas en una marca                                                                                                                                                                         |
-| `externalId`         | cuadrecaja                                    | Se escribe al crear, desde `payload.storeId`. Es la identidad de la `Tienda` en el POS y la clave de búsqueda                                                                                                                                                                    |
-| `slug`               | plataforma (registro de slugs)                | Nada. `payload.slug` es **semilla de derivación** al crear y nada más — si el valor está tomado o es reservado, queandabuscando deriva el siguiente libre en silencio (nunca falla)                                                                                              |
-| `name`               | cuadrecaja                                    | Escribe el nuevo valor. Viaja siempre                                                                                                                                                                                                                                            |
-| `description`        | cuadrecaja                                    | Escribe el valor; **ausente o `null` BORRA** la columna                                                                                                                                                                                                                          |
-| `status`             | compartida, árbitro escrito                   | El sync la toca **solo** si `publishToStore` difiere del valor ya guardado; el panel de administración la escribe cuando el negocio cierra o reabre a mano. Desde F-022, pasar a `PUBLISHED` exige una `timezone` que queandabuscando reconozca (`STORE_TIMEZONE_INVALID` si no) |
-| `phone`              | cuadrecaja                                    | Escribe el valor; ausente o `null` BORRA                                                                                                                                                                                                                                         |
-| `whatsapp`           | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
-| `email`              | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
-| `address`            | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
-| `city`               | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
-| `province`           | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
-| `latitude`           | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
-| `longitude`          | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                             |
-| `openingHours`       | cuadrecaja                                    | Escribe el calendario **completo**, por reemplazo. Ausente o `null` deja la columna intacta. Desde la v9, un valor que no cumple el formato **no se guarda** — rechaza el evento (`STORE_OPENING_HOURS_INVALID`)                                                                 |
-| `timezone`           | **panel**                                     | **Nada.** No es un campo del `payload`; si llega una clave `timezone` de todos modos, se descarta sin error. Se corrige a mano en queandabuscando mientras el panel no tenga editor                                                                                              |
-| `checkoutMode`       | cuadrecaja (desde v7)                         | Escribe el nuevo valor; ausente la deja intacta                                                                                                                                                                                                                                  |
-| `deliveryEnabled`    | cuadrecaja (desde v7)                         | Ídem                                                                                                                                                                                                                                                                             |
-| `deliveryFee`        | cuadrecaja (desde v7)                         | Escribe el nuevo valor, o `NULL` si llega `null` explícito                                                                                                                                                                                                                       |
-| `deliveryFeeMode`    | cuadrecaja (desde v7)                         | Escribe el nuevo valor; ausente la deja intacta                                                                                                                                                                                                                                  |
-| `orderExpiryHours`   | cuadrecaja (desde v7; antes, queandabuscando) | Ídem                                                                                                                                                                                                                                                                             |
-| `publishedAt`        | sync                                          | Se pone al publicar o republicar, y se borra al suspender, siempre junto a `status` y con la misma puerta. El panel no la toca ni al reabrir                                                                                                                                     |
-| `disabledReasonCode` | panel (vocabulario propio)                    | El sync solo la pone a `null`: al suspender por un cambio de `publishToStore`, y al republicar                                                                                                                                                                                   |
-| `disabledMessage`    | compartida, árbitro escrito                   | El sync escribe `unpublishReason ?? null` al suspender por un cambio de opt-in; el panel escribe su propio texto libre al cerrar desde la interfaz. Gana el último que actúe                                                                                                     |
-| `disabledAt`         | compartida, árbitro escrito                   | El sync la pone al suspender y la borra al republicar; el panel, al cerrar y al abrir                                                                                                                                                                                            |
-| `sourceUpdatedAt`    | cuadrecaja                                    | Escribe `payload.updatedAt` en todo evento aplicado. Un evento con `updatedAt` menor o igual al guardado no escribe nada (guarda anti-rancio)                                                                                                                                    |
-| `sourceOptIn`        | cuadrecaja                                    | Escribe `payload.publishToStore` (y `false` en un `DELETE`)                                                                                                                                                                                                                      |
-| `createdAt`          | plataforma                                    | Nada: default de la base                                                                                                                                                                                                                                                         |
-| `updatedAt`          | plataforma                                    | Se mueve sola en cualquier evento aplicado                                                                                                                                                                                                                                       |
+| Campo                | Dueño                                         | Un evento `STORE` que lo trae                                                                                                                                                                                                                                                                                                              |
+| -------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                 | plataforma                                    | Nada: la fila se localiza por `storeId` (el `externalId` interno), el `id` no viaja                                                                                                                                                                                                                                                        |
+| `businessId`         | plataforma                                    | Nada. El negocio sale del token autenticado, no del `payload`; una tienda cuyo `storeId` es de otro negocio se ignora                                                                                                                                                                                                                      |
+| `storefrontId`       | plataforma (registro de marcas)               | Se fija al crear y no se mueve. Solo lo mueve el panel cuando el negocio agrupa dos tiendas en una marca                                                                                                                                                                                                                                   |
+| `externalId`         | cuadrecaja                                    | Se escribe al crear, desde `payload.storeId`. Es la identidad de la `Tienda` en el POS y la clave de búsqueda                                                                                                                                                                                                                              |
+| `slug`               | plataforma (registro de slugs)                | Nada. `payload.slug` es **semilla de derivación** al crear y nada más — si el valor está tomado o es reservado, queandabuscando deriva el siguiente libre en silencio (nunca falla)                                                                                                                                                        |
+| `name`               | cuadrecaja                                    | Escribe el nuevo valor. Viaja siempre                                                                                                                                                                                                                                                                                                      |
+| `description`        | cuadrecaja                                    | Escribe el valor; **ausente o `null` BORRA** la columna                                                                                                                                                                                                                                                                                    |
+| `status`             | compartida, árbitro escrito                   | El sync la toca **solo** si `publishToStore` difiere del valor ya guardado; el panel de administración la escribe cuando el negocio cierra o reabre a mano. Desde F-022, pasar a `PUBLISHED` exige una `timezone` que queandabuscando reconozca (`STORE_TIMEZONE_INVALID` si no)                                                           |
+| `phone`              | cuadrecaja                                    | Escribe el valor; ausente o `null` BORRA                                                                                                                                                                                                                                                                                                   |
+| `whatsapp`           | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                                                                                       |
+| `email`              | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                                                                                       |
+| `address`            | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                                                                                       |
+| `city`               | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                                                                                       |
+| `province`           | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                                                                                       |
+| `latitude`           | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                                                                                       |
+| `longitude`          | cuadrecaja                                    | Ídem                                                                                                                                                                                                                                                                                                                                       |
+| `openingHours`       | cuadrecaja                                    | Escribe el calendario **completo**, por reemplazo. Ausente o `null` deja la columna intacta. Desde la v9, un valor que no cumple el formato **no se guarda** — rechaza el evento (`STORE_OPENING_HOURS_INVALID`)                                                                                                                           |
+| `timezone`           | **panel**                                     | **Nada.** No es un campo del `payload`; si llega una clave `timezone` de todos modos, se descarta sin error. Se corrige a mano en queandabuscando mientras el panel no tenga editor                                                                                                                                                        |
+| `checkoutMode`       | cuadrecaja (desde v7)                         | Escribe el nuevo valor; ausente la deja intacta                                                                                                                                                                                                                                                                                            |
+| `deliveryEnabled`    | cuadrecaja (desde v7)                         | Ídem                                                                                                                                                                                                                                                                                                                                       |
+| `deliveryFee`        | cuadrecaja (desde v7)                         | Escribe el nuevo valor, o `NULL` si llega `null` explícito                                                                                                                                                                                                                                                                                 |
+| `deliveryFeeMode`    | cuadrecaja (desde v7)                         | Escribe el nuevo valor; ausente la deja intacta                                                                                                                                                                                                                                                                                            |
+| `orderExpiryHours`   | cuadrecaja (desde v7; antes, queandabuscando) | Ídem                                                                                                                                                                                                                                                                                                                                       |
+| `publishedAt`        | sync                                          | Se pone al publicar o republicar, y se borra al suspender, siempre junto a `status` y con la misma puerta. El panel no la toca ni al reabrir                                                                                                                                                                                               |
+| `disabledReasonCode` | panel (vocabulario propio)                    | El sync solo la pone a `null`: al suspender por un cambio de `publishToStore`, y al republicar                                                                                                                                                                                                                                             |
+| `disabledMessage`    | compartida, árbitro escrito                   | El sync escribe `unpublishReason ?? null` al suspender por un cambio de opt-in; el panel escribe su propio texto libre al cerrar desde la interfaz. Gana el último que actúe                                                                                                                                                               |
+| `disabledAt`         | compartida, árbitro escrito                   | El sync la pone al suspender y la borra al republicar; el panel, al cerrar y al abrir                                                                                                                                                                                                                                                      |
+| `sourceUpdatedAt`    | cuadrecaja                                    | Escribe `payload.updatedAt` en todo evento aplicado. Un evento con `updatedAt` menor o igual al guardado no escribe nada (guarda anti-rancio)                                                                                                                                                                                              |
+| `sourceOptIn`        | cuadrecaja                                    | Escribe `payload.publishToStore` (y `false` en un `DELETE`)                                                                                                                                                                                                                                                                                |
+| `zoneCode`           | cuadrecaja (desde F-041, v13)                 | Escribe el nuevo valor si existe en el catálogo de zonas y tiene la forma del DPA (`STORE_ZONE_UNKNOWN` si no, evento entero — desde la v13.2/F-043 el sobre ya no distingue las dos causas); **ausente deja la columna intacta, `null` explícito la borra** — no entra en la familia de los nueve campos de contacto, donde ausente borra |
+| `createdAt`          | plataforma                                    | Nada: default de la base                                                                                                                                                                                                                                                                                                                   |
+| `updatedAt`          | plataforma                                    | Se mueve sola en cualquier evento aplicado                                                                                                                                                                                                                                                                                                 |
 
 **`StoreProduct`** — 23 columnas:
 
@@ -1617,6 +2638,14 @@ El checkout no depende de eso y no ha cambiado: lee las tasas frescas en cada
 pedido, así que **un pedido nunca se cotiza con una tasa caducada**. Lo que la
 v11 arregla es que la vitrina deje de enseñar un importe que el checkout ya no
 va a cobrar.
+
+#### `payload` de `ZONE_TARIFF` (v13)
+
+La séptima entidad, y la que trae la tarifa de una sucursal para una zona.
+Forma completa, con la tabla de campos, con el discriminante `rule`, con las
+dos guardas de importe y con el ejemplo del `400` de lote: § «Cambios respecto
+a la v12.2» arriba, que es donde nace y donde vive mientras esta versión sea
+la vigente.
 
 ### Transformación en queandabuscando
 
@@ -2309,8 +3338,13 @@ md5( concat( externalId ":" precio ":" moneda ":" disponibilidad "|" )
      ordenado por externalId )
 ```
 
-Si los hashes difieren: poner `dispPublicada = NULL` en las filas de ese local
-(lo que hace que la query convergente las levante todas) y alertar.
+**Si `hash` (el de productos) difiere: poner `dispPublicada = NULL` en las
+filas de ese local** (lo que hace que la query convergente las levante todas)
+**y alertar.** Esta es la única acción de recuperación que existe de este
+lado, y es **solo** la de productos: un `tariffHash` (v13.4, F-044) divergente
+no se arregla resincronizando el catálogo — ver «La divergencia del
+tarifario», al final de esta sección, para qué hacer cuando el que difiere es
+ese.
 
 **Alertar también si no hubo una corrida exitosa en 30 minutos.**
 
@@ -2415,6 +3449,205 @@ mano. Si el SQL implementado del lado de cuadrecaja no reproduce este hash
 sobre estos mismos cuatro valores, la diferencia está en la serialización del
 precio o en el orden, no en los datos reales.
 
+### El hash del tarifario de envío (v13.4)
+
+**Nuevo en la v13.4 (F-044).** El hash de arriba cubre el catálogo publicado
+—precio, moneda, disponibilidad— y deja fuera el tarifario de envío
+(`ZONE_TARIFF`, v13/F-041), que es lo único del cable que es un precio y no
+tenía espejo: si un `ZONE_TARIFF` agota sus reintentos de outbox, el hash de
+productos sigue coincidiendo y la divergencia queda invisible para siempre.
+Este segundo hash, `tariffHash`, junto con su cuenta `tariffs`, viaja en la
+MISMA respuesta de ⑤ (`{ products, hash, tariffs, tariffHash }`), calculado
+sobre la MISMA sucursal que resuelve `storeId`.
+
+```
+md5( concat( zoneCode ":" rule ":" importe "|" )
+     sobre las filas con rule ∈ {FEE, NOT_SERVED}, ordenado por bytes de zoneCode )
+```
+
+donde `importe` es el importe sin ceros de relleno cuando `rule = FEE`, y la
+cadena vacía en cualquier otro caso.
+
+**Qué filas entran: `FEE` y `NOT_SERVED`; `INHERIT` no.** Tres razones:
+
+1. **`INHERIT` no publica nada.** Para la resolución de la tarifa, `INHERIT`
+   y «no hay fila» son el mismo veredicto — el importe que se le cobra a un
+   comprador de cualquier zona es una función **solo** de las filas
+   `FEE`/`NOT_SERVED`, así que dos lados con el mismo conjunto de filas
+   `FEE`/`NOT_SERVED` cobran lo mismo en todas las zonas, que es exactamente
+   lo que este hash tiene que afirmar.
+2. **La retracción tiene que converger sin depender de vuestra tabla.**
+   `INHERIT` es la única retracción que existe y vuestra tabla todavía no
+   existe: no sabemos si guardaréis una fila `INHERIT` o borraréis la
+   vuestra. Con `INHERIT` fuera del hash, los dos lados convergen en las dos
+   formas.
+3. **No pierde detección.** Un `INHERIT` que se pierda por el camino deja
+   aquí la fila `FEE` vieja: este lado aporta una entrada que el vuestro no
+   aporta, y el hash **y** la cuenta difieren igual.
+
+   **Costo aceptado, para que nadie lo descubra depurando:** el hash no
+   distingue «hay una fila `INHERIT`» de «no hay fila». Es una diferencia sin
+   consecuencia sobre el importe.
+
+```sql
+SELECT count(*) AS tariffs,
+       md5(coalesce(string_agg(
+              t."zoneCode" || ':' ||
+              t."rule"::text || ':' ||
+              coalesce(case when t."rule" = 'FEE'
+                            then trim(trailing '.' from
+                                 trim(trailing '0' from round(t."deliveryFee"::numeric, 2)::text))
+                       end, '') || '|',
+              '' ORDER BY t."zoneCode" COLLATE "C"
+            ), '')) AS "tariffHash"
+FROM "ZoneTariff" t
+WHERE t."storeId" = $1
+  AND t."rule" <> 'INHERIT';
+```
+
+**Vuestra tabla todavía no existe (S-007, F-013): ajustad los nombres de
+vuestras columnas.** Lo de arriba está escrito con los nombres del cable
+—`storeId`, `zoneCode`, `rule`, `deliveryFee`— sobre una tabla `ZoneTariff`
+que es la nuestra, no la vuestra. **Lo que fija la semántica es el vector de
+prueba** de más abajo, igual que en el hash de productos.
+
+Cinco decisiones que este SQL lleva y que no se deducen del pseudocódigo:
+
+1. **`t."rule" <> 'INHERIT'` en el `WHERE`.** La razón está arriba: `INHERIT`
+   no publica nada y su retracción tiene que converger sin depender de
+   vuestra tabla.
+2. **El hueco vacío del importe, y su `coalesce` interior.** Una fila que no
+   publica importe —`rule` distinto de `FEE`, o la columna nula— entra con el
+   hueco **vacío**, nunca con `0` ni con un `NULL` sin envolver: `0.00` da
+   `0`, no `""`, así que el hueco vacío significa «sin importe» sin
+   ambigüedad. La condición se escribe sobre `rule`, no sobre la nulidad de
+   la columna, porque vuestra tabla podría tenerla `NOT NULL DEFAULT 0`.
+3. **El `coalesce(..., '')` de fuera.** `string_agg` sobre cero filas da
+   `NULL`, y `md5(NULL)` es `NULL`, no un hash. Con este `coalesce`, una
+   sucursal sin ninguna fila da `d41d8cd98f00b204e9800998ecf8427e` — el md5
+   de la cadena vacía.
+4. **La serialización del importe sin ceros de relleno**, con la precondición
+   de los dos decimales heredada de § ①: el importe del cable es múltiplo de
+   `0.01`, y con tres decimales los dos lados divergirían en el redondeo de
+   forma permanente, igual que `2.675` en el hash de productos.
+5. **Las filas de una sucursal dada de baja se excluyen del lado que tiene la
+   marca.** Aquí un `STORE` con `operation: "DELETE"` aplicado **borra** el
+   tarifario de esa sucursal, así que un espejo que siga contando las filas
+   de una sucursal que vosotros disteis de baja divergiría y **no volvería a
+   converger nunca**. Un `publishToStore: false` —vacaciones— **no** borra
+   nada aquí y **no** debe excluir nada allí.
+
+**El orden es de bytes, no el de una colación.** `ORDER BY t."zoneCode"
+COLLATE "C"`, la misma regla que el hash de productos y por el mismo motivo.
+
+**Precondición: el importe viaja con dos decimales como máximo** (ver § ①,
+`ZONE_TARIFF`): la columna es `Decimal(14,2)` y el sobre exige múltiplo de
+`0.01`. Con más de dos decimales, los dos lados divergirían en el redondeo de
+forma permanente, igual que `2.675` en el hash de productos.
+
+**Qué SÍ prueba la implementación de aquí, y qué NO.** Esta traducción se
+verifica contra filas de `ZoneTariff`, no contra vuestra tabla: valida el
+orden, los separadores, la serialización del importe, el hueco vacío y la
+exclusión de `INHERIT`. **No valida** los nombres de vuestras columnas, ni que
+vuestra tabla guarde una fila por `(sucursal, zona)`, ni vuestra exclusión de
+las sucursales dadas de baja — eso solo lo puede comprobar el equipo de
+cuadrecaja ejecutando el SQL de arriba contra su propia base.
+
+#### Vector del hash del tarifario (v13.4)
+
+```json
+{
+  "version": "1",
+  "cases": [
+    {
+      "id": "T1",
+      "rows": [
+        {
+          "zoneCode": "40.01",
+          "rule": "INHERIT",
+          "deliveryFee": null
+        },
+        {
+          "zoneCode": "23.05",
+          "rule": "FEE",
+          "deliveryFee": "300.00"
+        },
+        {
+          "zoneCode": "21",
+          "rule": "FEE",
+          "deliveryFee": "0.00"
+        },
+        {
+          "zoneCode": "23.01",
+          "rule": "FEE",
+          "deliveryFee": "250.50"
+        },
+        {
+          "zoneCode": "21.05",
+          "rule": "NOT_SERVED",
+          "deliveryFee": null
+        }
+      ],
+      "expected": {
+        "tariffs": 4,
+        "entries": ["21:FEE:0|", "21.05:NOT_SERVED:|", "23.01:FEE:250.5|", "23.05:FEE:300|"],
+        "tariffHash": "a67d37235e3dc5c803b469bfe9cadee7"
+      }
+    },
+    {
+      "id": "T2",
+      "rows": [],
+      "expected": {
+        "tariffs": 0,
+        "entries": [],
+        "tariffHash": "d41d8cd98f00b204e9800998ecf8427e"
+      }
+    }
+  ]
+}
+```
+
+Calculado ejecutando `tariffReconciliation` (`npm run vector:tariff`) sobre
+estas filas literales — no a mano. `entries` se publica, con las entradas ya
+serializadas y en su orden final: con ellas delante, cuadrecaja puede decir si
+su diferencia está en el **orden** o en la **serialización**, la misma frase
+con la que se cierra el vector de productos. Las `rows` de `T1` viajan en un
+orden distinto del orden por bytes a propósito, para que una implementación
+que concatene «según le llegan» falle este caso en vez de pasarlo por
+casualidad. `21` y `21.05` son códigos reales del catálogo publicado —Pinar
+del Río y su municipio La Palma—, elegidos para que este mismo bloque se
+pueda insertar tal cual en una sucursal real, sin violar la clave ajena contra
+`Zone`.
+
+#### El hash del bloque JSON del vector del tarifario
+
+El alcance es el mismo que el de productos: los bytes exactos capturados por
+la misma expresión regular (el grupo 1 de ` ```json\n([\s\S]*?)\n``` `), sin
+normalizar espacios ni saltos de línea.
+
+**sha256 del bloque JSON del vector del tarifario (v13.4):**
+
+`461437dd951bcd6436237cf95c0ab0c75deb664a8ce221ebce9909d2414ed01e`
+
+### La divergencia del tarifario (v13.4)
+
+**Solo alerta: no hay query convergente ni acción de recuperación de este
+lado para el tarifario.** Tres cosas que quedan dichas aquí, con letra y no
+entre líneas:
+
+(a) Si `tariffHash` difiere, **no** se ejecuta la resincronización de arriba
+—`dispPublicada = NULL`—, que es **solo** la del hash de productos y no toca
+ninguna fila de `ZoneTariff`.
+
+(b) **Una fila que sobre de este lado no se puede borrar desde aquí**: `DELETE`
+está rechazado (`ZONE_TARIFF_DELETE_NOT_SUPPORTED`) e `INHERIT` es la única
+retracción que existe. Solo la corrige un `ZONE_TARIFF` vuestro con
+`rule: "INHERIT"` y un `updatedAt` posterior al de la fila que sobra.
+
+(c) **Mientras diverge, el domicilio de la sucursal sigue funcionando**, con
+el importe que este lado tiene: una divergencia del tarifario no apaga ni
+degrada el checkout de nadie.
+
 ---
 
 ## Idempotencia, en dos capas
@@ -2435,6 +3668,40 @@ en ningún lado registre un error.
 ---
 
 ## Cambios requeridos en cuadrecaja
+
+### De la v13 — no emitáis todavía, y qué hace falta cuando se avise
+
+**No emitáis `ZONE_TARIFF` ni `deliveryFeeMode: "ZONE_BASED"` hasta que este
+documento diga explícitamente que el lado receptor está en pie.** Mientras
+tanto, `entity` no admite `ZONE_TARIFF` y ese evento respondería
+`400 INVALID_BATCH`, llevándose el lote entero por delante — el mismo riesgo
+que `BUSINESS` tuvo entre la v11 y la v12.2.
+
+Cuando se avise, lo que hace falta de vuestro lado:
+
+1. **Una columna nueva en `Tienda`** (el nombre es propuesta vuestra, lo que
+   ata el contrato es el campo del cable: `zoneCode`), opcional, con la misma
+   semántica de omisión que las cinco de la v7: ausente deja la columna
+   intacta, `null` explícito la borra.
+2. **Una pantalla donde el encargado declare su tarifario** — es vuestra, y el
+   acuerdo del 2026-09-06 fue que el encargado no pueda producir un `DELETE`
+   cuando quiere decir «aquí no entrego»: la única forma de retirar una
+   tarifa es `rule: "INHERIT"`, nunca borrar la fila.
+3. **Emitir `ZONE_TARIFF` por cada `(tienda, zona)` que cambie**, con la forma
+   de § «Cambios respecto a la v12.2» arriba — nunca como un array dentro del
+   `payload` de `STORE`.
+4. **El catálogo de 184 zonas**, para que vuestro selector ofrezca los mismos
+   códigos que este lado valida: la ruta y el sha256 están en § «La versión
+   del catálogo geográfico», arriba, y los bytes viajan adjuntos con este
+   borrador.
+5. **La función de precedencia**, para que el encargado vea, antes de guardar,
+   qué va a cobrar realmente en cada municipio — municipio → su provincia →
+   no servida, con las tres guardas de importe. El vector de trece casos de
+   arriba es lo que prueba que las dos implementaciones coinciden.
+6. **El espejo del hash del tarifario (v13.4, F-044)** — § ⑤, «El hash del
+   tarifario de envío», arriba: es donde este lado publica qué filas entran,
+   cómo se serializa el importe y el vector de prueba con el que comprobar
+   vuestra propia traducción.
 
 ### De la v12 — emitir `BUSINESS`
 

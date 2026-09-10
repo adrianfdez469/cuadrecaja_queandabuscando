@@ -16,6 +16,10 @@ export const STORE_CONFIG_KEYS = [
   "deliveryFee",
   "deliveryFeeMode",
   "orderExpiryHours",
+  // F-041 R29: same "omitir no es apagar" semantics as the five above —
+  // absent leaves the column intact, `null` explicit clears it — so it
+  // inherits `pickDefined` without a hand-rolled `if`.
+  "zoneCode",
 ] as const;
 
 export type StoreConfigColumn = (typeof STORE_CONFIG_KEYS)[number];

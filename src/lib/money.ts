@@ -61,6 +61,19 @@ function minorToString(minor: bigint, digits = Number(MINOR_UNITS)): string {
   return `${negative ? "-" : ""}${int}${digits > 0 ? `.${frac}` : ""}`;
 }
 
+/**
+ * F-041: a decimal string with exactly two fraction digits, for a domain that
+ * has no currency of its own (the zone tariff's `deliveryFee` — R16 says it
+ * shares `Store.deliveryFee`'s domain and moneda, but the resolution's own
+ * types carry no currency field to invent). Reuses the SAME BigInt minor-unit
+ * arithmetic every other function here already goes through — no second
+ * aritmética. `String(300)` gives `"300"`; this gives `"300.00"`
+ * (`src/features/sync/server/storeConfig.ts:68-77` documents that same bug).
+ */
+export function toDecimalString(value: MoneyInput): string {
+  return minorToString(parseToMinor(value));
+}
+
 export function money(amount: MoneyInput, currency: string): Money {
   if (!currency) throw new MoneyError("Currency is required");
   return { amount: minorToString(parseToMinor(amount)), currency };

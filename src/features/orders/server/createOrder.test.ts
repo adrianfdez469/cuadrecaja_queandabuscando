@@ -33,6 +33,16 @@ vi.mock("./read", async (importOriginal) => {
   };
 });
 
+// F-042 — `createOrder.ts` now calls this whenever `store.deliveryFeeMode`
+// is `ZONE_BASED` (architecture.md § Flujo C, paso 4.1), regardless of
+// `fulfillment`. Mocked so these FLAT_RATE-era fixtures never touch the
+// real Prisma client the `@/lib/prisma` mock above does not shape for it.
+const loadStoreZoneCoverage = vi.fn();
+
+vi.mock("@/features/zones/server/coverage", () => ({
+  loadStoreZoneCoverage: (...args: unknown[]) => loadStoreZoneCoverage(...args),
+}));
+
 const { createOrder } = await import("./createOrder");
 
 const store = {
@@ -44,6 +54,7 @@ const store = {
   checkoutMode: "WHATSAPP" as const,
   deliveryEnabled: false,
   deliveryFee: null as string | null,
+  deliveryFeeMode: "FLAT_RATE" as const,
   whatsappNumber: "+5350000001",
   status: "PUBLISHED" as const,
   disabledReasonCode: null,
@@ -81,6 +92,7 @@ beforeEach(() => {
   orderFindFirst.mockReset();
   orderCreate.mockReset();
   loadStoreForOrder.mockReset().mockResolvedValue(store);
+  loadStoreZoneCoverage.mockReset().mockResolvedValue(null);
   quoteCart.mockReset().mockResolvedValue({
     store,
     lines: [orderableLine()],
@@ -397,6 +409,156 @@ describe("createOrder() — writing the order", () => {
       expect(result).toMatchObject({ kind: "created" });
       const data = orderCreate.mock.calls[0][0].data;
       expect(data.deliveryFee).toBe("0.00");
+    });
+  });
+
+  describe("F-042 — ZONE_BASED (E16-E20, R9, R11): a resolvable zone is required, never a silent PICKUP degrade", () => {
+    // F-042 SUPERSEDES this suite's old F-041 title and its old assertion:
+    // until F-042 existed, `isDeliveryOffered` answered `false` for EVERY
+    // ZONE_BASED store and DELIVERY silently degraded to PICKUP (R13 of
+    // F-041). E20 now forbids exactly that: a ZONE_BASED store with no
+    // resolvable zone (or with one but no `zoneCode` in the body) answers
+    // an explicit error, never a mostrador order nobody asked for.
+    it("a residual Store.deliveryFee is NOT charged, and DELIVERY without a zoneCode is DELIVERY_ZONE_REQUIRED — never a silent PICKUP order (E17, E20, R9)", async () => {
+      const zoneBasedStore = {
+        ...store,
+        deliveryEnabled: true,
+        deliveryFeeMode: "ZONE_BASED" as const,
+        // A residual amount left in the column from before the store
+        // switched modes (R9: ZONE_BASED never reads this column at all).
+        deliveryFee: "500.00" as string | null,
+      };
+      loadStoreForOrder.mockResolvedValue(zoneBasedStore);
+      // No resolvable zone at all (`null`, same as a tarifario with nothing
+      // that decides) — irrelevant here either way, since the body sends no
+      // `zoneCode` (E17) and that check runs before the coverage matters.
+      loadStoreZoneCoverage.mockResolvedValue(null);
+      quoteCart.mockResolvedValue({
+        store: zoneBasedStore,
+        lines: [orderableLine()],
+        subtotal: money("900.00", "CUP"),
+        discountTotal: money("0", "CUP"),
+        rates: {},
+        capturedAt: "now",
+      });
+
+      const result = await createOrder(
+        baseBody({
+          fulfillment: "DELIVERY",
+          deliveryAddress: "Calle 23, Vedado",
+          expectedTotal: "900.00",
+        }),
+      );
+
+      expect(result).toEqual({ kind: "delivery_zone_required" });
+      expect(orderCreate).not.toHaveBeenCalled();
+    });
+
+    it("DELIVERY with a zoneCode not in the tienda's coverage is DELIVERY_ZONE_NOT_SERVED — the five ways a code can be invalid are the SAME fact (E16, E18, caso límite 14)", async () => {
+      const zoneBasedStore = {
+        ...store,
+        deliveryEnabled: true,
+        deliveryFeeMode: "ZONE_BASED" as const,
+        deliveryFee: null as string | null,
+      };
+      loadStoreForOrder.mockResolvedValue(zoneBasedStore);
+      loadStoreZoneCoverage.mockResolvedValue([
+        {
+          code: "23.01",
+          name: "Playa",
+          provinceCode: "23",
+          provinceName: "La Habana",
+          deliveryFee: "300.00",
+        },
+      ]);
+      quoteCart.mockResolvedValue({
+        store: zoneBasedStore,
+        lines: [orderableLine()],
+        subtotal: money("900.00", "CUP"),
+        discountTotal: money("0", "CUP"),
+        rates: {},
+        capturedAt: "now",
+      });
+
+      const result = await createOrder(
+        baseBody({
+          fulfillment: "DELIVERY",
+          deliveryAddress: "Calle 23, Vedado",
+          zoneCode: "99.99",
+          expectedTotal: "900.00",
+        }),
+      );
+
+      expect(result).toEqual({ kind: "delivery_zone_not_served", zoneCode: "99.99" });
+      expect(orderCreate).not.toHaveBeenCalled();
+    });
+
+    it("DELIVERY with a zoneCode that IS ofrecible charges the ZONE's fee, never the residual Store.deliveryFee, and writes deliveryZoneCode/Name (R9, R19-R21)", async () => {
+      const zoneBasedStore = {
+        ...store,
+        deliveryEnabled: true,
+        deliveryFeeMode: "ZONE_BASED" as const,
+        deliveryFee: "500.00" as string | null,
+      };
+      loadStoreForOrder.mockResolvedValue(zoneBasedStore);
+      loadStoreZoneCoverage.mockResolvedValue([
+        {
+          code: "23.01",
+          name: "Playa",
+          provinceCode: "23",
+          provinceName: "La Habana",
+          deliveryFee: "300.00",
+        },
+      ]);
+      quoteCart.mockResolvedValue({
+        store: zoneBasedStore,
+        lines: [orderableLine()],
+        subtotal: money("900.00", "CUP"),
+        discountTotal: money("0", "CUP"),
+        rates: {},
+        capturedAt: "now",
+      });
+      orderCreate.mockResolvedValue({ code: "A7K3M9PQR2" });
+
+      const result = await createOrder(
+        baseBody({
+          fulfillment: "DELIVERY",
+          deliveryAddress: "Calle 23, Vedado",
+          zoneCode: "23.01",
+          expectedTotal: "1200.00",
+        }),
+      );
+
+      expect(result).toMatchObject({ kind: "created" });
+      const data = orderCreate.mock.calls[0][0].data;
+      expect(data.deliveryFee).toBe("300.00");
+      expect(data.deliveryZoneCode).toBe("23.01");
+      expect(data.deliveryZoneName).toBe("Playa");
+      expect(data.total).toBe("1200.00");
+    });
+
+    it("ZONE_BASED with deliveryEnabled and NO tariff at all is still a valid, orderable configuration (caso límite 9) — PICKUP, same as above", async () => {
+      const zoneBasedStore = {
+        ...store,
+        deliveryEnabled: true,
+        deliveryFeeMode: "ZONE_BASED" as const,
+        deliveryFee: null as string | null,
+      };
+      loadStoreForOrder.mockResolvedValue(zoneBasedStore);
+      quoteCart.mockResolvedValue({
+        store: zoneBasedStore,
+        lines: [orderableLine()],
+        subtotal: money("900.00", "CUP"),
+        discountTotal: money("0", "CUP"),
+        rates: {},
+        capturedAt: "now",
+      });
+      orderCreate.mockResolvedValue({ code: "A7K3M9PQR2" });
+
+      const result = await createOrder(baseBody({ fulfillment: "PICKUP" }));
+
+      expect(result).toMatchObject({ kind: "created" });
+      expect(orderCreate.mock.calls[0][0].data.deliveryFee).toBe("0.00");
     });
   });
 

@@ -76,3 +76,71 @@ export const BUSINESS_DISPLAY_CURRENCIES_INVALID = "BUSINESS_DISPLAY_CURRENCIES_
  * list, emit `displayCurrencies: []` instead.
  */
 export const BUSINESS_DELETE_NOT_SUPPORTED = "BUSINESS_DELETE_NOT_SUPPORTED";
+
+/**
+ * F-041 R17, thrown by `assertZoneKnown` in
+ * `src/features/sync/server/handlers/zoneTariff.ts` (F-043, R7 step 4) — a
+ * `ZONE_TARIFF.zoneCode` this side does not recognise, for EITHER of two
+ * causes the sobre no longer distinguishes: absent from the committed
+ * catalog (`src/features/zones/catalog.ts`), or without the DPA's shape
+ * (`architecture.md` § AD2 — no `ZONE_CODE_MALFORMED`, one code covers both).
+ * Decided in the HANDLER, against the ARTEFACT — zero database queries (I7)
+ * — so it fails only THAT event, in `207 failed[]`, and the other events of
+ * the same lote apply. Before F-043 this was decided in the sobre's schema
+ * and killed the whole `400 INVALID_BATCH` lote (I6); that is exactly what
+ * this feature closes.
+ *
+ * Class for cuadrecaja's outbox (S-007 point 9): RETRYABLE. Also true when
+ * the cause is a malformed value — it never converges, so it burns the six
+ * attempts of THIS event and only this one, which is what the feature is
+ * for. Not one of `QAB_OUTBOX_PERMANENT_ERROR_CODES`.
+ */
+export const ZONE_TARIFF_ZONE_UNKNOWN = "ZONE_TARIFF_ZONE_UNKNOWN";
+
+/**
+ * F-041 R15: `deliveryFee` present (including an explicit `null`) on a
+ * `ZONE_TARIFF` whose `rule` is `NOT_SERVED` or `INHERIT` — both forbid an
+ * amount. Lives inside a `400`'s `issues[].message` (precedent: `barcode`,
+ * `src/features/sync/schemas.ts`), not in the wire's error vocabulary: the
+ * three codes the POS compares byte for byte are this one's siblings below.
+ *
+ * Class for cuadrecaja's outbox (S-007 point 9): PERMANENT. The same
+ * `payload`, with the same `deliveryFee` where `rule` forbids it, fails
+ * identically forever — the POS has to drop the field or change `rule`
+ * before resending, same reasoning as `STORE_DELIVERY_CONFIG_INCONSISTENT`.
+ */
+export const ZONE_TARIFF_FEE_NOT_ALLOWED = "ZONE_TARIFF_FEE_NOT_ALLOWED";
+
+/**
+ * F-041 R20: a `ZONE_TARIFF` with `operation: "DELETE"`. Not an operation
+ * this entity supports — `INHERIT` is the only retraction there is — thrown
+ * FIRST in the handler, before any query and before the anti-stale guard:
+ * a format error cannot depend on a timestamp (precedent:
+ * `src/features/sync/server/handlers/business.ts`'s
+ * `BUSINESS_DELETE_NOT_SUPPORTED`).
+ *
+ * Class for cuadrecaja's outbox (S-007 point 9): PERMANENT. A `DELETE`
+ * never becomes valid by retrying it unchanged — the POS has to resend the
+ * same row as an `UPDATE` with `rule: "INHERIT"` instead.
+ */
+export const ZONE_TARIFF_DELETE_NOT_SUPPORTED = "ZONE_TARIFF_DELETE_NOT_SUPPORTED";
+
+/**
+ * F-041 R18, F-043 (AD4): a `STORE` payload's `zoneCode` is not in the
+ * committed catalog, OR does not have the DPA's shape — since F-043 the
+ * sobre's schema no longer rejects a malformed value either, so both causes
+ * land in this same guard and give the same byte-for-byte answer. Thrown in
+ * `src/features/sync/server/handlers/store.ts`, BEFORE each of the three
+ * writes it guards (same pattern as `STORE_OPENING_HOURS_INVALID`): the
+ * event fails, none of the STORE's other fields apply, and
+ * `sourceUpdatedAt` does not advance. Since F-045, nothing about the
+ * request is written at all: `applyBusinessFields` writes
+ * `Business.name`/`baseCurrencyCode` as the LAST statement before each of
+ * the three store writes, after every guard of that path, so a failure
+ * here never reaches it.
+ *
+ * Class for cuadrecaja's outbox (S-007 point 9): RETRYABLE, same reasoning
+ * as `ZONE_TARIFF_ZONE_UNKNOWN` above — also true when the cause is a
+ * malformed value, not just an unconverged catalog.
+ */
+export const STORE_ZONE_UNKNOWN = "STORE_ZONE_UNKNOWN";

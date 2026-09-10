@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CheckoutMode, DeliveryFeeMode } from "@/generated/prisma/enums";
-import { STORE_DELIVERY_CONFIG_INCONSISTENT } from "@/constants/sync";
+import { STORE_DELIVERY_CONFIG_INCONSISTENT, ZONE_TARIFF_FEE_NOT_ALLOWED } from "@/constants/sync";
 
 /**
  * Wire format for /api/internal/sync/*.
@@ -40,6 +40,20 @@ export const storePayloadSchema = z
     email: z.string().nullish(),
     openingHours: z.unknown().nullish(),
     baseCurrency: z.string().length(3).default("CUP"),
+    /**
+     * F-041 R29: joins the "omitir no es apagar" family (ADR 0028 (d)) —
+     * absent leaves the column INTACT, an explicit `null` clears it. NOT one
+     * of the nine contact fields, where absent clears (`docs/sync-contract.md`
+     * § "dos semánticas de omisión"): this is computable configuration the
+     * POS may not emit yet, not presentation text. F-043 (R1/R5): the sobre
+     * no longer opines on the VALUE at all — neither "in the catalog" nor
+     * "has the DPA's shape" — only on the TYPE (a string, or absent, or
+     * explicit `null`). Both are validated against the catalog in the
+     * HANDLER (`STORE_ZONE_UNKNOWN`, `failed[]` of THIS event), never here —
+     * a `400` of the whole lote over one store's zone would take the other
+     * 499 events down with it (I6).
+     */
+    zoneCode: z.string().nullish(),
     /**
      * F-032 (R1-R3, R5, R19): the purchase configuration cuadrecaja is now the
      * owner of. All five are OPTIONAL and PLAIN (R2) — absent means "leave the
@@ -138,6 +152,62 @@ export const businessPayloadSchema = z.object({
   updatedAt: isoDate,
 });
 
+/**
+ * F-041 — the zone tariff. Sin `businessId`: the identity comes from the
+ * token (`src/features/sync/server/caller.ts`) and `storeId` already ties
+ * the row to the business — the handler validates membership itself, like
+ * `handleProduct` (R14).
+ *
+ * `discriminatedUnion` on `rule`, not an `object` with a `.refine()`: a
+ * `refine` would produce one message for two different errors and leave
+ * `deliveryFee` optional in the inferred type, so the handler would have to
+ * re-check what the schema already knew. With the union, `rule: "FEE"`
+ * IMPLIES `deliveryFee: number` in TypeScript — a discriminant that cannot
+ * contradict itself (R15).
+ *
+ * F-043 (R1/R2/R5): `zoneCode` is `z.string()` and nothing else in all three
+ * branches — no `regex`, no `refine(isKnownZoneCode)`. Whether the value is
+ * in the catalog and whether it has the DPA's shape are both questions for
+ * the HANDLER's `assertZoneKnown` (`src/features/sync/server/handlers/zoneTariff.ts`),
+ * never the sobre: a `400` of the whole lote over one tariff's zone would
+ * take the other 499 events down with it (same doctrine as `barcodes` in the
+ * v4 and `displayCurrencies` in the v12, both below). The TYPE — string,
+ * present, non-null — stays the sobre's call, so a `zoneCode` that arrives as
+ * a number, `null`, or absent is still `400 INVALID_BATCH` like any other
+ * malformed required field.
+ */
+export const zoneTariffPayloadSchema = z.discriminatedUnion("rule", [
+  z.object({
+    storeId: z.string().min(1),
+    zoneCode: z.string(),
+    rule: z.literal("FEE"),
+    // R16: same domain and shape as STORE's own `deliveryFee` above.
+    // OBLIGATORY here — the other half of guard (1) of R27 lives in
+    // `resolveZoneTariff` (`src/features/zones/precedence.ts`).
+    // `nonnegative()` is the schema half of guard (3).
+    deliveryFee: z.number().nonnegative().multipleOf(0.01).max(999999999999.99),
+    updatedAt: isoDate,
+  }),
+  z.object({
+    storeId: z.string().min(1),
+    zoneCode: z.string(),
+    rule: z.literal("NOT_SERVED"),
+    // FORBIDDEN, not ignored: present — including an explicit `null` — is a
+    // `400`. Precedent: `barcode` above.
+    deliveryFee: z.never({ error: ZONE_TARIFF_FEE_NOT_ALLOWED }).optional(),
+    updatedAt: isoDate,
+  }),
+  z.object({
+    storeId: z.string().min(1),
+    zoneCode: z.string(),
+    rule: z.literal("INHERIT"),
+    deliveryFee: z.never({ error: ZONE_TARIFF_FEE_NOT_ALLOWED }).optional(),
+    updatedAt: isoDate,
+  }),
+]);
+
+export type ZoneTariffPayload = z.infer<typeof zoneTariffPayloadSchema>;
+
 // --- envelope --------------------------------------------------------------
 
 export const syncOperationSchema = z.enum(["CREATE", "UPDATE", "DELETE"]);
@@ -188,6 +258,13 @@ export const syncEventSchema = z.discriminatedUnion("entity", [
     operation: syncOperationSchema,
     occurredAt: isoDate,
     payload: businessPayloadSchema,
+  }),
+  z.object({
+    eventId: z.string().min(1),
+    entity: z.literal("ZONE_TARIFF"),
+    operation: syncOperationSchema,
+    occurredAt: isoDate,
+    payload: zoneTariffPayloadSchema,
   }),
 ]);
 

@@ -84,12 +84,26 @@ export async function markSkipped(eventIds: string[]): Promise<void> {
 
 export async function markFailed(failures: { eventId: string; error: string }[]): Promise<void> {
   // Left as FAILED on purpose: recordBatch re-picks these on the next delivery.
-  // One update per failure, but failures are rare by construction.
+  //
+  // F-043 (architecture.md § AD5): one `updateMany` per DISTINCT message, not
+  // per failure — "failures are rare by construction" stopped being true the
+  // day a lote of 500 ZONE_TARIFF all diverge on the same catalog: that used
+  // to be 500 round-trips against a pool of `max: 5` (AGENTS.md § Cosas que
+  // muerden, "Batchea en un solo round-trip"). Same rows, same status, same
+  // `.slice(0, 500)` — zero observable change, just fewer round-trips.
+  const idsByMessage = new Map<string, string[]>();
+  for (const failure of failures) {
+    const message = failure.error.slice(0, 500);
+    const ids = idsByMessage.get(message);
+    if (ids) ids.push(failure.eventId);
+    else idsByMessage.set(message, [failure.eventId]);
+  }
+
   await Promise.all(
-    failures.map((failure) =>
+    [...idsByMessage.entries()].map(([error, eventIds]) =>
       prisma.syncEvent.updateMany({
-        where: { eventId: failure.eventId },
-        data: { status: "FAILED", error: failure.error.slice(0, 500) },
+        where: { eventId: { in: eventIds } },
+        data: { status: "FAILED", error },
       }),
     ),
   );

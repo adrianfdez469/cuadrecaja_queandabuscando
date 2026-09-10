@@ -12,6 +12,7 @@ import {
   ORDER_PROPOSAL_MESSAGE_MAX_LENGTH,
 } from "@/constants/orders";
 import { add, money, subtract, sum, type Money } from "@/lib/money";
+import { ZONE_CODE_MAX_LENGTH } from "@/constants/zones";
 import { normalizeName, normalizePhone } from "./contact";
 import type {
   CreateOrderBody,
@@ -99,6 +100,14 @@ export const createOrderRequestSchema = z
       .max(DELIVERY_ADDRESS_MAX_LENGTH)
       .optional(),
     notes: z.string().trim().max(ORDER_NOTES_MAX_LENGTH).optional(),
+    // F-042 (architecture.md § Contratos 3) — FORMA y nada más: sin regex
+    // del patrón de zona y sin `isKnownZoneCode`. E18 exige que un código
+    // inventado y uno real pero no ofrecible sean INDISTINGUIBLES para el
+    // comprador; validarlo aquí los separaría en un INVALID_BODY distinto
+    // de DELIVERY_ZONE_NOT_SERVED. La comprobación de verdad la hace
+    // `createOrder.ts` contra el conjunto ofrecible.
+    zoneCode: z.string().trim().min(1).max(ZONE_CODE_MAX_LENGTH).optional(),
+    expectedDeliveryFee: decimalStringSchema.optional(),
     expectedTotal: decimalStringSchema,
     idempotencyKey: z.string().uuid().optional(),
   })

@@ -4,6 +4,7 @@ import {
   provisionCredentialSchema,
   storePayloadSchema,
   syncEventSchema,
+  zoneTariffPayloadSchema,
 } from "./schemas";
 import { STORE_DELIVERY_CONFIG_INCONSISTENT } from "@/constants/sync";
 
@@ -252,10 +253,10 @@ describe("businessPayloadSchema / syncEventSchema — the sixth branch (R1, E1)"
     expect(result.success).toBe(true);
   });
 
-  it("rejects an entity the contract does not define (ZONE_TARIFF, v13 vocabulary — I3): accepting BUSINESS does not open the envelope to anything (E2)", () => {
+  it("rejects an entity the contract does not define (ORDER, I13 — ZONE_TARIFF was this example until F-041 defined it): accepting BUSINESS does not open the envelope to anything (E2)", () => {
     const result = syncEventSchema.safeParse({
       eventId: "evt-1",
-      entity: "ZONE_TARIFF",
+      entity: "ORDER",
       operation: "UPDATE",
       occurredAt: "2026-09-06T14:03:00.000Z",
       payload: {},
@@ -309,5 +310,131 @@ describe("businessPayloadSchema / syncEventSchema — the sixth branch (R1, E1)"
     expect(
       businessPayloadSchema.safeParse(businessBasePayload({ displayCurrencies: [] })).success,
     ).toBe(true);
+  });
+});
+
+/**
+ * F-041 — criterio 3 (paso 16, § "Los criterios con trampa"): NOT_SERVED/
+ * INHERIT with an amount, and FEE with NO amount, both 400 — neither is
+ * ever a silent discard (R15, precedent: `barcode`). Real codes of the
+ * committed catalog (`21`, `21.01`) so a regeneration that ever retires one
+ * fails loudly here rather than this file quietly testing against a code
+ * that stopped existing.
+ */
+function zoneTariffBasePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    storeId: "s1",
+    zoneCode: "21.01",
+    rule: "FEE",
+    deliveryFee: 300,
+    updatedAt: "2026-09-08T14:03:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("zoneTariffPayloadSchema / syncEventSchema — the seventh branch (C3, E6-E9)", () => {
+  it("accepts a valid FEE payload", () => {
+    expect(zoneTariffPayloadSchema.safeParse(zoneTariffBasePayload()).success).toBe(true);
+  });
+
+  it("accepts a valid NOT_SERVED payload with no deliveryFee key at all", () => {
+    const { deliveryFee: _fee, ...rest } = zoneTariffBasePayload({ rule: "NOT_SERVED" });
+    expect(zoneTariffPayloadSchema.safeParse(rest).success).toBe(true);
+  });
+
+  it("accepts a valid INHERIT payload with no deliveryFee key at all", () => {
+    const { deliveryFee: _fee, ...rest } = zoneTariffBasePayload({ rule: "INHERIT" });
+    expect(zoneTariffPayloadSchema.safeParse(rest).success).toBe(true);
+  });
+
+  it("E6: FEE with NO deliveryFee is rejected (400) — not free shipping, malformed", () => {
+    const { deliveryFee: _fee, ...rest } = zoneTariffBasePayload();
+    expect(zoneTariffPayloadSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it.each(["NOT_SERVED", "INHERIT"] as const)(
+    "E7: %s WITH a deliveryFee present is rejected (400) — presence is the error, never a silent discard",
+    (rule) => {
+      expect(
+        zoneTariffPayloadSchema.safeParse(zoneTariffBasePayload({ rule, deliveryFee: 0 })).success,
+      ).toBe(false);
+    },
+  );
+
+  it.each(["NOT_SERVED", "INHERIT"] as const)(
+    "E7: %s with deliveryFee EXPLICITLY null is ALSO rejected — null is not the same as absent",
+    (rule) => {
+      expect(
+        zoneTariffPayloadSchema.safeParse(zoneTariffBasePayload({ rule, deliveryFee: null }))
+          .success,
+      ).toBe(false);
+    },
+  );
+
+  it("E8: a negative deliveryFee on FEE is rejected (400), same nonnegative() guard as STORE's own deliveryFee", () => {
+    expect(
+      zoneTariffPayloadSchema.safeParse(zoneTariffBasePayload({ deliveryFee: -1 })).success,
+    ).toBe(false);
+  });
+
+  it("a deliveryFee with more than two decimal places is rejected (multipleOf 0.01, same domain as STORE R16)", () => {
+    expect(
+      zoneTariffPayloadSchema.safeParse(zoneTariffBasePayload({ deliveryFee: 300.005 })).success,
+    ).toBe(false);
+  });
+
+  it("a deliveryFee of exactly 0 on FEE is ACCEPTED at the schema layer — free shipping is a valid amount (R27(2), decided by the pure function, not here)", () => {
+    expect(
+      zoneTariffPayloadSchema.safeParse(zoneTariffBasePayload({ deliveryFee: 0 })).success,
+    ).toBe(true);
+  });
+
+  it("F-043 (R1/R5): a zoneCode with the wrong shape (no dot pattern match) is ACCEPTED at the schema layer — the VALUE is the handler's call, never the sobre's (avoids the 400 that took 499 unrelated events down with it)", () => {
+    expect(
+      zoneTariffPayloadSchema.safeParse(zoneTariffBasePayload({ zoneCode: "not-a-code" })).success,
+    ).toBe(true);
+  });
+
+  it("F-043 (R1/R5): a zoneCode not in the published catalog is ALSO accepted here — checked against the artefact in the handler's assertZoneKnown, not the sobre (I7)", () => {
+    const result = zoneTariffPayloadSchema.safeParse(zoneTariffBasePayload({ zoneCode: "99.99" }));
+    expect(result.success).toBe(true);
+  });
+
+  it("F-043 (R5, lectura (a) del humano): a NUMERIC zoneCode is still rejected — the TYPE stays the sobre's call, this is the only door left open to a 400 for this field", () => {
+    const result = zoneTariffPayloadSchema.safeParse(zoneTariffBasePayload({ zoneCode: 2101 }));
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a rule outside the vocabulary — Zod's OWN discriminator message comes through, not a message this repo wrote", () => {
+    const result = zoneTariffPayloadSchema.safeParse(zoneTariffBasePayload({ rule: "SERVED" }));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      // C3's trap: this is `invalid_union_discriminator` from Zod itself,
+      // not a custom message — still a schema-level rejection either way,
+      // which is all C3 requires ("400 INVALID_BATCH").
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("wraps in a full syncEventSchema ZONE_TARIFF event and rejects a malformed rule as INVALID at the envelope level too", () => {
+    const result = syncEventSchema.safeParse({
+      eventId: "evt-1",
+      entity: "ZONE_TARIFF",
+      operation: "UPDATE",
+      occurredAt: "2026-09-08T14:03:00.000Z",
+      payload: zoneTariffBasePayload({ rule: "SERVED" }),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a full syncEventSchema ZONE_TARIFF event when the payload is valid", () => {
+    const result = syncEventSchema.safeParse({
+      eventId: "evt-1",
+      entity: "ZONE_TARIFF",
+      operation: "UPDATE",
+      occurredAt: "2026-09-08T14:03:00.000Z",
+      payload: zoneTariffBasePayload(),
+    });
+    expect(result.success).toBe(true);
   });
 });

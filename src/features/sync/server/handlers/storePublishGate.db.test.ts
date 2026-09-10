@@ -167,4 +167,69 @@ describe("PUBLISHED gate against real Postgres (AC1, E3, E5)", () => {
     const closeResponse = writeResultToResponse(closeResult);
     expect(closeResponse.status).toBe(200);
   });
+
+  it("F-045 criterio 2(c): republishing over an unreadable timezone leaves Business.name/baseCurrencyCode untouched, with a single event in its own batch", async () => {
+    // Its OWN it, not an assertion added to the `it` above (`:57-140`): that
+    // one sends a SECOND, healthy STORE in the same batch, which DOES apply
+    // and DOES write the two columns — measuring something else entirely.
+    // This session's `beforeAll` is shared, so "before" is read INSIDE the
+    // `it`, never in `beforeAll`.
+    const gated = await session.createStore({ status: "SUSPENDED" });
+    await prisma.$executeRaw(
+      Prisma.sql`UPDATE "Store" SET "timezone" = 'Nowhere/Nothing' WHERE id = ${gated.id}`,
+    );
+
+    const before = await prisma.business.findUniqueOrThrow({
+      where: { id: session.businessId },
+      select: { name: true, baseCurrencyCode: true },
+    });
+
+    const eventId = `${session.token}-f045-tz-gate`;
+    const now = new Date().toISOString();
+
+    const response = await POST(
+      new Request("http://localhost/api/internal/sync/catalog", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${session.syncToken}`,
+        },
+        body: JSON.stringify({
+          businessId: session.businessExternalId,
+          events: [
+            {
+              eventId,
+              entity: "STORE",
+              operation: "UPDATE",
+              occurredAt: now,
+              payload: {
+                storeId: gated.externalId,
+                businessId: session.businessExternalId,
+                // Anti-vacuidad (F-045 architecture.md § AD5.3): distinto de
+                // "F-015 fixture <token>" / "CUP", que es lo que la fixture
+                // ya deja en la fila.
+                businessName: `RECHAZADO ${session.token}`,
+                name: `F-045 fixture ${session.token}`,
+                publishToStore: true,
+                baseCurrency: "USD",
+                updatedAt: now,
+              },
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(207);
+    const body = await response.json();
+    expect(body.ok).not.toContain(eventId);
+    const failure = body.failed.find((f: { id: string }) => f.id === eventId);
+    expect(failure?.error).toBe(STORE_TIMEZONE_INVALID);
+
+    const after = await prisma.business.findUniqueOrThrow({
+      where: { id: session.businessId },
+      select: { name: true, baseCurrencyCode: true },
+    });
+    expect(after).toEqual(before);
+  });
 });

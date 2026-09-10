@@ -1,8 +1,20 @@
 # 0028 — La configuración de compra de una tienda la escribe cuadrecaja, y omitir no es apagar
 
-**Propuesta** · 1 de septiembre de 2026 · F-032 — pasa a **Aceptada** cuando
-F-032 esté construido, verificado y fusionado, como hizo
+**Aceptada** · 1 de septiembre de 2026 · F-032 — F-032 está construido,
+verificado y fusionado, el disparador que esta cabecera fijaba, como hizo
 [ADR 0017](0017-frontera-de-escritura-del-panel.md) con su propia versión.
+
+**Su invariante (e) fue superado, para el modo `ZONE_BASED`, por
+[ADR 0033](0033-cobrar-el-domicilio-y-ofrecerlo-son-dos-preguntas.md) (F-041,
+9 de septiembre de 2026).** Sigue siendo cierto tal cual para `FLAT_RATE` y
+`QUOTED_PER_ORDER`.
+
+**Su tercera consecuencia fue estrechada, para `zoneCode`, por
+[ADR 0034](0034-lo-que-valida-el-sobre-y-lo-que-valida-el-aplicador.md)
+(F-043, 9 de septiembre de 2026).** Las otras cuatro columnas (`checkoutMode`,
+`deliveryEnabled`, `deliveryFee`, `deliveryFeeMode`, `orderExpiryHours`) siguen
+bajo ella tal cual: un valor mal formado sigue siendo `400` de lote, con el
+criterio nuevo que la 0034 fija escrito ahí, no por inercia.
 
 Completa a [ADR 0017](0017-frontera-de-escritura-del-panel.md) (a), que dice
 **quién puede escribir cada columna**, y a

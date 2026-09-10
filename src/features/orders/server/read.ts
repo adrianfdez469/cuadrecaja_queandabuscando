@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { isOrderCode, normalizeOrderCode } from "@/lib/orderCode";
 import { money } from "@/lib/money";
-import { publicEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 import { canonicalSlug, type PublicSlug } from "@/lib/publicSlug";
 import { routingWhatsappNumber } from "@/lib/storeContact";
 import type { CheckoutMode, OrderCancelledBy, OrderStatus } from "@/generated/prisma/enums";

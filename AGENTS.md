@@ -188,11 +188,14 @@ con `DEPENDENCY_FAILED_IN_BATCH` en vez de aplicarse a medias — ver
 `src/features/sync/dependencies.ts`. Si agregas un handler, mantén ambas
 propiedades o el reintento corrompe datos. Hay
 **dos** formas de la guarda, y no son intercambiables: la que **rechaza** y
-devuelve `STALE` (`STORE`, `CATEGORY`, `PRODUCT`, `BUSINESS`) y la de **orden**, de
-`EXCHANGE_RATE` (F-036) — que escribe siempre y decide al leer, porque su tabla
-es append-only y el histórico es el producto. Copiar la forma de una entidad
-esperando el mecanismo de la otra es el error: ver
+devuelve `STALE` (`STORE`, `CATEGORY`, `PRODUCT`, `BUSINESS`, `ZONE_TARIFF`) y la
+de **orden**, de `EXCHANGE_RATE` (F-036) — que escribe siempre y decide al leer,
+porque su tabla es append-only y el histórico es el producto. Copiar la forma de
+una entidad esperando el mecanismo de la otra es el error: ver
 [`docs/adr/0030-la-tasa-vigente-la-decide-la-lectura.md`](docs/adr/0030-la-tasa-vigente-la-decide-la-lectura.md).
+Desde F-041, `STORE` también **provee** clave de dependencia intra-lote para
+`ZONE_TARIFF`: un tarifario cuyo `STORE` falló en el mismo lote vuelve en
+`failed[]` con `DEPENDENCY_FAILED_IN_BATCH`, nunca `skipped_not_published`.
 
 **Un archivo que todavía no existe no se cita entre comillas invertidas.**
 `npm run check:harness` recorre la prosa del arnés y
@@ -215,6 +218,16 @@ está, arregla la prosa escribiendo la ruta completa desde la raíz del repo —
 the prose, not this check», que es lo que el propio mensaje pide—, y si ese
 documento no es tuyo escala a quien pueda editarlo en vez de darlo por bueno.
 Ya pasó en F-010, F-007, F-011 y F-017.
+
+**Un artefacto de bytes commiteados cuyo hash se publica va en
+`.prettierignore` desde el commit que lo crea, no después.** Prettier
+reindenta y reordena sin avisar, y eso le cambia los bytes — y con ellos el
+sha256 que un test o un documento afirma sobre él. Ya pasó dos veces:
+`src/features/zones/zone-index.json` (F-041) y
+`src/features/zones/geometry/` (F-042), los dos artefactos de la
+[ADR 0032](docs/adr/0032-catalogo-de-zonas-bytes-commiteados-y-la-base-como-espejo.md).
+La línea de `.prettierignore` lleva el motivo al lado, para que quien la lea
+sepa por qué ese directorio es la excepción.
 
 **Prettier también formatea la prosa del arnés, y ahí puede cambiar lo que
 dice.** Dos mitades del mismo problema, y son las dos trampas más repetidas del

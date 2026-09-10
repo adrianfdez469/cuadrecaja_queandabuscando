@@ -17,7 +17,7 @@ import {
   type CatalogFilterResult,
 } from "@/features/catalog/catalogFilters";
 import { clampSearchPage, normalizeSearchTerm } from "@/lib/searchTerm";
-import { publicEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 import { SEARCH_TERM_MAX_LENGTH } from "@/constants/search";
 import { Container } from "@/components/ui/Container";
 import { Alert } from "@/components/ui/Alert";

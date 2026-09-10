@@ -1,0 +1,1662 @@
+{
+  "version": "1.0.0",
+  "generatedAt": "2026-09-09T01:08:26.000Z",
+  "zones": [
+    {
+      "code": "21",
+      "name": "Pinar del Río",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1854617",
+      "osmName": "Pinar del Río",
+      "retiredAt": null
+    },
+    {
+      "code": "22",
+      "name": "Artemisa",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "2576644",
+      "osmName": "Artemisa",
+      "retiredAt": null
+    },
+    {
+      "code": "23",
+      "name": "La Habana",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1854615",
+      "osmName": "La Habana",
+      "retiredAt": null
+    },
+    {
+      "code": "24",
+      "name": "Mayabeque",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "2579313",
+      "osmName": "Mayabeque",
+      "retiredAt": null
+    },
+    {
+      "code": "25",
+      "name": "Matanzas",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1854616",
+      "osmName": "Matanzas",
+      "retiredAt": null
+    },
+    {
+      "code": "26",
+      "name": "Villa Clara",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1923804",
+      "osmName": "Villa Clara",
+      "retiredAt": null
+    },
+    {
+      "code": "27",
+      "name": "Cienfuegos",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1854632",
+      "osmName": "Cienfuegos",
+      "retiredAt": null
+    },
+    {
+      "code": "28",
+      "name": "Sancti Spíritus",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1923793",
+      "osmName": "Sancti Spíritus",
+      "retiredAt": null
+    },
+    {
+      "code": "29",
+      "name": "Ciego de Ávila",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1854631",
+      "osmName": "Ciego de Ávila",
+      "retiredAt": null
+    },
+    {
+      "code": "30",
+      "name": "Camagüey",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1854630",
+      "osmName": "Camagüey",
+      "retiredAt": null
+    },
+    {
+      "code": "31",
+      "name": "Las Tunas",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1854636",
+      "osmName": "Las Tunas",
+      "retiredAt": null
+    },
+    {
+      "code": "32",
+      "name": "Holguín",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1854635",
+      "osmName": "Holguín",
+      "retiredAt": null
+    },
+    {
+      "code": "33",
+      "name": "Granma",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1854633",
+      "osmName": "Granma",
+      "retiredAt": null
+    },
+    {
+      "code": "34",
+      "name": "Santiago de Cuba",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1854638",
+      "osmName": "Santiago de Cuba",
+      "retiredAt": null
+    },
+    {
+      "code": "35",
+      "name": "Guantánamo",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1854634",
+      "osmName": "Guantánamo",
+      "retiredAt": null
+    },
+    {
+      "code": "40",
+      "name": "Isla de la Juventud",
+      "level": "FIRST_LEVEL",
+      "provinceCode": null,
+      "osmRelationId": "1854614",
+      "osmName": "Isla de la Juventud",
+      "retiredAt": null
+    },
+    {
+      "code": "21.01",
+      "name": "Sandino",
+      "level": "MUNICIPALITY",
+      "provinceCode": "21",
+      "osmRelationId": "2575075",
+      "osmName": "Sandino",
+      "retiredAt": null
+    },
+    {
+      "code": "21.02",
+      "name": "Mantua",
+      "level": "MUNICIPALITY",
+      "provinceCode": "21",
+      "osmRelationId": "2575069",
+      "osmName": "Mantua",
+      "retiredAt": null
+    },
+    {
+      "code": "21.03",
+      "name": "Minas de Matahambre",
+      "level": "MUNICIPALITY",
+      "provinceCode": "21",
+      "osmRelationId": "2575070",
+      "osmName": "Minas de Matahambre",
+      "retiredAt": null
+    },
+    {
+      "code": "21.04",
+      "name": "Viñales",
+      "level": "MUNICIPALITY",
+      "provinceCode": "21",
+      "osmRelationId": "2575076",
+      "osmName": "Viñales",
+      "retiredAt": null
+    },
+    {
+      "code": "21.05",
+      "name": "La Palma",
+      "level": "MUNICIPALITY",
+      "provinceCode": "21",
+      "osmRelationId": "2575067",
+      "osmName": "La Palma",
+      "retiredAt": null
+    },
+    {
+      "code": "21.06",
+      "name": "Los Palacios",
+      "level": "MUNICIPALITY",
+      "provinceCode": "21",
+      "osmRelationId": "2575068",
+      "osmName": "Los Palacios",
+      "retiredAt": null
+    },
+    {
+      "code": "21.07",
+      "name": "Consolación del Sur",
+      "level": "MUNICIPALITY",
+      "provinceCode": "21",
+      "osmRelationId": "2575065",
+      "osmName": "Consolación del Sur",
+      "retiredAt": null
+    },
+    {
+      "code": "21.08",
+      "name": "Pinar del Río",
+      "level": "MUNICIPALITY",
+      "provinceCode": "21",
+      "osmRelationId": "2575071",
+      "osmName": "Pinar del Río",
+      "retiredAt": null
+    },
+    {
+      "code": "21.09",
+      "name": "San Luis",
+      "level": "MUNICIPALITY",
+      "provinceCode": "21",
+      "osmRelationId": "2575074",
+      "osmName": "San Luis",
+      "retiredAt": null
+    },
+    {
+      "code": "21.10",
+      "name": "San Juan y Martínez",
+      "level": "MUNICIPALITY",
+      "provinceCode": "21",
+      "osmRelationId": "2575073",
+      "osmName": "San Juan y Martínez",
+      "retiredAt": null
+    },
+    {
+      "code": "21.11",
+      "name": "Guane",
+      "level": "MUNICIPALITY",
+      "provinceCode": "21",
+      "osmRelationId": "2575066",
+      "osmName": "Guane",
+      "retiredAt": null
+    },
+    {
+      "code": "22.01",
+      "name": "Bahía Honda",
+      "level": "MUNICIPALITY",
+      "provinceCode": "22",
+      "osmRelationId": "2576647",
+      "osmName": "Bahía Honda",
+      "retiredAt": null
+    },
+    {
+      "code": "22.02",
+      "name": "Mariel",
+      "level": "MUNICIPALITY",
+      "provinceCode": "22",
+      "osmRelationId": "2576653",
+      "osmName": "Mariel",
+      "retiredAt": null
+    },
+    {
+      "code": "22.03",
+      "name": "Guanajay",
+      "level": "MUNICIPALITY",
+      "provinceCode": "22",
+      "osmRelationId": "2576651",
+      "osmName": "Guanajay",
+      "retiredAt": null
+    },
+    {
+      "code": "22.04",
+      "name": "Caimito",
+      "level": "MUNICIPALITY",
+      "provinceCode": "22",
+      "osmRelationId": "2576649",
+      "osmName": "Caimito",
+      "retiredAt": null
+    },
+    {
+      "code": "22.05",
+      "name": "Bauta",
+      "level": "MUNICIPALITY",
+      "provinceCode": "22",
+      "osmRelationId": "2576648",
+      "osmName": "Bauta",
+      "retiredAt": null
+    },
+    {
+      "code": "22.06",
+      "name": "San Antonio de los Baños",
+      "level": "MUNICIPALITY",
+      "provinceCode": "22",
+      "osmRelationId": "2576654",
+      "osmName": "San Antonio de los Baños",
+      "retiredAt": null
+    },
+    {
+      "code": "22.07",
+      "name": "Güira de Melena",
+      "level": "MUNICIPALITY",
+      "provinceCode": "22",
+      "osmRelationId": "2576652",
+      "osmName": "Güira de Melena",
+      "retiredAt": null
+    },
+    {
+      "code": "22.08",
+      "name": "Alquízar",
+      "level": "MUNICIPALITY",
+      "provinceCode": "22",
+      "osmRelationId": "2576645",
+      "osmName": "Alquízar",
+      "retiredAt": null
+    },
+    {
+      "code": "22.09",
+      "name": "Artemisa",
+      "level": "MUNICIPALITY",
+      "provinceCode": "22",
+      "osmRelationId": "2576646",
+      "osmName": "Artemisa",
+      "retiredAt": null
+    },
+    {
+      "code": "22.10",
+      "name": "Candelaria",
+      "level": "MUNICIPALITY",
+      "provinceCode": "22",
+      "osmRelationId": "2576650",
+      "osmName": "Candelaria",
+      "retiredAt": null
+    },
+    {
+      "code": "22.11",
+      "name": "San Cristóbal",
+      "level": "MUNICIPALITY",
+      "provinceCode": "22",
+      "osmRelationId": "2575072",
+      "osmName": "San Cristóbal",
+      "retiredAt": null
+    },
+    {
+      "code": "23.01",
+      "name": "Playa",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489827",
+      "osmName": "Playa",
+      "retiredAt": null
+    },
+    {
+      "code": "23.02",
+      "name": "Plaza de la Revolución",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489828",
+      "osmName": "Plaza de la Revolución",
+      "retiredAt": null
+    },
+    {
+      "code": "23.03",
+      "name": "Centro Habana",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489819",
+      "osmName": "Centro Habana",
+      "retiredAt": null
+    },
+    {
+      "code": "23.04",
+      "name": "La Habana Vieja",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489824",
+      "osmName": "La Habana Vieja",
+      "retiredAt": null
+    },
+    {
+      "code": "23.05",
+      "name": "Regla",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489829",
+      "osmName": "Regla",
+      "retiredAt": null
+    },
+    {
+      "code": "23.06",
+      "name": "La Habana del Este",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489823",
+      "osmName": "Habana del Este",
+      "retiredAt": null
+    },
+    {
+      "code": "23.07",
+      "name": "Guanabacoa",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5501389",
+      "osmName": "Guanabacoa",
+      "retiredAt": null
+    },
+    {
+      "code": "23.08",
+      "name": "San Miguel del Padrón",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489830",
+      "osmName": "San Miguel del Padrón",
+      "retiredAt": null
+    },
+    {
+      "code": "23.09",
+      "name": "Diez de Octubre",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489822",
+      "osmName": "Diez de Octubre",
+      "retiredAt": null
+    },
+    {
+      "code": "23.10",
+      "name": "Cerro",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489820",
+      "osmName": "Cerro",
+      "retiredAt": null
+    },
+    {
+      "code": "23.11",
+      "name": "Marianao",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489826",
+      "osmName": "Marianao",
+      "retiredAt": null
+    },
+    {
+      "code": "23.12",
+      "name": "La Lisa",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489825",
+      "osmName": "La Lisa",
+      "retiredAt": null
+    },
+    {
+      "code": "23.13",
+      "name": "Boyeros",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489818",
+      "osmName": "Boyeros",
+      "retiredAt": null
+    },
+    {
+      "code": "23.14",
+      "name": "Arroyo Naranjo",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489817",
+      "osmName": "Arroyo Naranjo",
+      "retiredAt": null
+    },
+    {
+      "code": "23.15",
+      "name": "Cotorro",
+      "level": "MUNICIPALITY",
+      "provinceCode": "23",
+      "osmRelationId": "5489821",
+      "osmName": "Cotorro",
+      "retiredAt": null
+    },
+    {
+      "code": "24.01",
+      "name": "Bejucal",
+      "level": "MUNICIPALITY",
+      "provinceCode": "24",
+      "osmRelationId": "5539164",
+      "osmName": "Bejucal",
+      "retiredAt": null
+    },
+    {
+      "code": "24.02",
+      "name": "San José de las Lajas",
+      "level": "MUNICIPALITY",
+      "provinceCode": "24",
+      "osmRelationId": "5539171",
+      "osmName": "San José de las Lajas",
+      "retiredAt": null
+    },
+    {
+      "code": "24.03",
+      "name": "Jaruco",
+      "level": "MUNICIPALITY",
+      "provinceCode": "24",
+      "osmRelationId": "5539166",
+      "osmName": "Jaruco",
+      "retiredAt": null
+    },
+    {
+      "code": "24.04",
+      "name": "Santa Cruz del Norte",
+      "level": "MUNICIPALITY",
+      "provinceCode": "24",
+      "osmRelationId": "5539173",
+      "osmName": "Santa Cruz del Norte",
+      "retiredAt": null
+    },
+    {
+      "code": "24.05",
+      "name": "Madruga",
+      "level": "MUNICIPALITY",
+      "provinceCode": "24",
+      "osmRelationId": "5539167",
+      "osmName": "Madruga",
+      "retiredAt": null
+    },
+    {
+      "code": "24.06",
+      "name": "Nueva Paz",
+      "level": "MUNICIPALITY",
+      "provinceCode": "24",
+      "osmRelationId": "5539169",
+      "osmName": "Nueva Paz",
+      "retiredAt": null
+    },
+    {
+      "code": "24.07",
+      "name": "San Nicolás",
+      "level": "MUNICIPALITY",
+      "provinceCode": "24",
+      "osmRelationId": "5539172",
+      "osmName": "San Nicolás",
+      "retiredAt": null
+    },
+    {
+      "code": "24.08",
+      "name": "Güines",
+      "level": "MUNICIPALITY",
+      "provinceCode": "24",
+      "osmRelationId": "5539165",
+      "osmName": "Güines",
+      "retiredAt": null
+    },
+    {
+      "code": "24.09",
+      "name": "Melena del Sur",
+      "level": "MUNICIPALITY",
+      "provinceCode": "24",
+      "osmRelationId": "5539168",
+      "osmName": "Melena del Sur",
+      "retiredAt": null
+    },
+    {
+      "code": "24.10",
+      "name": "Batabanó",
+      "level": "MUNICIPALITY",
+      "provinceCode": "24",
+      "osmRelationId": "5539163",
+      "osmName": "Batabanó",
+      "retiredAt": null
+    },
+    {
+      "code": "24.11",
+      "name": "Quivicán",
+      "level": "MUNICIPALITY",
+      "provinceCode": "24",
+      "osmRelationId": "5539170",
+      "osmName": "Quivicán",
+      "retiredAt": null
+    },
+    {
+      "code": "25.01",
+      "name": "Matanzas",
+      "level": "MUNICIPALITY",
+      "provinceCode": "25",
+      "osmRelationId": "5875983",
+      "osmName": "Matanzas",
+      "retiredAt": null
+    },
+    {
+      "code": "25.02",
+      "name": "Cárdenas",
+      "level": "MUNICIPALITY",
+      "provinceCode": "25",
+      "osmRelationId": "5875948",
+      "osmName": "Cárdenas",
+      "retiredAt": null
+    },
+    {
+      "code": "25.03",
+      "name": "Martí",
+      "level": "MUNICIPALITY",
+      "provinceCode": "25",
+      "osmRelationId": "5875982",
+      "osmName": "Martí",
+      "retiredAt": null
+    },
+    {
+      "code": "25.04",
+      "name": "Colón",
+      "level": "MUNICIPALITY",
+      "provinceCode": "25",
+      "osmRelationId": "5875947",
+      "osmName": "Colón",
+      "retiredAt": null
+    },
+    {
+      "code": "25.05",
+      "name": "Perico",
+      "level": "MUNICIPALITY",
+      "provinceCode": "25",
+      "osmRelationId": "5875951",
+      "osmName": "Perico",
+      "retiredAt": null
+    },
+    {
+      "code": "25.06",
+      "name": "Jovellanos",
+      "level": "MUNICIPALITY",
+      "provinceCode": "25",
+      "osmRelationId": "5875950",
+      "osmName": "Jovellanos",
+      "retiredAt": null
+    },
+    {
+      "code": "25.07",
+      "name": "Pedro Betancourt",
+      "level": "MUNICIPALITY",
+      "provinceCode": "25",
+      "osmRelationId": "5875984",
+      "osmName": "Pedro Betancourt",
+      "retiredAt": null
+    },
+    {
+      "code": "25.08",
+      "name": "Limonar",
+      "level": "MUNICIPALITY",
+      "provinceCode": "25",
+      "osmRelationId": "5875952",
+      "osmName": "Limonar",
+      "retiredAt": null
+    },
+    {
+      "code": "25.09",
+      "name": "Unión de Reyes",
+      "level": "MUNICIPALITY",
+      "provinceCode": "25",
+      "osmRelationId": "5875985",
+      "osmName": "Unión de Reyes",
+      "retiredAt": null
+    },
+    {
+      "code": "25.10",
+      "name": "Ciénaga de Zapata",
+      "level": "MUNICIPALITY",
+      "provinceCode": "25",
+      "osmRelationId": "5875946",
+      "osmName": "Ciénaga de Zapata",
+      "retiredAt": null
+    },
+    {
+      "code": "25.11",
+      "name": "Jagüey Grande",
+      "level": "MUNICIPALITY",
+      "provinceCode": "25",
+      "osmRelationId": "5875949",
+      "osmName": "Jagüey Grande",
+      "retiredAt": null
+    },
+    {
+      "code": "25.12",
+      "name": "Calimete",
+      "level": "MUNICIPALITY",
+      "provinceCode": "25",
+      "osmRelationId": "5875945",
+      "osmName": "Calimete",
+      "retiredAt": null
+    },
+    {
+      "code": "25.13",
+      "name": "Los Arabos",
+      "level": "MUNICIPALITY",
+      "provinceCode": "25",
+      "osmRelationId": "5875953",
+      "osmName": "Los Arabos",
+      "retiredAt": null
+    },
+    {
+      "code": "26.01",
+      "name": "Corralillo",
+      "level": "MUNICIPALITY",
+      "provinceCode": "26",
+      "osmRelationId": "5884791",
+      "osmName": "Corralillo",
+      "retiredAt": null
+    },
+    {
+      "code": "26.02",
+      "name": "Quemado de Güines",
+      "level": "MUNICIPALITY",
+      "provinceCode": "26",
+      "osmRelationId": "5884798",
+      "osmName": "Quemado de Güines",
+      "retiredAt": null
+    },
+    {
+      "code": "26.03",
+      "name": "Sagua la Grande",
+      "level": "MUNICIPALITY",
+      "provinceCode": "26",
+      "osmRelationId": "5884802",
+      "osmName": "Sagua la Grande",
+      "retiredAt": null
+    },
+    {
+      "code": "26.04",
+      "name": "Encrucijada",
+      "level": "MUNICIPALITY",
+      "provinceCode": "26",
+      "osmRelationId": "5884794",
+      "osmName": "Encrucijada",
+      "retiredAt": null
+    },
+    {
+      "code": "26.05",
+      "name": "Camajuaní",
+      "level": "MUNICIPALITY",
+      "provinceCode": "26",
+      "osmRelationId": "5884788",
+      "osmName": "Camajuaní",
+      "retiredAt": null
+    },
+    {
+      "code": "26.06",
+      "name": "Caibarién",
+      "level": "MUNICIPALITY",
+      "provinceCode": "26",
+      "osmRelationId": "5884787",
+      "osmName": "Caibarién",
+      "retiredAt": null
+    },
+    {
+      "code": "26.07",
+      "name": "Remedios",
+      "level": "MUNICIPALITY",
+      "provinceCode": "26",
+      "osmRelationId": "5884800",
+      "osmName": "Remedios",
+      "retiredAt": null
+    },
+    {
+      "code": "26.08",
+      "name": "Placetas",
+      "level": "MUNICIPALITY",
+      "provinceCode": "26",
+      "osmRelationId": "5884797",
+      "osmName": "Placetas",
+      "retiredAt": null
+    },
+    {
+      "code": "26.09",
+      "name": "Santa Clara",
+      "level": "MUNICIPALITY",
+      "provinceCode": "26",
+      "osmRelationId": "5884803",
+      "osmName": "Santa Clara",
+      "retiredAt": null
+    },
+    {
+      "code": "26.10",
+      "name": "Cifuentes",
+      "level": "MUNICIPALITY",
+      "provinceCode": "26",
+      "osmRelationId": "5884790",
+      "osmName": "Cifuentes",
+      "retiredAt": null
+    },
+    {
+      "code": "26.11",
+      "name": "Santo Domingo",
+      "level": "MUNICIPALITY",
+      "provinceCode": "26",
+      "osmRelationId": "5884805",
+      "osmName": "Santo Domingo",
+      "retiredAt": null
+    },
+    {
+      "code": "26.12",
+      "name": "Ranchuelo",
+      "level": "MUNICIPALITY",
+      "provinceCode": "26",
+      "osmRelationId": "5884799",
+      "osmName": "Ranchuelo",
+      "retiredAt": null
+    },
+    {
+      "code": "26.13",
+      "name": "Manicaragua",
+      "level": "MUNICIPALITY",
+      "provinceCode": "26",
+      "osmRelationId": "5884795",
+      "osmName": "Manicaragua",
+      "retiredAt": null
+    },
+    {
+      "code": "27.01",
+      "name": "Aguada de Pasajeros",
+      "level": "MUNICIPALITY",
+      "provinceCode": "27",
+      "osmRelationId": "5884786",
+      "osmName": "Aguada de Pasajeros",
+      "retiredAt": null
+    },
+    {
+      "code": "27.02",
+      "name": "Rodas",
+      "level": "MUNICIPALITY",
+      "provinceCode": "27",
+      "osmRelationId": "5884801",
+      "osmName": "Rodas",
+      "retiredAt": null
+    },
+    {
+      "code": "27.03",
+      "name": "Palmira",
+      "level": "MUNICIPALITY",
+      "provinceCode": "27",
+      "osmRelationId": "5884796",
+      "osmName": "Palmira",
+      "retiredAt": null
+    },
+    {
+      "code": "27.04",
+      "name": "Lajas",
+      "level": "MUNICIPALITY",
+      "provinceCode": "27",
+      "osmRelationId": "5884804",
+      "osmName": "Lajas",
+      "retiredAt": null
+    },
+    {
+      "code": "27.05",
+      "name": "Cruces",
+      "level": "MUNICIPALITY",
+      "provinceCode": "27",
+      "osmRelationId": "5884792",
+      "osmName": "Cruces",
+      "retiredAt": null
+    },
+    {
+      "code": "27.06",
+      "name": "Cumanayagua",
+      "level": "MUNICIPALITY",
+      "provinceCode": "27",
+      "osmRelationId": "5884793",
+      "osmName": "Cumanayagua",
+      "retiredAt": null
+    },
+    {
+      "code": "27.07",
+      "name": "Cienfuegos",
+      "level": "MUNICIPALITY",
+      "provinceCode": "27",
+      "osmRelationId": "5884789",
+      "osmName": "Cienfuegos",
+      "retiredAt": null
+    },
+    {
+      "code": "27.08",
+      "name": "Abreus",
+      "level": "MUNICIPALITY",
+      "provinceCode": "27",
+      "osmRelationId": "5884785",
+      "osmName": "Abreus",
+      "retiredAt": null
+    },
+    {
+      "code": "28.01",
+      "name": "Yaguajay",
+      "level": "MUNICIPALITY",
+      "provinceCode": "28",
+      "osmRelationId": "5884869",
+      "osmName": "Yaguajay",
+      "retiredAt": null
+    },
+    {
+      "code": "28.02",
+      "name": "Jatibonico",
+      "level": "MUNICIPALITY",
+      "provinceCode": "28",
+      "osmRelationId": "5884864",
+      "osmName": "Jatibonico",
+      "retiredAt": null
+    },
+    {
+      "code": "28.03",
+      "name": "Taguasco",
+      "level": "MUNICIPALITY",
+      "provinceCode": "28",
+      "osmRelationId": "5884867",
+      "osmName": "Taguasco",
+      "retiredAt": null
+    },
+    {
+      "code": "28.04",
+      "name": "Cabaiguán",
+      "level": "MUNICIPALITY",
+      "provinceCode": "28",
+      "osmRelationId": "5884862",
+      "osmName": "Cabaiguán",
+      "retiredAt": null
+    },
+    {
+      "code": "28.05",
+      "name": "Fomento",
+      "level": "MUNICIPALITY",
+      "provinceCode": "28",
+      "osmRelationId": "5884863",
+      "osmName": "Fomento",
+      "retiredAt": null
+    },
+    {
+      "code": "28.06",
+      "name": "Trinidad",
+      "level": "MUNICIPALITY",
+      "provinceCode": "28",
+      "osmRelationId": "5884868",
+      "osmName": "Trinidad",
+      "retiredAt": null
+    },
+    {
+      "code": "28.07",
+      "name": "Sancti Spíritus",
+      "level": "MUNICIPALITY",
+      "provinceCode": "28",
+      "osmRelationId": "5884866",
+      "osmName": "Sancti Spíritus",
+      "retiredAt": null
+    },
+    {
+      "code": "28.08",
+      "name": "La Sierpe",
+      "level": "MUNICIPALITY",
+      "provinceCode": "28",
+      "osmRelationId": "5884865",
+      "osmName": "La Sierpe",
+      "retiredAt": null
+    },
+    {
+      "code": "29.01",
+      "name": "Chambas",
+      "level": "MUNICIPALITY",
+      "provinceCode": "29",
+      "osmRelationId": "5887666",
+      "osmName": "Chambas",
+      "retiredAt": null
+    },
+    {
+      "code": "29.02",
+      "name": "Morón",
+      "level": "MUNICIPALITY",
+      "provinceCode": "29",
+      "osmRelationId": "5887680",
+      "osmName": "Morón",
+      "retiredAt": null
+    },
+    {
+      "code": "29.03",
+      "name": "Bolivia",
+      "level": "MUNICIPALITY",
+      "provinceCode": "29",
+      "osmRelationId": "5887665",
+      "osmName": "Bolivia",
+      "retiredAt": null
+    },
+    {
+      "code": "29.04",
+      "name": "Primero de Enero",
+      "level": "MUNICIPALITY",
+      "provinceCode": "29",
+      "osmRelationId": "5887681",
+      "osmName": "Primero de Enero",
+      "retiredAt": null
+    },
+    {
+      "code": "29.05",
+      "name": "Ciro Redondo",
+      "level": "MUNICIPALITY",
+      "provinceCode": "29",
+      "osmRelationId": "5887668",
+      "osmName": "Ciro Redondo",
+      "retiredAt": null
+    },
+    {
+      "code": "29.06",
+      "name": "Florencia",
+      "level": "MUNICIPALITY",
+      "provinceCode": "29",
+      "osmRelationId": "5887669",
+      "osmName": "Florencia",
+      "retiredAt": null
+    },
+    {
+      "code": "29.07",
+      "name": "Majagua",
+      "level": "MUNICIPALITY",
+      "provinceCode": "29",
+      "osmRelationId": "5887679",
+      "osmName": "Majagua",
+      "retiredAt": null
+    },
+    {
+      "code": "29.08",
+      "name": "Ciego de Ávila",
+      "level": "MUNICIPALITY",
+      "provinceCode": "29",
+      "osmRelationId": "5887667",
+      "osmName": "Ciego de Ávila",
+      "retiredAt": null
+    },
+    {
+      "code": "29.09",
+      "name": "Venezuela",
+      "level": "MUNICIPALITY",
+      "provinceCode": "29",
+      "osmRelationId": "5887682",
+      "osmName": "Venezuela",
+      "retiredAt": null
+    },
+    {
+      "code": "29.10",
+      "name": "Baraguá",
+      "level": "MUNICIPALITY",
+      "provinceCode": "29",
+      "osmRelationId": "5887664",
+      "osmName": "Baraguá",
+      "retiredAt": null
+    },
+    {
+      "code": "30.01",
+      "name": "Carlos Manuel de Céspedes",
+      "level": "MUNICIPALITY",
+      "provinceCode": "30",
+      "osmRelationId": "5892221",
+      "osmName": "Céspedes",
+      "retiredAt": null
+    },
+    {
+      "code": "30.02",
+      "name": "Esmeralda",
+      "level": "MUNICIPALITY",
+      "provinceCode": "30",
+      "osmRelationId": "5892222",
+      "osmName": "Esmeralda",
+      "retiredAt": null
+    },
+    {
+      "code": "30.03",
+      "name": "Sierra de Cubitas",
+      "level": "MUNICIPALITY",
+      "provinceCode": "30",
+      "osmRelationId": "5892231",
+      "osmName": "Sierra de Cubitas",
+      "retiredAt": null
+    },
+    {
+      "code": "30.04",
+      "name": "Minas",
+      "level": "MUNICIPALITY",
+      "provinceCode": "30",
+      "osmRelationId": "5892226",
+      "osmName": "Minas",
+      "retiredAt": null
+    },
+    {
+      "code": "30.05",
+      "name": "Nuevitas",
+      "level": "MUNICIPALITY",
+      "provinceCode": "30",
+      "osmRelationId": "5892228",
+      "osmName": "Nuevitas",
+      "retiredAt": null
+    },
+    {
+      "code": "30.06",
+      "name": "Guáimaro",
+      "level": "MUNICIPALITY",
+      "provinceCode": "30",
+      "osmRelationId": "5892224",
+      "osmName": "Guáimaro",
+      "retiredAt": null
+    },
+    {
+      "code": "30.07",
+      "name": "Sibanicú",
+      "level": "MUNICIPALITY",
+      "provinceCode": "30",
+      "osmRelationId": "5892230",
+      "osmName": "Sibanicú",
+      "retiredAt": null
+    },
+    {
+      "code": "30.08",
+      "name": "Camagüey",
+      "level": "MUNICIPALITY",
+      "provinceCode": "30",
+      "osmRelationId": "5892220",
+      "osmName": "Camagüey",
+      "retiredAt": null
+    },
+    {
+      "code": "30.09",
+      "name": "Florida",
+      "level": "MUNICIPALITY",
+      "provinceCode": "30",
+      "osmRelationId": "5892223",
+      "osmName": "Florida",
+      "retiredAt": null
+    },
+    {
+      "code": "30.10",
+      "name": "Vertientes",
+      "level": "MUNICIPALITY",
+      "provinceCode": "30",
+      "osmRelationId": "5892232",
+      "osmName": "Vertientes",
+      "retiredAt": null
+    },
+    {
+      "code": "30.11",
+      "name": "Jimaguayú",
+      "level": "MUNICIPALITY",
+      "provinceCode": "30",
+      "osmRelationId": "5892225",
+      "osmName": "Jimaguayú",
+      "retiredAt": null
+    },
+    {
+      "code": "30.12",
+      "name": "Najasa",
+      "level": "MUNICIPALITY",
+      "provinceCode": "30",
+      "osmRelationId": "5892227",
+      "osmName": "Najasa",
+      "retiredAt": null
+    },
+    {
+      "code": "30.13",
+      "name": "Santa Cruz del Sur",
+      "level": "MUNICIPALITY",
+      "provinceCode": "30",
+      "osmRelationId": "5892229",
+      "osmName": "Santa Cruz del Sur",
+      "retiredAt": null
+    },
+    {
+      "code": "31.01",
+      "name": "Manatí",
+      "level": "MUNICIPALITY",
+      "provinceCode": "31",
+      "osmRelationId": "5901301",
+      "osmName": "Manati",
+      "retiredAt": null
+    },
+    {
+      "code": "31.02",
+      "name": "Puerto Padre",
+      "level": "MUNICIPALITY",
+      "provinceCode": "31",
+      "osmRelationId": "5901302",
+      "osmName": "Puerto Padre",
+      "retiredAt": null
+    },
+    {
+      "code": "31.03",
+      "name": "Jesús Menéndez",
+      "level": "MUNICIPALITY",
+      "provinceCode": "31",
+      "osmRelationId": "5901289",
+      "osmName": "Jesús Menéndez",
+      "retiredAt": null
+    },
+    {
+      "code": "31.04",
+      "name": "Majibacoa",
+      "level": "MUNICIPALITY",
+      "provinceCode": "31",
+      "osmRelationId": "5901300",
+      "osmName": "Majibacoa",
+      "retiredAt": null
+    },
+    {
+      "code": "31.05",
+      "name": "Las Tunas",
+      "level": "MUNICIPALITY",
+      "provinceCode": "31",
+      "osmRelationId": "5901299",
+      "osmName": "Las Tunas",
+      "retiredAt": null
+    },
+    {
+      "code": "31.06",
+      "name": "Jobabo",
+      "level": "MUNICIPALITY",
+      "provinceCode": "31",
+      "osmRelationId": "5901298",
+      "osmName": "Jobabo",
+      "retiredAt": null
+    },
+    {
+      "code": "31.07",
+      "name": "Colombia",
+      "level": "MUNICIPALITY",
+      "provinceCode": "31",
+      "osmRelationId": "5901288",
+      "osmName": "Colombia",
+      "retiredAt": null
+    },
+    {
+      "code": "31.08",
+      "name": "Amancio",
+      "level": "MUNICIPALITY",
+      "provinceCode": "31",
+      "osmRelationId": "5901287",
+      "osmName": "Amancio",
+      "retiredAt": null
+    },
+    {
+      "code": "32.01",
+      "name": "Gibara",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904275",
+      "osmName": "Gibara",
+      "retiredAt": null
+    },
+    {
+      "code": "32.02",
+      "name": "Rafael Freyre",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904288",
+      "osmName": "Rafael Freyre",
+      "retiredAt": null
+    },
+    {
+      "code": "32.03",
+      "name": "Banes",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904269",
+      "osmName": "Banes",
+      "retiredAt": null
+    },
+    {
+      "code": "32.04",
+      "name": "Antilla",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904268",
+      "osmName": "Antilla",
+      "retiredAt": null
+    },
+    {
+      "code": "32.05",
+      "name": "Báguanos",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904270",
+      "osmName": "Báguanos",
+      "retiredAt": null
+    },
+    {
+      "code": "32.06",
+      "name": "Holguín",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904276",
+      "osmName": "Holguín",
+      "retiredAt": null
+    },
+    {
+      "code": "32.07",
+      "name": "Calixto García",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904272",
+      "osmName": "Calixto García",
+      "retiredAt": null
+    },
+    {
+      "code": "32.08",
+      "name": "Cacocum",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904271",
+      "osmName": "Cacocum",
+      "retiredAt": null
+    },
+    {
+      "code": "32.09",
+      "name": "Urbano Noris",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904290",
+      "osmName": "Urbano Noris",
+      "retiredAt": null
+    },
+    {
+      "code": "32.10",
+      "name": "Cueto",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904273",
+      "osmName": "Cueto",
+      "retiredAt": null
+    },
+    {
+      "code": "32.11",
+      "name": "Mayarí",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904277",
+      "osmName": "Mayarí",
+      "retiredAt": null
+    },
+    {
+      "code": "32.12",
+      "name": "Frank País",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904274",
+      "osmName": "Frank País",
+      "retiredAt": null
+    },
+    {
+      "code": "32.13",
+      "name": "Sagua de Tánamo",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904289",
+      "osmName": "Sagua de Tánamo",
+      "retiredAt": null
+    },
+    {
+      "code": "32.14",
+      "name": "Moa",
+      "level": "MUNICIPALITY",
+      "provinceCode": "32",
+      "osmRelationId": "5904287",
+      "osmName": "Moa",
+      "retiredAt": null
+    },
+    {
+      "code": "33.01",
+      "name": "Río Cauto",
+      "level": "MUNICIPALITY",
+      "provinceCode": "33",
+      "osmRelationId": "5915231",
+      "osmName": "Río Cauto",
+      "retiredAt": null
+    },
+    {
+      "code": "33.02",
+      "name": "Cauto Cristo",
+      "level": "MUNICIPALITY",
+      "provinceCode": "33",
+      "osmRelationId": "5915224",
+      "osmName": "Cauto Cristo",
+      "retiredAt": null
+    },
+    {
+      "code": "33.03",
+      "name": "Jiguaní",
+      "level": "MUNICIPALITY",
+      "provinceCode": "33",
+      "osmRelationId": "5915226",
+      "osmName": "Jiguaní",
+      "retiredAt": null
+    },
+    {
+      "code": "33.04",
+      "name": "Bayamo",
+      "level": "MUNICIPALITY",
+      "provinceCode": "33",
+      "osmRelationId": "5915221",
+      "osmName": "Bayamo",
+      "retiredAt": null
+    },
+    {
+      "code": "33.05",
+      "name": "Yara",
+      "level": "MUNICIPALITY",
+      "provinceCode": "33",
+      "osmRelationId": "5915232",
+      "osmName": "Yara",
+      "retiredAt": null
+    },
+    {
+      "code": "33.06",
+      "name": "Manzanillo",
+      "level": "MUNICIPALITY",
+      "provinceCode": "33",
+      "osmRelationId": "5915227",
+      "osmName": "Manzanillo",
+      "retiredAt": null
+    },
+    {
+      "code": "33.07",
+      "name": "Campechuela",
+      "level": "MUNICIPALITY",
+      "provinceCode": "33",
+      "osmRelationId": "5915223",
+      "osmName": "Campechuela",
+      "retiredAt": null
+    },
+    {
+      "code": "33.08",
+      "name": "Media Luna",
+      "level": "MUNICIPALITY",
+      "provinceCode": "33",
+      "osmRelationId": "5915228",
+      "osmName": "Media Luna",
+      "retiredAt": null
+    },
+    {
+      "code": "33.09",
+      "name": "Niquero",
+      "level": "MUNICIPALITY",
+      "provinceCode": "33",
+      "osmRelationId": "5915229",
+      "osmName": "Niquero",
+      "retiredAt": null
+    },
+    {
+      "code": "33.10",
+      "name": "Pilón",
+      "level": "MUNICIPALITY",
+      "provinceCode": "33",
+      "osmRelationId": "5915230",
+      "osmName": "Pilón",
+      "retiredAt": null
+    },
+    {
+      "code": "33.11",
+      "name": "Bartolomé Masó",
+      "level": "MUNICIPALITY",
+      "provinceCode": "33",
+      "osmRelationId": "5915220",
+      "osmName": "Bartolomé Masó",
+      "retiredAt": null
+    },
+    {
+      "code": "33.12",
+      "name": "Buey Arriba",
+      "level": "MUNICIPALITY",
+      "provinceCode": "33",
+      "osmRelationId": "5915222",
+      "osmName": "Buey Arriba",
+      "retiredAt": null
+    },
+    {
+      "code": "33.13",
+      "name": "Guisa",
+      "level": "MUNICIPALITY",
+      "provinceCode": "33",
+      "osmRelationId": "5915225",
+      "osmName": "Guisa",
+      "retiredAt": null
+    },
+    {
+      "code": "34.01",
+      "name": "Contramaestre",
+      "level": "MUNICIPALITY",
+      "provinceCode": "34",
+      "osmRelationId": "5919047",
+      "osmName": "Contramaestre",
+      "retiredAt": null
+    },
+    {
+      "code": "34.02",
+      "name": "Mella",
+      "level": "MUNICIPALITY",
+      "provinceCode": "34",
+      "osmRelationId": "5919050",
+      "osmName": "Mella",
+      "retiredAt": null
+    },
+    {
+      "code": "34.03",
+      "name": "San Luis",
+      "level": "MUNICIPALITY",
+      "provinceCode": "34",
+      "osmRelationId": "5919052",
+      "osmName": "San Luis",
+      "retiredAt": null
+    },
+    {
+      "code": "34.04",
+      "name": "Segundo Frente",
+      "level": "MUNICIPALITY",
+      "provinceCode": "34",
+      "osmRelationId": "5919054",
+      "osmName": "Segundo Frente",
+      "retiredAt": null
+    },
+    {
+      "code": "34.05",
+      "name": "Songo - La Maya",
+      "level": "MUNICIPALITY",
+      "provinceCode": "34",
+      "osmRelationId": "5919055",
+      "osmName": "Songo - La Maya",
+      "retiredAt": null
+    },
+    {
+      "code": "34.06",
+      "name": "Santiago de Cuba",
+      "level": "MUNICIPALITY",
+      "provinceCode": "34",
+      "osmRelationId": "5919053",
+      "osmName": "Santiago de Cuba",
+      "retiredAt": null
+    },
+    {
+      "code": "34.07",
+      "name": "Palma Soriano",
+      "level": "MUNICIPALITY",
+      "provinceCode": "34",
+      "osmRelationId": "5919051",
+      "osmName": "Palma Soriano",
+      "retiredAt": null
+    },
+    {
+      "code": "34.08",
+      "name": "Tercer Frente",
+      "level": "MUNICIPALITY",
+      "provinceCode": "34",
+      "osmRelationId": "5919056",
+      "osmName": "Tercer Frente",
+      "retiredAt": null
+    },
+    {
+      "code": "34.09",
+      "name": "Guamá",
+      "level": "MUNICIPALITY",
+      "provinceCode": "34",
+      "osmRelationId": "5919049",
+      "osmName": "Guamá",
+      "retiredAt": null
+    },
+    {
+      "code": "35.01",
+      "name": "El Salvador",
+      "level": "MUNICIPALITY",
+      "provinceCode": "35",
+      "osmRelationId": "5927812",
+      "osmName": "El Salvador",
+      "retiredAt": null
+    },
+    {
+      "code": "35.02",
+      "name": "Manuel Tames",
+      "level": "MUNICIPALITY",
+      "provinceCode": "35",
+      "osmRelationId": "5927816",
+      "osmName": "Manuel Tames",
+      "retiredAt": null
+    },
+    {
+      "code": "35.03",
+      "name": "Yateras",
+      "level": "MUNICIPALITY",
+      "provinceCode": "35",
+      "osmRelationId": "5927819",
+      "osmName": "Yateras",
+      "retiredAt": null
+    },
+    {
+      "code": "35.04",
+      "name": "Baracoa",
+      "level": "MUNICIPALITY",
+      "provinceCode": "35",
+      "osmRelationId": "5927810",
+      "osmName": "Baracoa",
+      "retiredAt": null
+    },
+    {
+      "code": "35.05",
+      "name": "Maisí",
+      "level": "MUNICIPALITY",
+      "provinceCode": "35",
+      "osmRelationId": "5927815",
+      "osmName": "Maisí",
+      "retiredAt": null
+    },
+    {
+      "code": "35.06",
+      "name": "Imías",
+      "level": "MUNICIPALITY",
+      "provinceCode": "35",
+      "osmRelationId": "5927814",
+      "osmName": "Imías",
+      "retiredAt": null
+    },
+    {
+      "code": "35.07",
+      "name": "San Antonio del Sur",
+      "level": "MUNICIPALITY",
+      "provinceCode": "35",
+      "osmRelationId": "5927818",
+      "osmName": "San Antonio del Sur",
+      "retiredAt": null
+    },
+    {
+      "code": "35.08",
+      "name": "Caimanera",
+      "level": "MUNICIPALITY",
+      "provinceCode": "35",
+      "osmRelationId": "5927811",
+      "osmName": "Caimanera",
+      "retiredAt": null
+    },
+    {
+      "code": "35.09",
+      "name": "Guantánamo",
+      "level": "MUNICIPALITY",
+      "provinceCode": "35",
+      "osmRelationId": "5927813",
+      "osmName": "Guantánamo",
+      "retiredAt": null
+    },
+    {
+      "code": "35.10",
+      "name": "Niceto Pérez",
+      "level": "MUNICIPALITY",
+      "provinceCode": "35",
+      "osmRelationId": "5927817",
+      "osmName": "Niceto Pérez",
+      "retiredAt": null
+    },
+    {
+      "code": "40.01",
+      "name": "Isla de la Juventud",
+      "level": "MUNICIPALITY",
+      "provinceCode": "40",
+      "osmRelationId": "1854614",
+      "osmName": "Isla de la Juventud",
+      "retiredAt": null
+    }
+  ]
+}

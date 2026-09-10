@@ -79,7 +79,10 @@ async function postAvailability(items) {
   return { status: response.status, body: await response.json() };
 }
 
-/** C1 — the shape of a 200: exactly `products` and `hash`, `hash` 32 hex. */
+/**
+ * C1 — la forma de un 200: exactamente `products`, `hash`, `tariffs` y
+ * `tariffHash` (F-044, v13.4), `hash` y `tariffHash` los dos 32 hex.
+ */
 async function checkStore(storeId) {
   const { status, body } = await getReconciliation(storeId);
   if (status !== 200) {
@@ -87,15 +90,27 @@ async function checkStore(storeId) {
     return;
   }
   const keys = Object.keys(body).sort().join(",");
-  if (keys !== "hash,products") {
-    fail(`--store=${storeId}: claves "${keys}", esperaba exactamente "hash,products"`);
+  if (keys !== "hash,products,tariffHash,tariffs") {
+    fail(
+      `--store=${storeId}: claves "${keys}", esperaba exactamente "hash,products,tariffHash,tariffs"`,
+    );
     return;
   }
   if (!/^[0-9a-f]{32}$/.test(body.hash)) {
     fail(`--store=${storeId}: hash "${body.hash}" no son 32 hex minúsculas`);
     return;
   }
-  ok(`--store=${storeId} -> 200 { products: ${body.products}, hash: ${body.hash} }`);
+  if (!/^[0-9a-f]{32}$/.test(body.tariffHash)) {
+    fail(`--store=${storeId}: tariffHash "${body.tariffHash}" no son 32 hex minúsculas`);
+    return;
+  }
+  if (typeof body.tariffs !== "number") {
+    fail(`--store=${storeId}: tariffs "${body.tariffs}" no es un número`);
+    return;
+  }
+  ok(
+    `--store=${storeId} -> 200 { products: ${body.products}, hash: ${body.hash}, tariffs: ${body.tariffs}, tariffHash: ${body.tariffHash} }`,
+  );
 }
 
 /**
@@ -274,8 +289,17 @@ async function checkEmpty() {
     fail(`--empty: HTTP ${status}, esperaba 200. Cuerpo: ${JSON.stringify(body)}`);
     return;
   }
-  const expected = { products: 0, hash: "d41d8cd98f00b204e9800998ecf8427e" };
-  if (JSON.stringify(body) !== JSON.stringify(expected)) {
+  // F-044, H1: comparado clave a clave, nunca con JSON.stringify — eso ataría
+  // la aserción al orden de inserción del handler, que no es lo que importa
+  // aquí.
+  const expected = {
+    products: 0,
+    hash: "d41d8cd98f00b204e9800998ecf8427e",
+    tariffs: 0,
+    tariffHash: "d41d8cd98f00b204e9800998ecf8427e",
+  };
+  const mismatches = Object.keys(expected).filter((key) => body[key] !== expected[key]);
+  if (mismatches.length > 0 || Object.keys(body).length !== Object.keys(expected).length) {
     fail(`--empty: cuerpo ${JSON.stringify(body)}, esperaba ${JSON.stringify(expected)}`);
     return;
   }

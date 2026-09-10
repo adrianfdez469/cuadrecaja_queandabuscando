@@ -8,6 +8,7 @@
  * the islands expect.
  */
 import type { SerializableIssue } from "@/lib/httpJson";
+import type { DeliveryFeeModeName } from "./deliveryOffer";
 
 export type QuoteLineReason = "OUT_OF_STOCK" | "REMOVED" | "NO_PRICE";
 
@@ -22,8 +23,10 @@ export type QuoteStore = {
   deliveryEnabled: boolean;
   deliveryFee: string | null;
   /** F-031 R20: travels EXPLICIT so the checkout island never has to deduce
-   *  a mode from `deliveryFee === null`, which today means "no delivery". */
-  deliveryFeeMode: "FLAT_RATE" | "QUOTED_PER_ORDER";
+   *  a mode from `deliveryFee === null`, which today means "no delivery".
+   *  F-041 (I4): sourced from the generated enum via `deliveryOffer.ts`, not
+   *  a hand-rolled union — a third value here compiles again on its own. */
+  deliveryFeeMode: DeliveryFeeModeName;
   /** F-039 (architecture.md AD3): `Business.displayCurrencies` as declared
    *  (R1), unpruned — the same list `priceEquivalents`/`selectableCurrencies`
    *  read elsewhere. Obligatory, not optional: an opt-out here would leave a
@@ -94,6 +97,16 @@ export type CreateOrderBody = {
   fulfillment: Fulfillment;
   deliveryAddress?: string;
   notes?: string;
+  /** F-042 — el MUNICIPIO elegido. Opcional en el tipo y en el schema
+   *  porque la mayoría de los pedidos no la lleva (D3); obligatoria DE
+   *  HECHO cuando el pedido se cierra como DELIVERY en una tienda
+   *  ZONE_BASED, y eso lo comprueba el servidor, que es el único que
+   *  conoce el modo de la tienda (E17, E18). */
+  zoneCode?: string;
+  /** F-042 — lo que el cliente está MOSTRANDO como envío. Se compara SOLO
+   *  para afinar el mensaje del 409 y nunca se persiste. Precedente
+   *  literal: `expectedUnitPrice`. */
+  expectedDeliveryFee?: string;
   /** What the client is showing as the total — compared, never persisted (R7). */
   expectedTotal: string;
   /** One per checkout attempt (R26). Absent means no duplicate protection (R28). */
@@ -113,15 +126,32 @@ export type InvalidBodyIssue = SerializableIssue;
 
 export type UnavailableLine = { storeProductId: string; reason: QuoteLineReason };
 export type PriceChangedLine = { storeProductId: string; was: string | null; now: string };
+/** F-042 — el envío nombrado en un `409 PRICE_CHANGED`, cuando el cliente
+ *  mandó `expectedDeliveryFee`: "el envío pasó de 300 a 350" en vez de
+ *  "los precios cambiaron" (§ Datos y contrato). */
+export type PriceChangedDelivery = { was: string | null; now: string };
 
 export type CreateOrderError =
   | { error: "INVALID_BODY"; issues: InvalidBodyIssue[] }
   | { error: "EMPTY_CART" }
   | { error: "STORE_NOT_FOUND" }
   | { error: "ITEMS_UNAVAILABLE"; lines: UnavailableLine[] }
-  | { error: "PRICE_CHANGED"; lines: PriceChangedLine[]; total: string }
+  | {
+      error: "PRICE_CHANGED";
+      lines: PriceChangedLine[];
+      total: string;
+      /** Presente solo cuando el desajuste incluye el envío (E15, C13). */
+      delivery?: PriceChangedDelivery;
+    }
   | { error: "TOO_MANY_ORDERS"; retryAfterSeconds: number }
-  | { error: "ORDER_CREATE_FAILED" };
+  | { error: "ORDER_CREATE_FAILED" }
+  // F-042 (architecture.md § AD7, § Contratos 5): dos errores nuevos,
+  // distinguibles entre sí y de PRICE_CHANGED — E18 exige que un código
+  // inventado y uno real pero no ofrecible por esta tienda sean el MISMO
+  // hecho para el comprador, así que ninguno de los dos lleva más detalle
+  // que el código que se mandó.
+  | { error: "DELIVERY_ZONE_REQUIRED" }
+  | { error: "DELIVERY_ZONE_NOT_SERVED"; zoneCode: string };
 
 // ---------------------------------------------------------------------------
 // F-019 — renegotiation wire types (architecture.md § Contratos, § Tipos de

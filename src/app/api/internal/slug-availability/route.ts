@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withInternalAuth } from "../_lib/guard";
 import { previewSlug } from "@/features/storefront/server/registry";
-import { publicEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 
 /**
  * HS7 — cuadrecaja can ask, BEFORE publishing, what slug a candidate would

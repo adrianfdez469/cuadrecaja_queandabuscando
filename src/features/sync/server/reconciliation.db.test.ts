@@ -190,10 +190,23 @@ describe("SQL mirror (R15) vs storeReconciliationHash() — C8, C9", () => {
 
   it("C8: the SQL mirror agrees with storeReconciliationHash() on an empty store too", async () => {
     const fromFunction = await storeReconciliationHash(session.businessId, emptyStore.externalId);
-    expect(fromFunction).toEqual({ products: 0, hash: EMPTY_HASH });
+    // F-044 (IP1, autorizado por el orquestador): `storeReconciliationHash()`
+    // devuelve cuatro claves desde este feature (products/hash del catálogo,
+    // tariffs/tariffHash del tarifario). El literal completo sigue siendo la
+    // forma correcta de este guardián — no se relaja a `toMatchObject`.
+    expect(fromFunction).toEqual({
+      products: 0,
+      hash: EMPTY_HASH,
+      tariffs: 0,
+      tariffHash: EMPTY_HASH,
+    });
 
+    // `runMirrorSql` es el espejo SQL de PRODUCTOS únicamente — no calcula
+    // el tarifario, así que solo puede compararse contra esa mitad de
+    // `fromFunction`. El espejo del tarifario tiene el suyo propio en
+    // `reconciliationTariff.db.test.ts` (E13/E14).
     const fromSql = await runMirrorSql(emptyStore.id, true);
-    expect(fromSql).toEqual(fromFunction);
+    expect(fromSql).toEqual({ products: fromFunction!.products, hash: fromFunction!.hash });
   });
 });
 

@@ -28,16 +28,24 @@ import {
   CHECKOUT_KEY_STORAGE_PREFIX,
 } from "@/constants/cart";
 import { generateUuidV4 } from "@/features/orders/idempotencyKey";
-import { isDeliveryOffered } from "@/features/orders/deliveryOffer";
-import type { CreateOrderBody, Fulfillment, QuoteResponse } from "@/features/orders/types";
+import { deliveryFeeForNewOrder, type ChosenZone } from "@/features/orders/deliveryOffer";
+import type {
+  CreateOrderBody,
+  Fulfillment,
+  PriceChangedDelivery,
+  QuoteResponse,
+} from "@/features/orders/types";
+import type { DeliveryFeeModeName } from "@/features/orders/deliveryOffer";
 import { resolveStoreClosureHeadline } from "@/lib/storeClosure";
+import { findZoneInCoverage, type OfferableZone } from "@/features/zones/coverage";
+import { ZonePicker } from "@/features/zones/components/ZonePicker";
 import { useCart, useHydrated } from "../cartStore";
 import { OrderSummary } from "./OrderSummary";
 
 type QuoteState = "loading" | "ready" | "error" | "not-found" | "closed";
 
 type FieldErrors = Partial<
-  Record<"name" | "phone" | "email" | "deliveryAddress" | "notes", string>
+  Record<"name" | "phone" | "email" | "deliveryAddress" | "notes" | "zoneCode", string>
 >;
 
 const FIELD_LABEL: Record<keyof FieldErrors, string> = {
@@ -46,6 +54,7 @@ const FIELD_LABEL: Record<keyof FieldErrors, string> = {
   email: "Correo",
   deliveryAddress: "Dirección",
   notes: "Notas",
+  zoneCode: "Municipio",
 };
 
 type SubmitOutcome =
@@ -56,11 +65,15 @@ type SubmitOutcome =
       kind: "price_changed";
       lines: { storeProductId: string; was: string | null; now: string }[];
       total: string;
+      delivery?: PriceChangedDelivery;
     }
   | { kind: "too_many_orders"; retryAfterSeconds: number }
   | { kind: "invalid_body" }
   | { kind: "store_not_found" }
   | { kind: "store_closed"; reasonCode: string | null; disabledAt: string | null }
+  // F-042 — los dos errores nuevos de la ruta pública (E16, E20).
+  | { kind: "delivery_zone_required" }
+  | { kind: "delivery_zone_not_served"; zoneCode: string }
   | { kind: "failed" }
   | { kind: "network_error" };
 
@@ -75,7 +88,28 @@ function emailLooksValid(value: string): boolean {
  * send. The contact fields are usable from the very first paint — they are
  * plain HTML, not gated on the quote.
  */
-export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlug: string }) {
+export function CheckoutForm({
+  storeId,
+  storeSlug,
+  deliveryOffered,
+  deliveryFeeMode,
+  deliveryFlatFee,
+  zoneCoverage,
+}: {
+  storeId: string;
+  storeSlug: string;
+  /** F-042 (D12, paso 15) — el hecho resuelto en SERVIDOR, para los TRES
+   *  modos de envío: el `<fieldset>` de modalidad ya no cuelga de la
+   *  cotización (`quoteState`). */
+  deliveryOffered: boolean;
+  deliveryFeeMode: DeliveryFeeModeName;
+  /** Solo tiene sentido para `FLAT_RATE`; los otros dos modos lo ignoran
+   *  (R11, `deliveryFeeForNewOrder`). */
+  deliveryFlatFee: string | null;
+  /** `null` salvo en una tienda `ZONE_BASED` con domicilio (D5): los
+   *  nombres YA están en el HTML de esta respuesta. */
+  zoneCoverage: readonly OfferableZone[] | null;
+}) {
   const hydrated = useHydrated();
   const cart = useCart(storeId);
 
@@ -113,6 +147,11 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
   const [notes, setNotes] = useState("");
   const [fulfillment, setFulfillment] = useState<Fulfillment>("PICKUP");
   const [deliveryAddress, setDeliveryAddress] = useState("");
+  // D11/PP3: una cobertura de un solo municipio llega YA elegida — inicializador
+  // perezoso, no un efecto, así que no hay "setState en un efecto" que evitar.
+  const [zoneCode, setZoneCode] = useState<string | null>(() =>
+    zoneCoverage?.length === 1 ? zoneCoverage[0].code : null,
+  );
 
   const [attempted, setAttempted] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -172,8 +211,11 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
       const data = (await response.json()) as QuoteResponse;
       setQuote(data);
       setQuoteState("ready");
-      if (data.store.deliveryEnabled === false && fulfillment === "DELIVERY")
-        setFulfillment("PICKUP");
+      // F-042 (D12, riesgo 7 de architecture.md): `deliveryOffered` ya es un
+      // hecho de SERVIDOR, resuelto en el render de la página — no en esta
+      // cotización. Si el modo cambió justo en esa ventana de ~300 ms, lo
+      // cierra el 409 al confirmar, no una re-lectura aquí.
+      if (!deliveryOffered && fulfillment === "DELIVERY") setFulfillment("PICKUP");
     } catch {
       setQuoteState("error");
     }
@@ -309,6 +351,12 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
       else if (address.length < DELIVERY_ADDRESS_MIN_LENGTH) {
         errors.deliveryAddress = "La dirección es demasiado corta: agrega calle y número.";
       }
+
+      // F-042 — en ZONE_BASED, el municipio es tan obligatorio como la
+      // dirección (D3, R1).
+      if (deliveryFeeMode === "ZONE_BASED" && !zoneCode) {
+        errors.zoneCode = "Elige el municipio a donde enviamos.";
+      }
     }
 
     if (notes.length > ORDER_NOTES_MAX_LENGTH)
@@ -327,10 +375,22 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
     }
     if (!quote || quoteState !== "ready") return;
 
-    const deliveryFee =
-      fulfillment === "DELIVERY" && quote.store.deliveryFee
-        ? money(quote.store.deliveryFee, quote.store.currencyCode)
-        : money("0", quote.store.currencyCode);
+    // R8: la MISMA función que el servidor, nunca una segunda copia de la
+    // precedencia aquí. `chosenZone` viene de las props del servidor
+    // (D5) — nunca del índice ni de una consulta propia.
+    const selectedZone = zoneCode ? findZoneInCoverage(zoneCoverage ?? [], zoneCode) : null;
+    const chosenZone: ChosenZone | null = selectedZone
+      ? { code: selectedZone.code, deliveryFee: selectedZone.deliveryFee }
+      : null;
+    const deliveryResult = deliveryFeeForNewOrder(
+      { deliveryEnabled: true, deliveryFeeMode, deliveryFee: deliveryFlatFee },
+      fulfillment === "DELIVERY" ? "DELIVERY" : "PICKUP",
+      chosenZone,
+    );
+    const deliveryFee = money(
+      deliveryResult.kind === "charged" ? deliveryResult.amount : "0",
+      quote.store.currencyCode,
+    );
     const subtotalMoney = money(quote.subtotal, quote.store.currencyCode);
     const discountMoney = money(quote.discountTotal, quote.store.currencyCode);
     // R29: subtotal - discountTotal + deliveryFee. Without subtracting the
@@ -360,6 +420,10 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
       },
       fulfillment,
       ...(fulfillment === "DELIVERY" ? { deliveryAddress: deliveryAddress.trim() } : {}),
+      ...(fulfillment === "DELIVERY" && chosenZone ? { zoneCode: chosenZone.code } : {}),
+      ...(fulfillment === "DELIVERY" && deliveryResult.kind === "charged"
+        ? { expectedDeliveryFee: deliveryResult.amount }
+        : {}),
       ...(notes.trim() ? { notes: notes.trim() } : {}),
       expectedTotal,
       idempotencyKey,
@@ -387,11 +451,28 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
         return;
       }
       if (response.status === 409 && data?.error === "PRICE_CHANGED") {
-        setOutcome({ kind: "price_changed", lines: data.lines ?? [], total: data.total });
+        setOutcome({
+          kind: "price_changed",
+          lines: data.lines ?? [],
+          total: data.total,
+          delivery: data.delivery,
+        });
         return;
       }
       if (response.status === 429) {
         setOutcome({ kind: "too_many_orders", retryAfterSeconds: data?.retryAfterSeconds ?? 60 });
+        return;
+      }
+      // F-042 — E16: la zona dejó de servirse entre cargar y confirmar.
+      // NUNCA se degrada a recogida en silencio: se deselecciona y se le
+      // devuelve la decisión al comprador (design.md § 6).
+      if (response.status === 409 && data?.error === "DELIVERY_ZONE_NOT_SERVED") {
+        setZoneCode(null);
+        setOutcome({ kind: "delivery_zone_not_served", zoneCode: data.zoneCode ?? "" });
+        return;
+      }
+      if (response.status === 400 && data?.error === "DELIVERY_ZONE_REQUIRED") {
+        setOutcome({ kind: "delivery_zone_required" });
         return;
       }
       if (response.status === 400) {
@@ -434,24 +515,47 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
     ? cart.items.some((item) => unavailableIds.has(item.storeProductId))
     : false;
 
-  const deliveryOffered = quote
-    ? isDeliveryOffered({
-        deliveryEnabled: quote.store.deliveryEnabled,
-        deliveryFeeMode: quote.store.deliveryFeeMode,
-        deliveryFee: quote.store.deliveryFee,
-      })
-    : false;
+  // F-042 (D12) — `deliveryOffered` YA llega como prop del servidor, para
+  // los tres modos. R8: el importe que se muestra sale de la MISMA función
+  // que cobra el servidor, nunca de una copia de la precedencia aquí.
+  const selectedZone = zoneCode ? findZoneInCoverage(zoneCoverage ?? [], zoneCode) : null;
+  const chosenZoneForDisplay: ChosenZone | null = selectedZone
+    ? { code: selectedZone.code, deliveryFee: selectedZone.deliveryFee }
+    : null;
+  const deliveryResult = deliveryOffered
+    ? deliveryFeeForNewOrder(
+        { deliveryEnabled: true, deliveryFeeMode, deliveryFee: deliveryFlatFee },
+        fulfillment === "DELIVERY" ? "DELIVERY" : "PICKUP",
+        chosenZoneForDisplay,
+      )
+    : null;
   // F-031 R20/E1: with QUOTED_PER_ORDER there is no fee to show for a NEW
   // order — the store sets it once it looks at the address. This is the
   // "sin cotizar" boolean for the checkout, before any order exists.
-  const deliveryQuotePending =
-    deliveryOffered &&
-    fulfillment === "DELIVERY" &&
-    quote?.store.deliveryFeeMode === "QUOTED_PER_ORDER";
+  const deliveryQuotePending = deliveryResult?.kind === "not_quoted";
   const deliveryFeeMoney =
-    quote && deliveryOffered && fulfillment === "DELIVERY" && !deliveryQuotePending
-      ? money(quote.store.deliveryFee as string, quote.store.currencyCode)
+    quote && deliveryResult?.kind === "charged"
+      ? money(deliveryResult.amount, quote.store.currencyCode)
       : null;
+  // design.md § 4: "Elige tu municipio" mientras no hay zona; "Gratis" con
+  // importe cero (nunca "$0.00" en un envío a domicilio de ZONE_BASED, R11);
+  // `null` mientras la cotización carga, para que OrderSummary pinte su
+  // propio "Calculando…" — el mismo mientras no se sabe ni el subtotal.
+  const deliveryFeeLabel: string | null | undefined = !deliveryOffered
+    ? undefined
+    : quoteState !== "ready"
+      ? null
+      : fulfillment === "PICKUP"
+        ? formatMoney(money("0", quote?.store.currencyCode ?? "CUP"))
+        : deliveryResult?.kind === "not_quoted"
+          ? "Por confirmar"
+          : deliveryResult?.kind === "zone_required"
+            ? "Elige tu municipio"
+            : deliveryFeeMoney
+              ? deliveryFeeMoney.amount === "0.00"
+                ? "Gratis"
+                : formatMoney(deliveryFeeMoney)
+              : formatMoney(money("0", quote?.store.currencyCode ?? "CUP"));
   const subtotalLabel = quote ? formatMoney(money(quote.subtotal, quote.store.currencyCode)) : null;
   const discountMoney =
     quote && quote.discountTotal !== "0.00" && quote.discountTotal !== "0"
@@ -600,7 +704,14 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
           </Alert>
         )}
         {outcome.kind === "price_changed" && (
-          <Alert tone="warning" title="El precio cambió mientras hacías el pedido.">
+          <Alert
+            tone="warning"
+            title={
+              outcome.delivery && outcome.lines.length === 0
+                ? "El costo del envío cambió mientras hacías el pedido."
+                : "El precio cambió mientras hacías el pedido."
+            }
+          >
             <p>No se creó ningún pedido. Este es el total actualizado.</p>
             <ul className="mt-2 space-y-1">
               {outcome.lines.map((line) => (
@@ -609,8 +720,25 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
                   {line.now}
                 </li>
               ))}
+              {outcome.delivery && (
+                <li>
+                  Envío:{" "}
+                  {outcome.delivery.was && (
+                    <span className="line-through">Antes {outcome.delivery.was}</span>
+                  )}{" "}
+                  Ahora {outcome.delivery.now}
+                </li>
+              )}
             </ul>
           </Alert>
+        )}
+        {outcome.kind === "delivery_zone_not_served" && (
+          <Alert tone="danger" title="Esta tienda ya no hace envíos a ese municipio.">
+            <p>No se creó ningún pedido. Elige otro municipio o recógelo en la tienda.</p>
+          </Alert>
+        )}
+        {outcome.kind === "delivery_zone_required" && (
+          <Alert tone="danger">Elige el municipio a donde enviamos.</Alert>
         )}
         {outcome.kind === "too_many_orders" && (
           <Alert tone="warning" title="Ya enviaste varios pedidos en los últimos minutos.">
@@ -769,7 +897,11 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
             )}
           </Field>
 
-          {quoteState === "ready" && deliveryOffered && (
+          {/* F-042 (D12, paso 15): ya NO cuelga de `quoteState` — el hecho
+              de si hay domicilio lo resolvió el SERVIDOR (`deliveryOffered`
+              prop), así que este bloque está en el HTML de la primera
+              respuesta para los TRES modos de envío (criterio 1). */}
+          {deliveryOffered && (
             <fieldset>
               <legend className="text-fg mb-2 text-sm font-medium">
                 ¿Cómo lo quieres recibir?
@@ -786,49 +918,65 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
                   name="fulfillment"
                   label="Envío a domicilio"
                   description={
-                    quote?.store.deliveryFeeMode === "QUOTED_PER_ORDER"
+                    deliveryFeeMode === "QUOTED_PER_ORDER"
                       ? "Costo por confirmar"
-                      : quote?.store.deliveryFee
-                        ? `+ ${formatMoney(money(quote.store.deliveryFee, quote.store.currencyCode))}`
-                        : undefined
+                      : deliveryFeeMode === "ZONE_BASED"
+                        ? // R9: JAMÁS el `deliveryFee` residual de la fila en
+                          // ZONE_BASED — el importe vive en la línea del
+                          // municipio y en el resumen (design.md § 0).
+                          "El costo depende de tu municipio"
+                        : deliveryFlatFee
+                          ? `+ ${formatMoney(money(deliveryFlatFee, quote?.store.currencyCode ?? "CUP"))}`
+                          : undefined
                   }
                   checked={fulfillment === "DELIVERY"}
                   onChange={() => setFulfillment("DELIVERY")}
                 />
               </div>
 
-              {fulfillment === "DELIVERY" && (
-                <div className="mt-3">
-                  <Field
-                    id="field-deliveryAddress"
-                    label="Dirección de entrega"
-                    help="Calle, número, entre calles y municipio."
-                    error={fieldErrors.deliveryAddress}
-                  >
-                    {(props) => (
-                      <input
-                        {...props}
-                        type="text"
-                        autoComplete="street-address"
-                        value={deliveryAddress}
-                        onChange={(event) => setDeliveryAddress(event.target.value)}
-                        className="border-border min-h-11 w-full rounded-md border px-3"
-                      />
-                    )}
-                  </Field>
-                  {quote?.store.deliveryFeeMode === "QUOTED_PER_ORDER" && (
-                    <p className="text-fg-muted mt-3 text-sm">
-                      Cuando la tienda revise tu pedido va a poner el costo del envío y te va a
-                      contactar para que lo apruebes o lo rechaces. Hasta entonces no se prepara
-                      nada.
-                    </p>
+              {/* F-042 (design.md § 2 "El HTML ya trae... el campo de
+                  municipio con sus opciones dentro", criterio 1) — SIEMPRE en
+                  el árbol, nunca un `&&` que lo quite del HTML: `curl` cuenta
+                  municipios en la respuesta cruda, que no ejecuta CSS ni
+                  JavaScript. `hidden` es el atributo nativo — el contenido
+                  sigue estando en el marcado, solo no se pinta hasta que se
+                  elige domicilio. */}
+              <div className="mt-3 space-y-3" hidden={fulfillment !== "DELIVERY"}>
+                {deliveryFeeMode === "ZONE_BASED" && (
+                  <ZonePicker
+                    zones={zoneCoverage ?? []}
+                    currencyCode={quote?.store.currencyCode ?? "CUP"}
+                    storeSlug={storeSlug}
+                    value={zoneCode}
+                    onChange={setZoneCode}
+                    error={fieldErrors.zoneCode}
+                  />
+                )}
+                <Field
+                  id="field-deliveryAddress"
+                  label="Dirección de entrega"
+                  help="Calle, número y entre calles."
+                  error={fieldErrors.deliveryAddress}
+                >
+                  {(props) => (
+                    <input
+                      {...props}
+                      type="text"
+                      autoComplete="street-address"
+                      value={deliveryAddress}
+                      onChange={(event) => setDeliveryAddress(event.target.value)}
+                      className="border-border min-h-11 w-full rounded-md border px-3"
+                    />
                   )}
-                </div>
-              )}
+                </Field>
+                {deliveryFeeMode === "QUOTED_PER_ORDER" && (
+                  <p className="text-fg-muted text-sm">
+                    Cuando la tienda revise tu pedido va a poner el costo del envío y te va a
+                    contactar para que lo apruebes o lo rechaces. Hasta entonces no se prepara nada.
+                  </p>
+                )}
+              </div>
             </fieldset>
-          )}
-          {quoteState === "loading" && (
-            <p className="text-fg-muted text-sm">Cargando las opciones de entrega…</p>
           )}
 
           <p className="text-fg-muted text-sm">
@@ -867,15 +1015,7 @@ export function CheckoutForm({ storeId, storeSlug }: { storeId: string; storeSlu
         <OrderSummary
           subtotalLabel={subtotalLabel}
           discountLabel={discountLabel}
-          deliveryFeeLabel={
-            deliveryOffered
-              ? deliveryQuotePending
-                ? "Por confirmar"
-                : deliveryFeeMoney
-                  ? formatMoney(deliveryFeeMoney)
-                  : formatMoney(money("0", quote?.store.currencyCode ?? "CUP"))
-              : undefined
-          }
+          deliveryFeeLabel={deliveryFeeLabel}
           totalLabel={totalLabel}
           totalCaption={deliveryQuotePending ? "Total parcial" : undefined}
           partialNotice={deliveryQuotePending ? "más el envío por confirmar" : undefined}

@@ -6,10 +6,12 @@ import {
   STORE_DELIVERY_CONFIG_INCONSISTENT,
   STORE_OPENING_HOURS_INVALID,
   STORE_TIMEZONE_INVALID,
+  STORE_ZONE_UNKNOWN,
 } from "@/constants/sync";
 import { DEFAULT_STORE_TIMEZONE } from "@/constants/storeHours";
 import { isCanonicalTimeZone } from "@/lib/timezone";
 import { openingHoursSchema } from "@/lib/openingHours";
+import { isKnownZoneCode } from "@/features/zones/catalog";
 import {
   effectiveDeliveryConfig,
   NEW_STORE_DELIVERY_BASELINE,
@@ -66,15 +68,6 @@ export async function handleStore(
   operation: "CREATE" | "UPDATE" | "DELETE",
   businessId: string,
 ): Promise<HandlerOutcome> {
-  // R8/E16: the sync no longer creates a Business — a business is born only
-  // when its token is minted (script or seed). `businessId` is the caller's
-  // OWN identity, already authenticated; this only ever updates it.
-  await prisma.business.update({
-    where: { id: businessId },
-    data: { name: payload.businessName, baseCurrencyCode: payload.baseCurrency },
-    select: { id: true },
-  });
-
   const existing = await prisma.store.findUnique({
     where: { externalId: payload.storeId },
     select: {
@@ -133,7 +126,9 @@ export async function handleStore(
     // write it guards, not once at the top: doing it before the SKIPPED
     // above would turn E12 into a failure the spec requires stays skipped.
     assertDeliveryConsistent(config, rowDeliveryConfig(existing));
+    assertZoneKnown(config);
     const optInChanged = existing.sourceOptIn !== false;
+    await applyBusinessFields(businessId, payload);
     await prisma.store.update({
       where: { id: existing.id },
       data: {
@@ -154,6 +149,16 @@ export async function handleStore(
         ...config,
       },
     });
+    // F-041 R22(b): a `STORE` `DELETE` that ACTUALLY APPLIES (this path)
+    // takes its ZoneTariff rows with it — today this event SUSPENDS rather
+    // than deletes the row (I1), so the `onDelete: Cascade` FK alone would
+    // never fire in production. An `UPDATE` that merely unpublishes
+    // (`publishToStore: false`, vacations) does NOT reach here with
+    // `operation === "DELETE"`, so it never touches the tarifario — it is
+    // reversible and the tariff has to be there when the store reopens.
+    if (operation === "DELETE") {
+      await prisma.zoneTariff.deleteMany({ where: { storeId: existing.id } });
+    }
     const canonical = canonicalSlug({
       storeSlug: existing.slug,
       brandSlug: existing.storefront.slug,
@@ -198,6 +203,7 @@ export async function handleStore(
     // as inconsistent as it would be against `FLAT_RATE`/`NULL` on an
     // existing row.
     assertDeliveryConsistent(config, NEW_STORE_DELIVERY_BASELINE);
+    assertZoneKnown(config);
     // R12: a brand-new row has not written its own zone yet, so what is
     // ABOUT to publish is the column's default — checked as a constant, kept
     // honest by the caso límite 1 test that the default is itself a value
@@ -205,6 +211,7 @@ export async function handleStore(
     if (!isCanonicalTimeZone(DEFAULT_STORE_TIMEZONE)) {
       throw new SyncEventFailure(STORE_TIMEZONE_INVALID);
     }
+    await applyBusinessFields(businessId, payload);
     // E9/HS2: the brand and its first branch are created in ONE nested
     // write. `payload.slug` travels as a DERIVATION SEED, never as a
     // proposal — a sync event must never fail over an unfortunate name
@@ -244,6 +251,7 @@ export async function handleStore(
   // turn the SKIPPED/STALE returns above into failures the spec requires
   // stay exactly what they are.
   assertDeliveryConsistent(config, rowDeliveryConfig(existing));
+  assertZoneKnown(config);
   const optInChanged = existing.sourceOptIn !== true;
   // R12: only checked when `data` below is about to carry
   // `status: "PUBLISHED"` — a routine event (a new phone number) on a store
@@ -253,6 +261,7 @@ export async function handleStore(
   if (optInChanged && !isCanonicalTimeZone(existing.timezone)) {
     throw new SyncEventFailure(STORE_TIMEZONE_INVALID);
   }
+  await applyBusinessFields(businessId, payload);
   const updated = await prisma.store.update({
     where: { id: existing.id },
     data: {
@@ -286,6 +295,38 @@ export async function handleStore(
     touchedBrandSlug: existing.storefront.slug,
     touchedSlugValues: siblingTouch(existing.storefront),
   };
+}
+
+/**
+ * F-045 (R1, R2): the two BUSINESS columns that ride on a STORE event —
+ * `name` and `baseCurrencyCode`. R8/E16 of F-018 still hold and they are
+ * about WHICH ROW, not about where this runs: `businessId` is the caller's
+ * OWN authenticated identity, never the payload's own business identifier,
+ * and this is an `update`, never an `upsert` — the sync does not create businesses, they
+ * are born when their token is minted (`provisioning.ts`).
+ *
+ * WHERE it is called is the whole feature, and it is doctrine, not taste:
+ * HERE, as the LAST statement before each of the three store writes, after
+ * EVERY guard of that path — never once at the top, which is where it lived
+ * until F-045 and why an event answered `stale`, `skipped_not_published` or
+ * `failed` still moved the merchant's base currency (I4). Same rule as
+ * `assertDeliveryConsistent`/`assertZoneKnown` below, plus one they do not
+ * need: a guard added later goes ABOVE this call, never between it and the
+ * write — below it, the defect is back in miniature.
+ *
+ * `select: { id: true }` is not a leftover to clean up: nobody reads the
+ * result (someone did in 613b254, when this was an `upsert`), and it is the
+ * narrowest RETURNING Prisma will emit for an `update`.
+ */
+async function applyBusinessFields(
+  businessId: string,
+  payload: Pick<StorePayload, "businessName" | "baseCurrency">,
+): Promise<void> {
+  await prisma.business.update({
+    where: { id: businessId },
+    data: { name: payload.businessName, baseCurrencyCode: payload.baseCurrency },
+    select: { id: true },
+  });
 }
 
 /**
@@ -334,6 +375,29 @@ function assertDeliveryConsistent(config: StoreConfigWrite, fallback: DeliveryCo
   if (!touchesTriad) return;
   if (isDeliveryConfigInconsistent(effectiveDeliveryConfig(config, fallback))) {
     throw new SyncEventFailure(STORE_DELIVERY_CONFIG_INCONSISTENT);
+  }
+}
+
+/**
+ * F-041 R18, F-043 (architecture.md § AD4): `zoneCode` validated against the
+ * catalog, in the HANDLER. The sobre (`storePayloadSchema`) no longer opines
+ * on ANY shape of this field — since F-043 it is plain `z.string().nullish()`
+ * — so this guard is the ONLY place that decides whether a value is good,
+ * covering both "absent from the catalog" and "does not have the DPA's
+ * shape" with the same answer (architecture.md § AD2: one code, no
+ * `ZONE_CODE_MALFORMED`). Does nothing when `config` does not touch
+ * `zoneCode` at all — same doctrine as `assertDeliveryConsistent`: a row
+ * already carrying a stale zone must not fail an unrelated event. `null` (an
+ * explicit clear, R29) is never checked against the catalog — there is
+ * nothing to look up. Called HERE, right before each of the three writes it
+ * guards, never once at the top (architecture.md § Flujo de datos): doing so
+ * would turn the SKIPPED/STALE returns above into failures the spec requires
+ * stay exactly what they are.
+ */
+function assertZoneKnown(config: StoreConfigWrite): void {
+  if (config.zoneCode == null) return;
+  if (!isKnownZoneCode(config.zoneCode)) {
+    throw new SyncEventFailure(STORE_ZONE_UNKNOWN);
   }
 }
 

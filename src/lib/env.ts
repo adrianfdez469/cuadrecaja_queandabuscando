@@ -47,9 +47,10 @@ export function serverEnv(): ServerEnv {
   return cached;
 }
 
-/** Public config. Safe to read in the browser. */
-export const publicEnv = {
-  siteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
-  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-  supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
-} as const;
+// F-042 (§ Desviaciones de impl.md) — `publicEnv` vivía aquí mismo, junto a
+// Zod. Se movió a `src/lib/publicEnv.ts`, sin ninguna dependencia de Zod:
+// cualquier árbol de cliente que solo necesitaba leer una variable
+// `NEXT_PUBLIC_*` pagaba, sin saberlo, los ~63 KB gzip de Zod de este
+// archivo — Turbopack no lo eliminaba como código muerto. Los importadores
+// existentes de `publicEnv` se actualizaron a la ruta nueva en el mismo
+// cambio.

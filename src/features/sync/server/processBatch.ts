@@ -18,6 +18,7 @@ import { handleProduct } from "./handlers/product";
 import { handleStore } from "./handlers/store";
 import { handleCategory, handleCurrency, handleExchangeRate } from "./handlers/misc";
 import { handleBusiness } from "./handlers/business";
+import { handleZoneTariff } from "./handlers/zoneTariff";
 import { createRenderableBranchLookup, type RenderableBranchLookup } from "./businessBranches";
 import { createBatchDependencies } from "../dependencies";
 import { SyncEventFailure } from "./handlers/types";
@@ -175,5 +176,7 @@ function applyEvent(
       return handleExchangeRate(event.payload, businessId, renderableBranches);
     case "BUSINESS":
       return handleBusiness(event.payload, event.operation, businessId, renderableBranches);
+    case "ZONE_TARIFF":
+      return handleZoneTariff(event.payload, event.operation, businessId);
   }
 }

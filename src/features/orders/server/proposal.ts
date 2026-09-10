@@ -1,6 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { publicEnv } from "@/lib/env";
+import { publicEnv } from "@/lib/publicEnv";
 import type { OrderStatus } from "@/generated/prisma/enums";
 import type { ProposalItem } from "../types";
 import { buildProposalWhatsappUrl, type ProposalWhatsappReason } from "../whatsapp";
