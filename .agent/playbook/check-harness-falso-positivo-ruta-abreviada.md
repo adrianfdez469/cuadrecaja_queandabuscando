@@ -5,7 +5,7 @@ firma: `[A-Za-z0-9._/-]+\.(ts|tsx)` does not exist
 etapa: harness
 visto_en: F-010, F-007, F-011, F-017, PR #7, F-018, F-023, F-019, F-026, F-022, F-035, F-041, F-042
 creado: 2026-08-26T05:00:00Z
-actualizado: 2026-08-26T12:45:00Z
+actualizado: 2026-09-09T23:10:00Z
 promovido_a_agents: sí
 arreglo: si el archivo existe, escribe la ruta completa en el documento que abrevió — y si ese documento no es tuyo, escala a quien pueda editarlo; no lo des por bueno
 ---
@@ -68,6 +68,28 @@ correcto: el arreglo de esta ficha cubre **las dos** ramas —si el archivo exis
 escribe la ruta completa; si de verdad no existe, es la referencia muerta que el
 check pretende cazar— así que no hay caso en el que salga de más y estorbe. Una
 ficha que solo reconoce la mitad de su propio síntoma vale la mitad.
+
+## Por qué aparece justo AL CERRAR, y no antes
+
+Dos veces seguidas —F-041 y F-042— este fallo se destapó en el momento peor:
+después de dar el feature por terminado. La causa no es mala suerte.
+`scripts/check-harness.mjs` **salta las líneas que nombran un feature sin
+`passes`**, para que un documento pueda hablar de archivos que todavía no
+existen. En cuanto alguien pone `"passes": true` en `.agent/features.json`,
+todos los documentos de ese feature entran a comprobarse de golpe, y las rutas
+abreviadas que llevaban ahí semanas salen todas juntas.
+
+En F-041 fue su `impl.md` citando el handler de STORE con el nombre a secas —y,
+con guasa, dentro de la frase que describía el arreglo de una ruta abreviada—.
+En F-042, el mismo `impl.md` citando las dos ADR con tres puntos en medio del
+nombre, en una tabla ancha, que es exactamente el caso que abre esta ficha.
+
+Lo que se hace con ello: **antes de poner `passes` a true, corre
+`bash .agent/verify.sh <ID> --only harness`**. Sale en segundos y es el único
+momento en que este fallo aparece sin haber declarado ya nada terminado.
+Y al escribir cualquier tabla ancha en un artefacto, la ruta va completa desde
+la raíz del repo aunque la columna de al lado ya diga el directorio: el ahorro
+visual de la abreviatura se paga entero el día que el feature cierra.
 
 ## Cuándo NO es esto
 
